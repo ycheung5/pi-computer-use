@@ -1,0 +1,53 @@
+{
+  "name": "pi-computer-use",
+  "version": "0.1.0",
+  "description": "Native Pi tools for Windows computer use from Windows and WSL2",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "computer-use",
+    "windows"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "docs/runtime.md",
+    "assets/node-LICENSE.txt"
+  ],
+  "pi": {
+    "extensions": [
+      "./dist/extension.js"
+    ]
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "format": "biome format --write .",
+    "lint": "biome check .",
+    "check": "npm run typecheck && npm run lint && npm test",
+    "prepack": "npm run build",
+    "lint:fix": "biome check --write .",
+    "test:native": "node tests/native-health.mjs"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.4",
+    "@earendil-works/pi-coding-agent": "1.4.0",
+    "@types/node": "22.19.19",
+    "tsx": "4.21.0",
+    "typebox": "1.3.27",
+    "typescript": "5.9.3"
+  },
+  "overrides": {
+    "undici": "8.12.2",
+    "esbuild": "0.28.1"
+  }
+}

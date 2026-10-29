@@ -13,6 +13,7 @@ Read the row matching the task; follow section links before reading whole docume
 | Why behavior parity was chosen | [ADR 0001](adr/0001-preserve-reference-behavior.md) |
 | Publish or read issues | [Issue tracker](agents/issue-tracker.md), [triage labels](agents/triage-labels.md) |
 | Implementation task graph | [Tickets](tickets.md) |
+| Worker setup, protocol and test evidence | [Runtime and validation](runtime.md) |
 | Domain-document consumer rules | [Domain docs](agents/domain.md) |
 
 ## Repository layout
@@ -21,9 +22,9 @@ Read the row matching the task; follow section links before reading whole docume
 README.md              project entry point
 AGENTS.md              short contributor rules and routing
 GLOSSARY.md            domain terms
-src/                   flat TypeScript modules initially (planned)
-tests/                 tests and fixtures (planned)
-assets/                packaged helper/runtime assets when needed (planned)
+src/                   flat TypeScript modules
+tests/                 tests and native smoke fixtures
+assets/                packaged resources and runtime notices
 docs/
   README.md            this index
   spec.md              authoritative requirements

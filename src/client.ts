@@ -1,0 +1,214 @@
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import type { WorkerResponse, WorkerResult } from "./protocol.js";
+
+export interface WorkerLaunch {
+  executable: string;
+  args: string[];
+  cwd?: string;
+}
+
+export interface WorkerClientOptions {
+  launch: (signal?: AbortSignal) => Promise<WorkerLaunch>;
+  timeoutMs?: number;
+  shutdownMs?: number;
+}
+
+interface Pending {
+  resolve: (result: WorkerResult) => void;
+  reject: (error: Error) => void;
+  cleanup: () => void;
+}
+
+function abortable<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    operation
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
+export class WorkerClient {
+  private child: ChildProcessWithoutNullStreams | undefined;
+  private starting: Promise<ChildProcessWithoutNullStreams> | undefined;
+  private readonly pending = new Map<number, Pending>();
+  private nextId = 0;
+  private disposed = false;
+  private readonly lifetime = new AbortController();
+
+  constructor(private readonly options: WorkerClientOptions) {}
+
+  private async start(
+    signal?: AbortSignal,
+  ): Promise<ChildProcessWithoutNullStreams> {
+    if (this.disposed) throw new Error("WORKER_DISPOSED: session has closed");
+    signal?.throwIfAborted();
+    if (this.child) return this.child;
+    const launchSignal = signal
+      ? AbortSignal.any([signal, this.lifetime.signal])
+      : this.lifetime.signal;
+    this.starting ??= abortable(this.options.launch(launchSignal), launchSignal)
+      .then((launch) => {
+        if (this.disposed)
+          throw new Error("WORKER_DISPOSED: session has closed");
+        signal?.throwIfAborted();
+        const child = spawn(launch.executable, launch.args, {
+          stdio: ["pipe", "pipe", "pipe"],
+          windowsHide: true,
+          cwd: launch.cwd,
+        });
+        this.child = child;
+        let output = "";
+        let diagnostic = "";
+        child.stdout.setEncoding("utf8");
+        child.stderr.setEncoding("utf8");
+        child.stderr.on("data", (chunk: string) => {
+          diagnostic = (diagnostic + chunk).slice(-4096);
+        });
+        child.stdout.on("data", (chunk: string) => {
+          output += chunk;
+          if (output.length > 32 * 1024 * 1024) {
+            this.fail(
+              child,
+              new Error("WORKER_PROTOCOL_ERROR: response exceeds 32 MiB"),
+            );
+            child.kill();
+            return;
+          }
+          for (;;) {
+            const newline = output.indexOf("\n");
+            if (newline < 0) break;
+            const line = output.slice(0, newline);
+            output = output.slice(newline + 1);
+            try {
+              const response = JSON.parse(line) as WorkerResponse;
+              if (
+                !Number.isSafeInteger(response.id) ||
+                typeof response.result?.ok !== "boolean" ||
+                typeof response.result.action !== "string"
+              )
+                throw new Error("Invalid response");
+              const pending = this.pending.get(response.id);
+              if (pending) {
+                this.pending.delete(response.id);
+                pending.cleanup();
+                pending.resolve(response.result);
+              }
+            } catch {
+              this.fail(
+                child,
+                new Error("WORKER_PROTOCOL_ERROR: invalid response"),
+              );
+              child.kill();
+            }
+          }
+        });
+        child.once("error", (error) =>
+          this.fail(child, new Error(`WORKER_START_FAILED: ${error.message}`)),
+        );
+        child.once("close", (code) =>
+          this.fail(
+            child,
+            new Error(
+              `WORKER_EXITED: code ${code}${diagnostic ? `; ${diagnostic.trim()}` : ""}`,
+            ),
+          ),
+        );
+        child.stdin.on("error", (error) =>
+          this.fail(child, new Error(`WORKER_WRITE_FAILED: ${error.message}`)),
+        );
+        return child;
+      })
+      .finally(() => {
+        this.starting = undefined;
+      });
+    return this.starting;
+  }
+
+  private fail(child: ChildProcessWithoutNullStreams, error: Error): void {
+    if (this.child !== child) return;
+    this.child = undefined;
+    for (const [id, pending] of this.pending) {
+      this.pending.delete(id);
+      pending.cleanup();
+      pending.reject(error);
+    }
+  }
+
+  async execute(
+    action: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<WorkerResult> {
+    const child = await this.start(signal);
+    if (this.disposed) throw new Error("WORKER_DISPOSED: session has closed");
+    signal?.throwIfAborted();
+    const id = ++this.nextId;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.fail(
+          child,
+          new Error(
+            `WORKER_TIMEOUT: ${action} exceeded the execution deadline; input was not replayed`,
+          ),
+        );
+        child.kill();
+      }, this.options.timeoutMs ?? 30_000);
+      const abort = () => {
+        const pending = this.pending.get(id);
+        if (!pending) return;
+        this.pending.delete(id);
+        pending.cleanup();
+        // Health has no held input. Cooperative input stopping is added before input tools.
+        child.stdin.write(`${JSON.stringify({ cancel: id })}\n`);
+        pending.reject(new Error("COMPUTER_USE_CANCELLED"));
+      };
+      this.pending.set(id, {
+        resolve,
+        reject,
+        cleanup: () => {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", abort);
+        },
+      });
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) {
+        abort();
+        return;
+      }
+      child.stdin.write(
+        `${JSON.stringify({ id, action, args })}\n`,
+        (error) => {
+          if (error)
+            this.fail(
+              child,
+              new Error(`WORKER_WRITE_FAILED: ${error.message}`),
+            );
+        },
+      );
+    });
+  }
+
+  async dispose(): Promise<void> {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.lifetime.abort(new Error("WORKER_DISPOSED: session has closed"));
+    await this.starting?.catch(() => undefined);
+    const child = this.child;
+    if (!child) return;
+    this.fail(child, new Error("WORKER_DISPOSED: session has closed"));
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        child.kill();
+        resolve();
+      }, this.options.shutdownMs ?? 1000);
+      child.once("close", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      child.stdin.end();
+    });
+  }
+}
