@@ -42,7 +42,8 @@
     "test:native:chromium": "node tests/native-chromium-accessibility.mjs",
     "test:ownership": "node tests/ownership-host.mjs",
     "test:native:capture": "node tests/native-capture.mjs",
-    "test:stop": "node tests/stop-host.mjs"
+    "test:stop": "node tests/stop-host.mjs",
+    "test:native:controls": "node tests/native-controls.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

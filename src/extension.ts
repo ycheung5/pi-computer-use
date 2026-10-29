@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { observationTools } from "./accessibility.js";
+import { controlTools, observationTools } from "./accessibility.js";
 import { screenshotContent } from "./capture.js";
 import { WorkerClient, type WorkerClientOptions } from "./client.js";
 import { nativeWorkerLaunch } from "./launcher.js";
@@ -145,6 +145,24 @@ export function registerComputerUse(
       async execute(_toolCallId, args, signal, _onUpdate, ctx) {
         const result = await executeDesktop(action, args, signal, ctx);
         return screenshotContent(result);
+      },
+    });
+  }
+  for (const { action, parameters } of controlTools) {
+    pi.registerTool({
+      name: `windows_computer_use_${action}`,
+      label: action.replaceAll("_", " "),
+      description:
+        "Operate freshly observed Windows controls in the background. Unsupported physical fallbacks are explicitly gated; dispatch alone does not verify task success.",
+      parameters: Type.Unsafe<Record<string, unknown>>(parameters),
+      executionMode: "sequential",
+      async execute(_toolCallId, args, signal, _onUpdate, ctx) {
+        const result = await executeDesktop(action, args, signal, ctx);
+        return {
+          content: [{ type: "text", text: JSON.stringify(result) }],
+          details: result,
+          isError: !result.ok,
+        };
       },
     });
   }

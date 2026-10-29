@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline";
-import { observeDesktop } from "./accessibility.js";
+import { executeAccessibility } from "./accessibility.js";
 import { screenshot } from "./capture.js";
 import { disposeDesktop, listWindows, retireDesktop } from "./desktop.js";
 import {
@@ -81,18 +81,9 @@ async function dispatch(
     return;
   }
   if (
-    [
-      "click",
-      "double_click",
-      "move",
-      "drag",
-      "scroll",
-      "type_text",
-      "keypress",
-      "focus",
-      "invoke",
-      "set_value",
-    ].includes(request.action)
+    ["click", "double_click", "move", "drag", "type_text", "keypress"].includes(
+      request.action,
+    )
   ) {
     process.stdout.write(
       `${JSON.stringify({ id: request.id, result: { ok: false, action: request.action, error: "INPUT_SAFETY_NOT_READY: action requires cooperative native cleanup before enabling input" } })}\n`,
@@ -119,8 +110,12 @@ async function dispatch(
                   "accessibility_tree",
                   "find",
                   "element_info",
+                  "focus",
+                  "invoke",
+                  "set_value",
+                  "scroll",
                 ].includes(request.action)
-              ? await observeDesktop(request.action, request.args, signal)
+              ? await executeAccessibility(request.action, request.args, signal)
               : { ok: false, action: request.action, error: "UNKNOWN_ACTION" },
   };
   process.stdout.write(`${JSON.stringify(response)}\n`);

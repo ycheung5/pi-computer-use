@@ -90,16 +90,69 @@ const definitions: Record<
       y: { type: "integer" },
     },
   },
+  focus: {
+    properties: {
+      ...target,
+      ...view,
+      elementId: { type: "string", minLength: 1 },
+    },
+    required: ["elementId"],
+  },
+  invoke: {
+    properties: {
+      ...target,
+      ...view,
+      elementId: { type: "string", minLength: 1 },
+      action: {
+        type: "string",
+        enum: ["default", "expand", "collapse", "scroll_into_view"],
+        default: "default",
+      },
+      fallbackClick: { type: "boolean", default: true },
+    },
+    required: ["elementId"],
+  },
+  set_value: {
+    properties: {
+      ...target,
+      ...view,
+      elementId: { type: "string", minLength: 1 },
+      value: { type: "string" },
+      fallbackType: { type: "boolean", default: true },
+      restoreClipboard: { type: "boolean", default: true },
+    },
+    required: ["elementId", "value"],
+  },
+  scroll: {
+    properties: {
+      ...target,
+      ...view,
+      elementId: { type: "string", minLength: 1 },
+      x: { type: "integer" },
+      y: { type: "integer" },
+      deltaY: { type: "integer", default: 480 },
+      deltaX: { type: "integer", default: 0 },
+    },
+  },
 };
 
-export const observationTools = Object.entries(definitions).map(
+const toolDefinitions = Object.entries(definitions).map(
   ([action, definition]) => ({
     action,
     parameters: { type: "object", additionalProperties: false, ...definition },
   }),
 );
 
-export async function observeDesktop(
+export const observationTools = toolDefinitions.filter((tool) =>
+  ["snapshot", "accessibility_tree", "find", "element_info"].includes(
+    tool.action,
+  ),
+);
+export const controlTools = toolDefinitions.filter((tool) =>
+  ["focus", "invoke", "set_value", "scroll"].includes(tool.action),
+);
+
+export async function executeAccessibility(
   action: string,
   args: Record<string, unknown>,
   signal?: AbortSignal,
@@ -148,6 +201,17 @@ export async function observeDesktop(
     (normalized.x === undefined || normalized.y === undefined)
   )
     return invalid("provide elementId or both x and y");
+  if (action === "scroll" && !normalized.elementId) {
+    if (normalized.x === undefined || normalized.y === undefined)
+      return invalid("provide elementId or both x and y");
+    return {
+      ok: false,
+      action,
+      error:
+        "INPUT_SAFETY_NOT_READY: coordinate scrolling requires guarded physical input",
+      inputRequired: true,
+    };
+  }
   signal?.throwIfAborted();
   let result: WorkerResult;
   try {
