@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { observationTools } from "./accessibility.js";
 import { WorkerClient, type WorkerClientOptions } from "./client.js";
 import { nativeWorkerLaunch } from "./launcher.js";
 
@@ -7,7 +8,10 @@ export function registerComputerUse(
   pi: Pick<ExtensionAPI, "registerTool" | "on">,
   options: WorkerClientOptions = { launch: nativeWorkerLaunch },
 ): void {
-  const worker = new WorkerClient(options);
+  const worker = new WorkerClient({
+    ...options,
+    timeoutMs: options.timeoutMs ?? 90_000,
+  });
   pi.registerTool({
     name: "windows_computer_use_health",
     label: "Windows Computer Use Health",
@@ -45,6 +49,24 @@ export function registerComputerUse(
       };
     },
   });
+  for (const { action, parameters } of observationTools) {
+    pi.registerTool({
+      name: `windows_computer_use_${action}`,
+      label: action.replaceAll("_", " "),
+      description:
+        "Observe Windows accessibility without physical input. Element references require fresh observation; partial results are explicitly marked.",
+      parameters: Type.Unsafe<Record<string, unknown>>(parameters),
+      executionMode: "sequential",
+      async execute(_toolCallId, args, signal) {
+        const result = await worker.execute(action, args, signal);
+        return {
+          content: [{ type: "text", text: JSON.stringify(result) }],
+          details: result,
+          isError: !result.ok,
+        };
+      },
+    });
+  }
   pi.on("session_shutdown", async () => {
     await worker.dispose();
   });

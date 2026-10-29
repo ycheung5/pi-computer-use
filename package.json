@@ -15,7 +15,8 @@
     "docs/runtime.md",
     "assets/node-LICENSE.txt",
     "assets/windows.cs",
-    "docs/windows.md"
+    "docs/windows.md",
+    "assets/accessibility.cs"
   ],
   "pi": {
     "extensions": [
@@ -36,7 +37,9 @@
     "lint:fix": "biome check --write .",
     "test:native": "node tests/native-health.mjs",
     "test:native:windows": "node tests/native-windows.mjs",
-    "test:wsl": "node tests/wsl-health.mjs"
+    "test:wsl": "node tests/wsl-health.mjs",
+    "test:native:accessibility": "node tests/native-accessibility.mjs",
+    "test:native:chromium": "node tests/native-chromium-accessibility.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

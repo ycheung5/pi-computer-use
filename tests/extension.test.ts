@@ -64,3 +64,51 @@ test("Pi health tool reaches worker and session shutdown rejects subsequent call
     /disposed/i,
   );
 });
+
+test("Pi observation tools expose argument failures through normal execution", async () => {
+  const tools: ToolDefinition[] = [];
+  const shutdown: Array<() => Promise<void>> = [];
+  const host = {
+    registerTool: (tool: ToolDefinition) => {
+      tools.push(tool);
+    },
+    on: (event: string, handler: () => Promise<void>) => {
+      if (event === "session_shutdown") shutdown.push(handler);
+      return () => {};
+    },
+  } as Pick<ExtensionAPI, "registerTool" | "on">;
+  registerComputerUse(host, {
+    launch: async () => ({
+      executable: process.execPath,
+      args: [
+        "--import",
+        "tsx",
+        fileURLToPath(new URL("../src/worker.ts", import.meta.url)),
+      ],
+    }),
+  });
+  try {
+    for (const action of [
+      "snapshot",
+      "accessibility_tree",
+      "find",
+      "element_info",
+    ]) {
+      const tool = tools.find(
+        (item) => item.name === `windows_computer_use_${action}`,
+      );
+      assert.ok(tool, `${action} is callable from Pi`);
+      const result = await tool.execute(
+        "bad",
+        { viewMode: "unsupported" },
+        undefined,
+        undefined,
+        {} as Parameters<typeof tool.execute>[4],
+      );
+      assert.equal(result.isError, true);
+      assert.match(JSON.stringify(result.details), /INVALID_ARGUMENTS/);
+    }
+  } finally {
+    for (const handler of shutdown) await handler();
+  }
+});
