@@ -158,6 +158,7 @@ try {
       {},
     ),
   );
+  await host.emit("before_agent_start", { messageType: "user" });
   fixture.stdin.write("minimize\n");
   await once(fixture.stdout, "data");
   const minimized = await call({ query: "HELLO" });

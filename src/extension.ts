@@ -8,34 +8,94 @@ import { nativeWorkerLaunch } from "./launcher.js";
 import { ocrParameters } from "./ocr.js";
 
 export function registerComputerUse(
-  pi: Pick<ExtensionAPI, "registerTool" | "on">,
+  pi: Pick<ExtensionAPI, "registerTool" | "on"> &
+    Partial<Pick<ExtensionAPI, "registerCommand">>,
   options: WorkerClientOptions = { launch: nativeWorkerLaunch },
 ): void {
+  let operationId = randomUUID();
+  let operationActive = false;
+  let stopped = false;
+  let operationAbort = new AbortController();
+  let abortRun: (() => void) | undefined;
   const worker = new WorkerClient({
     ...options,
     timeoutMs: options.timeoutMs ?? 90_000,
+    onStop(id) {
+      options.onStop?.(id);
+      if (id === operationId) stopOperation(false);
+    },
   });
-  let operationId = randomUUID();
-  let operationActive = false;
-  const executeDesktop = (
+  const stopOperation = (notifyWorker = true) => {
+    if (stopped) return;
+    stopped = true;
+    if (notifyWorker) worker.stopOperation(operationId);
+    operationAbort.abort(
+      new Error(
+        "COMPUTER_USE_STOPPED: user stopped this operation; wait for new user input",
+      ),
+    );
+    abortRun?.();
+  };
+  const executeDesktop = async (
     action: string,
     args: Record<string, unknown>,
     signal?: AbortSignal,
+    ctx?: { abort: () => void },
   ) => {
+    if (stopped)
+      throw new Error("COMPUTER_USE_STOPPED: wait for new user input");
+    if (typeof ctx?.abort === "function") abortRun = () => ctx.abort();
     operationActive = true;
-    return worker.execute(action, args, signal, operationId);
+    const abort = () => stopOperation();
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+    try {
+      return await worker.execute(
+        action,
+        args,
+        signal
+          ? AbortSignal.any([operationAbort.signal, signal])
+          : operationAbort.signal,
+        operationId,
+      );
+    } finally {
+      signal?.removeEventListener("abort", abort);
+    }
   };
+  pi.registerCommand?.("computer-stop", {
+    description:
+      "Stop the current computer-use operation without waiting for its tools",
+    async handler(_args, ctx) {
+      stopOperation();
+      if (typeof ctx?.abort === "function") ctx.abort();
+    },
+  });
   const endOperation = async () => {
     if (!operationActive) return;
     operationActive = false;
-    await worker.execute("operation_end", {}, undefined, operationId);
+    const result = await worker.execute(
+      "operation_end",
+      {},
+      undefined,
+      operationId,
+    );
+    if (!result.ok)
+      throw new Error(
+        String(
+          result.error ??
+            "STOP_CLEANUP_FAILED: desktop ownership was not released",
+        ),
+      );
   };
   pi.on("before_agent_start", async (event) => {
     if (event.messageType !== "user") return;
     await endOperation();
     operationId = randomUUID();
+    stopped = false;
+    operationAbort = new AbortController();
   });
-  pi.on("agent_settled", async () => {
+  pi.on("agent_settled", async (event) => {
+    if (event.aborted) stopOperation();
     await endOperation();
   });
   pi.registerTool({
@@ -66,8 +126,8 @@ export function registerComputerUse(
       ),
     }),
     executionMode: "sequential",
-    async execute(_toolCallId, args, signal) {
-      const result = await executeDesktop("list_windows", args, signal);
+    async execute(_toolCallId, args, signal, _onUpdate, ctx) {
+      const result = await executeDesktop("list_windows", args, signal, ctx);
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
         details: result,
@@ -83,8 +143,8 @@ export function registerComputerUse(
         "Observe Windows accessibility without physical input. Element references require fresh observation; partial results are explicitly marked.",
       parameters: Type.Unsafe<Record<string, unknown>>(parameters),
       executionMode: "sequential",
-      async execute(_toolCallId, args, signal) {
-        const result = await executeDesktop(action, args, signal);
+      async execute(_toolCallId, args, signal, _onUpdate, ctx) {
+        const result = await executeDesktop(action, args, signal, ctx);
         return screenshotContent(result);
       },
     });
@@ -109,9 +169,9 @@ export function registerComputerUse(
       ),
     }),
     executionMode: "sequential",
-    async execute(_toolCallId, args, signal) {
+    async execute(_toolCallId, args, signal, _onUpdate, ctx) {
       return screenshotContent(
-        await executeDesktop("screenshot", args, signal),
+        await executeDesktop("screenshot", args, signal, ctx),
       );
     },
   });
@@ -122,8 +182,8 @@ export function registerComputerUse(
       "Read screen text with literal query matching and screen-space bounds. OCR candidates are not control IDs; occluded captures remain inconclusive.",
     parameters: Type.Unsafe<Record<string, unknown>>(ocrParameters),
     executionMode: "sequential",
-    async execute(_id, args, signal) {
-      return screenshotContent(await executeDesktop("ocr", args, signal));
+    async execute(_id, args, signal, _onUpdate, ctx) {
+      return screenshotContent(await executeDesktop("ocr", args, signal, ctx));
     },
   });
   pi.on("session_shutdown", async () => {

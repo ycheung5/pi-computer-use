@@ -15,7 +15,8 @@
     "docs/runtime.md",
     "docs/windows.md",
     "docs/ownership.md",
-    "assets/"
+    "assets/",
+    "docs/stopping.md"
   ],
   "pi": {
     "extensions": [
@@ -41,7 +42,8 @@
     "test:native:chromium": "node tests/native-chromium-accessibility.mjs",
     "test:ownership": "node tests/ownership-host.mjs",
     "test:native:capture": "node tests/native-capture.mjs",
-    "test:native:ocr": "node tests/native-ocr.mjs"
+    "test:native:ocr": "node tests/native-ocr.mjs",
+    "test:stop": "node tests/stop-host.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
