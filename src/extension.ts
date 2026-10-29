@@ -24,6 +24,27 @@ export function registerComputerUse(
       };
     },
   });
+  pi.registerTool({
+    name: "windows_computer_use_list_windows",
+    label: "List Windows",
+    description:
+      "List Windows desktop windows with native identities, bounds and responsiveness. Includes visible non-minimized windows by default; does not send physical input.",
+    parameters: Type.Object({
+      includeInvisible: Type.Optional(Type.Boolean({ default: false })),
+      maxWindows: Type.Optional(
+        Type.Integer({ minimum: 1, maximum: 200, default: 50 }),
+      ),
+    }),
+    executionMode: "sequential",
+    async execute(_toolCallId, args, signal) {
+      const result = await worker.execute("list_windows", args, signal);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result,
+        isError: !result.ok,
+      };
+    },
+  });
   pi.on("session_shutdown", async () => {
     await worker.dispose();
   });

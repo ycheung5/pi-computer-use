@@ -13,7 +13,9 @@
     "dist",
     "README.md",
     "docs/runtime.md",
-    "assets/node-LICENSE.txt"
+    "assets/node-LICENSE.txt",
+    "assets/windows.cs",
+    "docs/windows.md"
   ],
   "pi": {
     "extensions": [
@@ -33,6 +35,7 @@
     "prepack": "npm run build",
     "lint:fix": "biome check --write .",
     "test:native": "node tests/native-health.mjs",
+    "test:native:windows": "node tests/native-windows.mjs",
     "test:wsl": "node tests/wsl-health.mjs"
   },
   "peerDependencies": {

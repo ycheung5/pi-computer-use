@@ -2,7 +2,7 @@
 
 ## Current scope
 
-The native Windows health tool is implemented. It checks the worker connection and reports platform, worker PID and Node version; it does not yet establish UIA/OCR/input capability. The same tool runs from WSL2 using Windows executable interop. No physical input is sent by this slice.
+The native Windows health tool and [window listing](windows.md) are implemented. Health checks the worker connection and reports platform, worker PID and Node version; it does not yet establish UIA/OCR/input capability. The same tools run from WSL2 using Windows executable interop. These read-only capabilities send no physical input.
 
 ## Runtime provisioning
 
@@ -18,7 +18,7 @@ The runtime and worker start on first tool execution, not extension registration
 
 The normal worker client interface is `execute(action, args, signal?)` and `dispose()`. The launcher supplies an executable, argument array and optional working directory. Transport is one JSON request/response per line, with numeric request IDs. Responses contain `result` with `ok`, `action` and action-specific evidence. Cancellation is a separate request carrying the cancelled ID. Stdout is protocol-only; diagnostics use stderr.
 
-This health-only client does not yet implement desktop ownership or input-safe cancellation; those tickets must land before input tools are enabled. Keep future tests at the agreed Pi tool and worker request/cancellation interfaces.
+This read-only client does not yet implement desktop ownership or input-safe cancellation; those tickets must land before input tools are enabled. Keep future tests at the agreed Pi tool and worker request/cancellation interfaces.
 
 ## Verification
 
