@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { observationTools } from "./accessibility.js";
@@ -11,6 +12,29 @@ export function registerComputerUse(
   const worker = new WorkerClient({
     ...options,
     timeoutMs: options.timeoutMs ?? 90_000,
+  });
+  let operationId = randomUUID();
+  let operationActive = false;
+  const executeDesktop = (
+    action: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ) => {
+    operationActive = true;
+    return worker.execute(action, args, signal, operationId);
+  };
+  const endOperation = async () => {
+    if (!operationActive) return;
+    operationActive = false;
+    await worker.execute("operation_end", {}, undefined, operationId);
+  };
+  pi.on("before_agent_start", async (event) => {
+    if (event.messageType !== "user") return;
+    await endOperation();
+    operationId = randomUUID();
+  });
+  pi.on("agent_settled", async () => {
+    await endOperation();
   });
   pi.registerTool({
     name: "windows_computer_use_health",
@@ -41,7 +65,7 @@ export function registerComputerUse(
     }),
     executionMode: "sequential",
     async execute(_toolCallId, args, signal) {
-      const result = await worker.execute("list_windows", args, signal);
+      const result = await executeDesktop("list_windows", args, signal);
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
         details: result,
@@ -58,7 +82,7 @@ export function registerComputerUse(
       parameters: Type.Unsafe<Record<string, unknown>>(parameters),
       executionMode: "sequential",
       async execute(_toolCallId, args, signal) {
-        const result = await worker.execute(action, args, signal);
+        const result = await executeDesktop(action, args, signal);
         return {
           content: [{ type: "text", text: JSON.stringify(result) }],
           details: result,

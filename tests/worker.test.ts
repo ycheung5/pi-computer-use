@@ -153,6 +153,7 @@ test("abort during provisioning cancels the call and later health can start", as
   });
   const controller = new AbortController();
   const pending = worker.execute("health", {}, controller.signal);
+  await new Promise((resolve) => setImmediate(resolve));
   controller.abort();
   await assert.rejects(pending, { name: "AbortError" });
   try {

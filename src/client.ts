@@ -37,6 +37,7 @@ export class WorkerClient {
   private nextId = 0;
   private disposed = false;
   private readonly lifetime = new AbortController();
+  private queue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly options: WorkerClientOptions) {}
 
@@ -137,10 +138,32 @@ export class WorkerClient {
     }
   }
 
-  async execute(
+  execute(
     action: string,
     args: Record<string, unknown>,
     signal?: AbortSignal,
+    operationId?: string,
+  ): Promise<WorkerResult> {
+    if (this.disposed)
+      return Promise.reject(new Error("WORKER_DISPOSED: session has closed"));
+    const callSignal = signal
+      ? AbortSignal.any([signal, this.lifetime.signal])
+      : this.lifetime.signal;
+    const result = this.queue
+      .catch(() => undefined)
+      .then(() => {
+        callSignal.throwIfAborted();
+        return this.executeNow(action, args, callSignal, operationId);
+      });
+    this.queue = result.catch(() => undefined);
+    return abortable(result, callSignal);
+  }
+
+  private async executeNow(
+    action: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+    operationId?: string,
   ): Promise<WorkerResult> {
     const child = await this.start(signal);
     if (this.disposed) throw new Error("WORKER_DISPOSED: session has closed");
@@ -179,7 +202,7 @@ export class WorkerClient {
         return;
       }
       child.stdin.write(
-        `${JSON.stringify({ id, action, args })}\n`,
+        `${JSON.stringify({ id, action, args, operationId })}\n`,
         (error) => {
           if (error)
             this.fail(
