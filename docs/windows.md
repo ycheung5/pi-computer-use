@@ -20,7 +20,7 @@ Keeping the helper persistent gives subsequent accessibility slices a place for 
 - `npm run build`: produces the worker modules; package contents include the native bridge source.
 - `npm run test:native:windows`: run with Windows Node after building. Creates only dedicated passive fixture windows, tests visible/hidden filtering, identity metadata, bounds, responsiveness, limits and window disappearance, then closes fixtures and disposes the worker. It does not send keyboard/mouse input or modify normal applications.
 
-Live proof on 2026-10-29 used Windows 11 x64 through WSL interop and the private package-managed Node runtime. Both portable worker/Pi tests and the real fixture test passed. Per-monitor DPI awareness is requested before enumeration; multi-monitor geometry remains a later capture/manual release check.
+Live proof on 2026-10-29 used Windows 11 x64 through WSL interop and the private package-managed Node runtime. Both portable worker/Pi tests and the real fixture test passed. After integrating the WSL2 launcher, a Linux-side worker client also enumerated one native window through that launcher and disposed successfully; only counts were logged. Per-monitor DPI awareness is requested before enumeration; multi-monitor geometry remains a later capture/manual release check.
 
 ## Remaining targeted behavior
 
