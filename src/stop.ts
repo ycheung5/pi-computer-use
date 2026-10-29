@@ -92,8 +92,16 @@ export class StopListener {
       cancelEvent: this.cancelEvent,
       listenerProcessId: this.listenerProcessId,
       inputReady: true,
-      readyActions: ["click", "double_click", "move", "drag", "scroll"],
-      note: "Pointer actions implement cancellation polling and button cleanup. Keyboard input remains gated.",
+      readyActions: [
+        "click",
+        "double_click",
+        "move",
+        "drag",
+        "scroll",
+        "type_text",
+        "keypress",
+      ],
+      note: "Pointer and keyboard actions implement cancellation polling and held-input cleanup.",
     };
   }
   async inputStarted(operationId: string): Promise<void> {

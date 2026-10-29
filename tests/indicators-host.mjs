@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { WorkerClient } from "../dist/client.js";
 import {
@@ -120,6 +121,14 @@ try {
     const hidden = await worker.execute("health", {});
     assert.equal(hidden.control.presentation.visible, false);
   }
+  let peer = fileURLToPath(new URL("./indicators-peer.mjs", import.meta.url));
+  if (process.platform === "linux")
+    peer = (await run("wslpath", ["-w", peer])).stdout.trim();
+  const protocol = await run(launch.executable, [peer], {
+    cwd: launch.cwd,
+    timeout: 30000,
+  });
+  assert.equal(JSON.parse(protocol.stdout.trim()).ok, true);
   console.log(
     JSON.stringify({
       ok: true,

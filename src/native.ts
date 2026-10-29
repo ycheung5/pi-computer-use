@@ -151,6 +151,7 @@ export const nativeDesktop = new NativeDesktopClient({
       "controls.cs",
       "window-management.cs",
       "pointer.cs",
+      "text.cs",
     ]) {
       try {
         await access(

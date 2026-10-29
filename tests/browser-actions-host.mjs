@@ -40,12 +40,17 @@ const source = await new Promise((resolve, reject) => {
   server.once("error", reject);
 });
 process.env.PI_CU_SETTINGS_FILE = source.settings;
+process.env.WSLENV = `${process.env.WSLENV ?? ""}:PI_CU_SETTINGS_FILE:PI_CU_BROWSER_EXECUTABLE`;
 const host = computerUseHost();
 registerComputerUse(host.api);
 const call = async (action, args, signal) => {
   const tool = host.tools.get(`windows_computer_use_${action}`);
   assert.ok(tool, action);
   const result = await tool.execute(action, args, signal, undefined, {});
+  assert.ok(
+    !JSON.stringify(result).includes("fixture-secret-value"),
+    "password values stay out of browser details and rendered text",
+  );
   return result.details;
 };
 const foreground = async () => {
@@ -68,7 +73,28 @@ try {
     value: source.url,
   });
   assert.equal(opened.ok, true, JSON.stringify(opened));
+  assert.ok(
+    !JSON.stringify(opened).includes("fixture-secret-value"),
+    "password values are redacted from browser outlines",
+  );
   const tab = opened.tab.id;
+  const launched = (await call("list_windows", {})).browserLane.browsers[0];
+  assert.equal(launched.app, process.env.PI_CU_BROWSER_APP);
+  assert.match(launched.version, /\d+\./);
+  assert.match(
+    launched.executable,
+    process.env.PI_CU_BROWSER_APP === "firefox"
+      ? /firefox\.exe$/i
+      : process.env.PI_CU_BROWSER_APP === "edge"
+        ? /msedge\.exe$/i
+        : /chrome\.exe$/i,
+  );
+  assert.equal(
+    launched.headless,
+    process.env.PI_CU_BROWSER_APP === "firefox" ||
+      process.env.PI_CU_BROWSER_VISIBLE === "false",
+  );
+
   const find = async (name, role) => {
     const found = await call("find", { browserTab: tab, query: name });
     assert.equal(found.ok, true, JSON.stringify(found));
@@ -78,6 +104,11 @@ try {
     assert.ok(entry, JSON.stringify(found));
     return entry.id;
   };
+  const password = await find("Password", "textbox");
+  assert.equal(
+    (await call("element_info", { elementId: password })).element.value,
+    "[redacted]",
+  );
   const increment = await find("Increment", "button");
   const clicked = await call("click", { elementId: increment });
   assert.equal(clicked.ok, true, JSON.stringify(clicked));
@@ -123,6 +154,16 @@ try {
   assert.equal(
     (await call("element_info", { elementId: editor })).element.value,
     "Replacement",
+  );
+  const multiline = await find("Multiline", "textbox");
+  assert.equal(
+    (await call("set_value", { elementId: multiline, value: "你好\n🙂 café" }))
+      .ok,
+    true,
+  );
+  assert.equal(
+    (await call("element_info", { elementId: multiline })).element.value,
+    "你好\n🙂 café",
   );
   const readOnly = await call("set_value", {
     elementId: await find("Read only", "textbox"),
@@ -205,26 +246,38 @@ try {
     (await call("keypress", { browserTab: tab, keys: ["enter"] })).ok,
     true,
   );
-  const chooser = await call("click", {
-    elementId: await find("Upload fixture", "button"),
-  });
-  assert.ok(chooser.fileChooser?.input, JSON.stringify(chooser));
-  const uploaded = await call("set_value", {
-    elementId: chooser.fileChooser.input,
-    value: source.upload,
-  });
-  assert.equal(uploaded.ok, true, JSON.stringify(uploaded));
-  assert.match(uploaded.text, /Uploaded: fixture-upload.txt/);
-  const downloaded = await call("click", {
-    elementId: await find("Download fixture", "link"),
-  });
-  assert.equal(downloaded.ok, true, JSON.stringify(downloaded));
-  assert.equal(
-    downloaded.downloads?.[0].state,
-    "completed",
-    JSON.stringify(downloaded),
-  );
-  assert.equal(downloaded.downloads[0].name, "fixture-download.txt");
+  if (process.env.PI_CU_BROWSER_APP !== "firefox") {
+    const chooser = await call("click", {
+      elementId: await find("Upload fixture", "button"),
+    });
+    assert.ok(chooser.fileChooser?.input, JSON.stringify(chooser));
+    const uploaded = await call("set_value", {
+      elementId: chooser.fileChooser.input,
+      value: source.upload,
+    });
+    assert.equal(uploaded.ok, true, JSON.stringify(uploaded));
+    assert.match(uploaded.text, /Uploaded: fixture-upload.txt/);
+    const downloaded = await call("click", {
+      elementId: await find("Download fixture", "link"),
+    });
+    assert.equal(downloaded.ok, true, JSON.stringify(downloaded));
+    assert.equal(
+      downloaded.downloads?.[0].state,
+      "completed",
+      JSON.stringify(downloaded),
+    );
+    assert.equal(downloaded.downloads[0].name, "fixture-download.txt");
+  } else {
+    const unsupportedUpload = await call("set_value", {
+      elementId: await find("Direct upload", "textbox"),
+      value: source.upload,
+    });
+    assert.match(unsupportedUpload.error, /BROWSER_UNSUPPORTED/);
+    const unsupported = await call("click", {
+      elementId: await find("Download fixture", "link"),
+    });
+    assert.match(unsupported.error, /BROWSER_UNSUPPORTED/);
+  }
   const popup = await call("click", {
     elementId: await find("Open child", "link"),
   });
@@ -273,7 +326,8 @@ try {
   console.log(
     JSON.stringify({
       ok: true,
-      check: "Chromium actions/dialogs/transfers/waits",
+      check: "Browser actions/dialogs/waits and supported transfers",
+      launched,
       browser: process.env.PI_CU_BROWSER_APP,
       physicalInput: false,
       host: process.platform,

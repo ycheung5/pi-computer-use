@@ -16,6 +16,7 @@ import {
   readPersonalSettings,
   TOOL_PREFIX,
 } from "./settings.js";
+import { textTools } from "./text.js";
 import { waitTools } from "./waits.js";
 import { windowTools } from "./window-management.js";
 
@@ -274,6 +275,7 @@ export function registerComputerUse(
   for (const { action, parameters } of [
     ...controlTools,
     ...pointerTools,
+    ...textTools,
   ].filter(
     ({ action }) => !browserActionTools.some((tool) => tool.action === action),
   )) {
