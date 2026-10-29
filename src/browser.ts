@@ -10,6 +10,7 @@ import puppeteer, {
   type Page,
   type SerializedAXNode,
 } from "puppeteer-core";
+import { observationTools } from "./accessibility.js";
 import type { WorkerResult } from "./protocol.js";
 
 const run = promisify(execFile);
@@ -23,9 +24,9 @@ const reads = new Set([
   "screenshot",
 ]);
 const salt = () => randomBytes(8).toString("hex");
-const fail = (code: string, message: string): never => {
+function fail(code: string, message: string): never {
   throw new Error(`${code}: ${message}`);
-};
+}
 
 interface Tab {
   id: string;
@@ -65,9 +66,16 @@ function navigationUrl(value: unknown): string {
       "browser navigation requires a URL string",
     );
   try {
-    const parsed = new URL(value);
+    let parsed: URL;
+    try {
+      parsed = new URL(value.trim());
+    } catch {
+      if (/\s/.test(value)) throw new Error("invalid address");
+      parsed = new URL(`https://${value}`);
+      if (!parsed.hostname.includes(".")) throw new Error("invalid hostname");
+    }
     if (
-      !["http:", "https:"].includes(parsed.protocol) &&
+      !["http:", "https:", "file:", "data:"].includes(parsed.protocol) &&
       parsed.href !== "about:blank"
     )
       throw new Error("scheme");
@@ -75,7 +83,7 @@ function navigationUrl(value: unknown): string {
   } catch {
     return fail(
       "INVALID_ARGUMENTS",
-      "browser navigation requires an http(s) URL or about:blank",
+      "browser navigation requires an http(s), file or data URL, hostname, or about:blank",
     );
   }
 }
@@ -89,24 +97,26 @@ async function discoverBrowser(
       "BROWSER_UNAVAILABLE",
       "this browser read slice supports installed Chrome and Edge",
     );
-  if (app === "default") {
-    try {
-      const result = await run(
-        "reg.exe",
-        [
-          "query",
-          "HKCU\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice",
-          "/v",
-          "ProgId",
-        ],
-        { timeout: 5000, signal },
-      );
-      app = /ChromeHTML/i.test(result.stdout) ? "chrome" : "edge";
-    } catch {
-      signal?.throwIfAborted();
-      app = "edge";
-    }
+  let registered: { progId?: string; paths?: Record<string, string[]> } = {};
+  try {
+    const script = `[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $ErrorActionPreference='Stop'; $base='Registry::HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https'; $prog=$null; foreach($key in @('UserChoiceLatest\\ProgId','UserChoice')) { try { $prog=(Get-Item -LiteralPath ($base+'\\'+$key)).GetValue('ProgId'); if($prog){break} } catch {} }; $paths=@{}; foreach($exe in @('chrome.exe','msedge.exe')) { $values=@(); foreach($root in @('Registry::HKEY_CURRENT_USER\\Software','Registry::HKEY_LOCAL_MACHINE\\Software','Registry::HKEY_LOCAL_MACHINE\\Software\\WOW6432Node')) { try { $value=(Get-Item -LiteralPath ($root+'\\Microsoft\\Windows\\CurrentVersion\\App Paths\\'+$exe)).GetValue(''); if($value){$values+=([Environment]::ExpandEnvironmentVariables($value))} } catch {} }; $paths[$exe]=$values }; @{progId=$prog;paths=$paths}|ConvertTo-Json -Compress -Depth 4`;
+    const result = await run(
+      "powershell.exe",
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
+      ],
+      { timeout: 8000, signal, windowsHide: true },
+    );
+    registered = JSON.parse(result.stdout.trim());
+  } catch {
+    signal?.throwIfAborted();
   }
+  if (app === "default")
+    app = /Chrome/i.test(registered.progId ?? "") ? "chrome" : "edge";
   const roots = [
     process.env.LOCALAPPDATA,
     process.env.ProgramFiles,
@@ -117,11 +127,18 @@ async function discoverBrowser(
       ? [app]
       : [app, app === "edge" ? "chrome" : "edge"];
   for (const browser of preferred) {
-    for (const root of roots) {
-      const executable =
+    const name = browser === "edge" ? "msedge.exe" : "chrome.exe";
+    const candidates = [
+      process.env.PI_CU_BROWSER_EXECUTABLE,
+      ...(registered.paths?.[name] ?? []),
+      ...roots.map((root) =>
         browser === "edge"
-          ? join(root, "Microsoft", "Edge", "Application", "msedge.exe")
-          : join(root, "Google", "Chrome", "Application", "chrome.exe");
+          ? join(root, "Microsoft", "Edge", "Application", name)
+          : join(root, "Google", "Chrome", "Application", name),
+      ),
+    ];
+    for (const executable of candidates) {
+      if (!executable) continue;
       try {
         await access(executable);
         return { app: browser, executable };
@@ -297,9 +314,9 @@ async function pageOutline(
     if (node.readonly !== undefined) entry.readonly = node.readonly;
     if (node.checked !== undefined) entry.checked = node.checked;
     if (node.focused) entry.focused = true;
-    const handle = await node.elementHandle();
+    const handle = await withCancellation(node.elementHandle(), signal);
     if (handle) {
-      const backendId = await handle.backendNodeId();
+      const backendId = await withCancellation(handle.backendNodeId(), signal);
       let id = tab.backendIds.get(backendId);
       if (id) await handle.dispose();
       else {
@@ -415,6 +432,61 @@ export async function browserListing(): Promise<Record<string, unknown>> {
   };
 }
 
+function validateBrowserOptions(
+  action: string,
+  args: Record<string, unknown>,
+): void {
+  type Rule = {
+    type: string;
+    enum?: readonly string[];
+    minimum?: number;
+    maximum?: number;
+    minLength?: number;
+  };
+  const definition = observationTools.find((tool) => tool.action === action)
+    ?.parameters as
+    | { properties: Record<string, Rule>; required?: string[] }
+    | undefined;
+  const properties: Record<string, Rule> =
+    action === "set_value"
+      ? {
+          elementId: { type: "string", minLength: 1 },
+          value: { type: "string" },
+          fallbackType: { type: "boolean" },
+          restoreClipboard: { type: "boolean" },
+        }
+      : action === "screenshot"
+        ? {
+            scope: { type: "string", enum: ["active_window", "desktop"] },
+            maxWidth: { type: "integer", minimum: 0, maximum: 7680 },
+            activate: { type: "boolean" },
+          }
+        : { ...definition?.properties };
+  properties.browserTab = { type: "string", minLength: 1 };
+  for (const key of Object.keys(args)) {
+    const rule = properties[key];
+    const value = args[key];
+    if (!rule) fail("INVALID_ARGUMENTS", `unknown option ${key}`);
+    if (
+      (rule.type === "integer"
+        ? !Number.isSafeInteger(value)
+        : typeof value !== rule.type) ||
+      (typeof value === "number" &&
+        ((rule.minimum !== undefined && value < rule.minimum) ||
+          (rule.maximum !== undefined && value > rule.maximum))) ||
+      (typeof value === "string" &&
+        ((rule.enum && !rule.enum.includes(value)) ||
+          (rule.minLength !== undefined && value.length < rule.minLength)))
+    )
+      fail("INVALID_ARGUMENTS", `${key} has an unsupported value`);
+  }
+  for (const key of action === "set_value"
+    ? ["elementId", "value"]
+    : (definition?.required ?? []))
+    if (!Object.hasOwn(args, key))
+      fail("INVALID_ARGUMENTS", `${key} is required`);
+}
+
 export async function browse(
   action: string,
   args: Record<string, unknown>,
@@ -431,6 +503,7 @@ export async function browse(
         "INVALID_ARGUMENTS",
         "cannot combine browser references with native targets or coordinates",
       );
+    validateBrowserOptions(action, args);
     if (
       args.browserTab !== undefined &&
       (typeof args.browserTab !== "string" ||
@@ -476,6 +549,7 @@ export async function browse(
             tab.page.goto(url, {
               waitUntil: "domcontentloaded",
               timeout: 15_000,
+              signal,
             }),
             signal,
           );
@@ -520,6 +594,7 @@ export async function browse(
         tab.page.goto(navigationUrl(args.value), {
           waitUntil: "domcontentloaded",
           timeout: 15_000,
+          signal,
         }),
         signal,
       );

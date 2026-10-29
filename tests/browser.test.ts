@@ -46,3 +46,18 @@ test("browser reads reject native coordinates and unknown document references", 
     await client.dispose();
   }
 });
+
+test("browser tools validate options before touching a document", async () => {
+  const client = worker();
+  try {
+    const unknown = await client.execute("accessibility_tree", {
+      browserTab: "t123",
+      fabricatedOption: true,
+    });
+    assert.match(String(unknown.error), /INVALID_ARGUMENTS.*unknown/);
+    const missingQuery = await client.execute("find", { browserTab: "t123" });
+    assert.match(String(missingQuery.error), /INVALID_ARGUMENTS.*query/);
+  } finally {
+    await client.dispose();
+  }
+});

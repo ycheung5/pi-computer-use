@@ -5,7 +5,6 @@ import { once } from "node:events";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { WorkerClient } from "../dist/client.js";
 import { registerComputerUse } from "../dist/extension.js";
 import { nativeWorkerLaunch } from "../dist/launcher.js";
 import { computerUseHost } from "./native-host.mjs";
@@ -38,7 +37,38 @@ const url = await new Promise((resolve, reject) => {
   });
   server.once("error", reject);
 });
-const client = new WorkerClient({ launch: nativeWorkerLaunch });
+const host = computerUseHost();
+registerComputerUse(host.api);
+const client = {
+  async execute(action, args, signal) {
+    const tool = host.tools.get(`windows_computer_use_${action}`);
+    assert.ok(tool, `${action} is registered through Pi`);
+    const result = await tool.execute(
+      `fixture-${action}`,
+      args,
+      signal,
+      undefined,
+      {},
+    );
+    const image = result.content.find((block) => block.type === "image");
+    if (image) {
+      assert.ok(
+        !result.content
+          .filter((block) => block.type === "text")
+          .some((block) => block.text.includes(image.data)),
+        "PNG payload stays out of text",
+      );
+      return {
+        ...result.details,
+        screenshot: { ...result.details.screenshot, base64: image.data },
+      };
+    }
+    return result.details;
+  },
+  async dispose() {
+    for (const handler of host.shutdown) await handler();
+  },
+};
 const foreground = async () => {
   const script =
     "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class PiBrowserProbe { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); }'; [Console]::Write([PiBrowserProbe]::GetForegroundWindow().ToInt64())";
@@ -98,6 +128,35 @@ try {
   const stale = await client.execute("element_info", { elementId: input.id });
   assert.equal(stale.ok, false);
   assert.match(stale.error, /STALE_BROWSER_REFERENCE/);
+  const browserPid = listing.browserLane.browsers[0].processId;
+  assert.ok(browserPid);
+  await run("taskkill.exe", ["/PID", String(browserPid), "/T", "/F"]);
+  const deadline = Date.now() + 5000;
+  let disconnected;
+  do {
+    disconnected = await client.execute("list_windows", {});
+    if (disconnected.browserLane.browsers.length === 0) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } while (Date.now() < deadline);
+  assert.equal(
+    disconnected.browserLane.browsers.length,
+    0,
+    "disconnected tabs withdrawn",
+  );
+  const missing = await client.execute("accessibility_tree", {
+    browserTab: tab,
+  });
+  assert.match(missing.error, /STALE_BROWSER_REFERENCE/);
+  const reopened = await client.execute("set_value", {
+    elementId: "new-tab",
+    value: url,
+  });
+  assert.equal(reopened.ok, true, JSON.stringify(reopened));
+  assert.notEqual(
+    reopened.tab.id,
+    tab,
+    "reconnect never aliases old tab identity",
+  );
   const controller = new AbortController();
   controller.abort();
   await assert.rejects(
@@ -117,6 +176,8 @@ try {
       screenshots: true,
       foregroundPreserved: true,
       staleRejected: true,
+      reconnect: true,
+      piTools: true,
       isolated: true,
     }),
   );

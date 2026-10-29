@@ -18,4 +18,4 @@ The internal worker envelope accepts an optional operation identifier; direct wo
 
 ## Before enabling physical input
 
-Ticket #9 must connect independent emergency stopping and bounded native key/button cleanup to operation cancellation. Releasing ownership after a cancelled caller alone does not prove that an in-flight native input routine has finished cleanup. This slice exposes read-only tools; do not treat its mutex/caller cancellation checks as physical-input safety evidence.
+The [stopping contract](stopping.md) now supplies independent listener/event control and bounded retirement for cancelled read-only bridges. Physical input remains gated until its action proves cancellation polling and key/button release before ownership handoff; caller cancellation alone is not that evidence.

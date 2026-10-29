@@ -95,6 +95,7 @@ partial class WindowsBridge {
         try {
           Dictionary<string, object> args = (Dictionary<string, object>)request["args"];
           if (action == "list_windows") result = ListWindows(args);
+          else if (action == "screenshot") result = CaptureScreenshot(args);
           else if (action == "snapshot" || action == "accessibility_tree" || action == "find" || action == "element_info") result = ObserveAccessibility(action, args);
           else throw new InvalidOperationException("UNKNOWN_ACTION");
         } catch (Exception error) {

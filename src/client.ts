@@ -11,6 +11,7 @@ export interface WorkerClientOptions {
   launch: (signal?: AbortSignal) => Promise<WorkerLaunch>;
   timeoutMs?: number;
   shutdownMs?: number;
+  onStop?: (operationId: string) => void;
 }
 
 interface Pending {
@@ -84,7 +85,17 @@ export class WorkerClient {
             const line = output.slice(0, newline);
             output = output.slice(newline + 1);
             try {
-              const response = JSON.parse(line) as WorkerResponse;
+              const response = JSON.parse(line) as WorkerResponse & {
+                event?: string;
+                operationId?: string;
+              };
+              if (
+                response.event === "stopped" &&
+                typeof response.operationId === "string"
+              ) {
+                this.options.onStop?.(response.operationId);
+                continue;
+              }
               if (
                 !Number.isSafeInteger(response.id) ||
                 typeof response.result?.ok !== "boolean" ||
@@ -214,24 +225,43 @@ export class WorkerClient {
     });
   }
 
+  stopOperation(operationId: string): void {
+    // Control messages bypass queued calls, including a busy native provider.
+    this.child?.stdin.write(`${JSON.stringify({ stop: operationId })}\n`);
+  }
+
+  async retire(reason = "WORKER_RETIRED: operation stopped"): Promise<void> {
+    const child = this.child;
+    if (!child) return;
+    this.fail(child, new Error(reason));
+    await new Promise<void>((resolve, reject) => {
+      let forced: ReturnType<typeof setTimeout> | undefined;
+      const timer = setTimeout(() => {
+        child.kill();
+        forced = setTimeout(
+          () =>
+            reject(
+              new Error(
+                "WORKER_RETIRE_FAILED: child exit was not confirmed; desktop ownership must stay held",
+              ),
+            ),
+          1000,
+        );
+      }, this.options.shutdownMs ?? 1000);
+      child.once("close", () => {
+        clearTimeout(timer);
+        clearTimeout(forced);
+        resolve();
+      });
+      child.stdin.end();
+    });
+  }
+
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
     this.lifetime.abort(new Error("WORKER_DISPOSED: session has closed"));
     await this.starting?.catch(() => undefined);
-    const child = this.child;
-    if (!child) return;
-    this.fail(child, new Error("WORKER_DISPOSED: session has closed"));
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        child.kill();
-        resolve();
-      }, this.options.shutdownMs ?? 1000);
-      child.once("close", () => {
-        clearTimeout(timer);
-        resolve();
-      });
-      child.stdin.end();
-    });
+    await this.retire("WORKER_DISPOSED: session has closed");
   }
 }

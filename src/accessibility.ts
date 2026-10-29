@@ -1,3 +1,4 @@
+import { screenshot } from "./capture.js";
 import { nativeDesktop } from "./native.js";
 import type { WorkerResult } from "./protocol.js";
 
@@ -153,13 +154,44 @@ export async function observeDesktop(
   )
     return invalid("provide elementId or both x and y");
   signal?.throwIfAborted();
+  let result: WorkerResult;
   try {
-    return await nativeDesktop.execute(action, normalized, signal);
+    result = await nativeDesktop.execute(action, normalized, signal);
   } catch (error) {
-    return {
+    result = {
       ok: false,
       action,
       error: error instanceof Error ? error.message : String(error),
     };
   }
+  if (action === "snapshot" && normalized.includeScreenshot) {
+    delete result.screenshotPending;
+    const windowCapture =
+      normalized.captureWindow && normalized.scope !== "desktop";
+    const captureArgs: Record<string, unknown> = {
+      scope: windowCapture ? "active_window" : "desktop",
+      maxWidth: normalized.maxWidth,
+    };
+    if (windowCapture) {
+      for (const key of [
+        "windowTitle",
+        "processId",
+        "nativeWindowHandle",
+        "activate",
+      ]) {
+        const value = result[key] ?? normalized[key];
+        if (value !== undefined) captureArgs[key] = value;
+      }
+    }
+    const captured = await screenshot(captureArgs, signal);
+    if (captured.ok && captured.screenshot)
+      result.screenshot = captured.screenshot;
+    else {
+      result.partial = true;
+      result.screenshotError = String(
+        captured.error ?? "SCREENSHOT_UNAVAILABLE",
+      );
+    }
+  }
+  return result;
 }

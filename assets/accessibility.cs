@@ -175,7 +175,6 @@ partial class WindowsBridge {
     if(state.Reason!=null) { output["truncationReason"]=state.Reason; output["conclusive"]=false; }
     if(state.Error!=null) { output["providerError"]=state.Error; if(root==null) output["error"]="UIA_PROVIDER_ERROR: "+state.Error; }
     if(action=="find") { List<object> matches=new List<object>(); FindMatches(root,TextOption(args,"query",""),TextOption(args,"controlType",""),matches,NumberOption(args,"maxResults",25)); output.Remove("tree"); output["matches"]=matches; output["query"]=TextOption(args,"query",""); if(matches.Count==0 && Option(args,"ocrFallback",true) && TextOption(args,"controlType","").Length==0 && (state.Count<=20 || state.Reason!=null)) output["ocrFallbackPending"]=true; }
-    if(action=="snapshot" && Option(args,"includeScreenshot",true)) output["screenshotPending"]=true;
     return output;
   }
 }

@@ -117,7 +117,9 @@ test("Pi browser navigation is exposed without adding a separate MCP extension",
   const tools: ToolDefinition[] = [];
   const shutdown: Array<() => Promise<void>> = [];
   const host = {
-    registerTool: (tool: ToolDefinition) => tools.push(tool),
+    registerTool: (tool: ToolDefinition) => {
+      tools.push(tool);
+    },
     on: (event: string, handler: () => Promise<void>) => {
       if (event === "session_shutdown") shutdown.push(handler);
       return () => {};
