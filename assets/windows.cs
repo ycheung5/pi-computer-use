@@ -100,6 +100,7 @@ partial class WindowsBridge {
           if (action == "click" || action == "double_click" || action == "move" || action == "drag" || (action == "scroll" && (!args.ContainsKey("elementId") || args.ContainsKey("_cancelEvent")))) result = ExecutePointer(action,args);
           else if (action == "list_windows") result = ListWindows(args);
           else if (action == "focus" || action == "invoke" || action == "set_value" || action == "scroll") result = ExecuteControl(action,args);
+          else if (action == "launch_app" || action == "activate_window" || action == "move_window" || action == "close_window") result = ManageNativeWindow(action,args);
           else if (action == "screenshot") result = CaptureScreenshot(args);
           else if (action == "snapshot" || action == "accessibility_tree" || action == "find" || action == "element_info") result = ObserveAccessibility(action, args);
           else throw new InvalidOperationException("UNKNOWN_ACTION");
