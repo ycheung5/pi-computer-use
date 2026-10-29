@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { screenshotContent } from "./capture.js";
 import { WorkerClient, type WorkerClientOptions } from "./client.js";
 import { nativeWorkerLaunch } from "./launcher.js";
 
@@ -43,6 +44,32 @@ export function registerComputerUse(
         details: result,
         isError: !result.ok,
       };
+    },
+  });
+  pi.registerTool({
+    name: "windows_computer_use_screenshot",
+    label: "Screenshot",
+    description:
+      "Capture a Windows window or desktop without UI Automation. Returns a PNG and screen-coordinate bounds; flagged fallbacks may show occluding content.",
+    parameters: Type.Object({
+      scope: Type.Optional(
+        Type.Union([Type.Literal("active_window"), Type.Literal("desktop")], {
+          default: "active_window",
+        }),
+      ),
+      windowTitle: Type.Optional(Type.String({ minLength: 1 })),
+      processId: Type.Optional(Type.Integer({ minimum: 1 })),
+      nativeWindowHandle: Type.Optional(Type.Integer({ minimum: 1 })),
+      activate: Type.Optional(Type.Boolean({ default: false })),
+      maxWidth: Type.Optional(
+        Type.Integer({ minimum: 0, maximum: 7680, default: 1600 }),
+      ),
+    }),
+    executionMode: "sequential",
+    async execute(_toolCallId, args, signal) {
+      return screenshotContent(
+        await worker.execute("screenshot", args, signal),
+      );
     },
   });
   pi.on("session_shutdown", async () => {

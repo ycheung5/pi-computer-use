@@ -1,4 +1,5 @@
 import { createInterface } from "node:readline";
+import { screenshot } from "./capture.js";
 import { disposeDesktop, listWindows } from "./desktop.js";
 import type { WorkerRequest, WorkerResponse } from "./protocol.js";
 
@@ -28,7 +29,9 @@ async function dispatch(
           }
         : request.action === "list_windows"
           ? await listWindows(request.args, signal)
-          : { ok: false, action: request.action, error: "UNKNOWN_ACTION" },
+          : request.action === "screenshot"
+            ? await screenshot(request.args, signal)
+            : { ok: false, action: request.action, error: "UNKNOWN_ACTION" },
   };
   process.stdout.write(`${JSON.stringify(response)}\n`);
 }

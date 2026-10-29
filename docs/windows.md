@@ -1,5 +1,17 @@
 # Windows discovery
 
+## Screenshots
+
+`windows_computer_use_screenshot` accepts native window identity/title/process targeting, `scope: active_window | desktop`, `maxWidth` (0 means original size), and optional explicit activation. Capture does not resolve UIA elements. PNG data is returned as a Pi image block; text and rendering details contain metadata without duplicated base64.
+
+The capture chain prefers verified unobstructed foreground pixels, then `PrintWindow`. A failed or apparently blank render tries an isolated Windows.Graphics.Capture helper using HWND interop and a free-threaded frame pool. The helper has bounded frame/copy polling plus an external worker deadline, so unavailable WinRT metadata and stalled capture do not disable ordinary window enumeration. A final screen-region fallback is marked `occludedPossible: true`. Hidden/minimized/unavailable target surfaces return a desktop fallback marked `windowCaptureFailed: true`; callers must not treat it as the target's content. Capture errors and fallback warnings remain explicit.
+
+`bounds` and `origin` are physical screen coordinates, including negative virtual-desktop positions. `width`/`height` describe the actual PNG. Map image X using `origin.x + imageX / imageScale` and Y using `origin.y + imageY / imageScaleY`; a separate Y scale accounts for height rounding during resizing. Target identity and geometry are checked around capture. No tool automatically activates a window unless `activate: true` is requested.
+
+Run `npm run test:native:capture` with Windows Node after building. Its dedicated passive fixtures verify actual green pixels behind a magenta cover, PNG dimensions, coordinate mapping, wrong-owner refusal, a black-frame-triggered WGC fallback and explicit minimized-target metadata. Screenshots remain in test process memory; the suite sends no physical input. Multi-monitor layouts and changes across mixed DPI displays still require recorded manual validation rather than being inferred from this fixture.
+
+WGC uses the documented [CreateForWindow interop](https://learn.microsoft.com/en-us/windows/win32/api/windows.graphics.capture.interop/nf-windows-graphics-capture-interop-igraphicscaptureiteminterop-createforwindow), [free-threaded frame pool](https://learn.microsoft.com/en-us/uwp/api/windows.graphics.capture.direct3d11captureframepool.createfreethreaded), and [memory-buffer byte access](https://devblogs.microsoft.com/oldnewthing/20240122-00/?p=109304). A composited frame can legitimately be black; only the unreliable PrintWindow path uses black-frame detection to choose a fallback.
+
 ## Implemented scope
 
 `windows_computer_use_list_windows` reads native top-level windows without resolving UI Automation elements or sending physical input. Options match the reference: `includeInvisible` defaults to false and `maxWindows` defaults to 50, with an integer range of 1–200. The default excludes hidden and minimized windows.
