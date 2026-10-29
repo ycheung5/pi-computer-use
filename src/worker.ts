@@ -190,39 +190,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-async function guardedPointer(
-  action: string,
-  args: Record<string, unknown>,
-  operationId: string,
-  signal: AbortSignal,
-): Promise<import("./protocol.js").WorkerResult> {
-  const armed = await stopListener.arm(operationId, signal);
-  if (!armed.ok || typeof armed.cancelEvent !== "string")
-    return { ...armed, action };
-  signal.throwIfAborted();
-  process.stdout.write(
-    `${JSON.stringify({ event: "input_state", active: true })}\n`,
-  );
-  let result: WorkerResponse["result"];
-  try {
-    result = await executePointer(
-      action,
-      args,
-      armed.cancelEvent,
-      operationId,
-      Number(armed.listenerProcessId),
-    );
-  } catch (error) {
-    void stopOperation(operationId).catch(() => undefined);
-    throw error;
-  }
-  process.stdout.write(
-    `${JSON.stringify({ event: "input_state", active: false })}\n`,
-  );
-  return result;
-}
-
-async function guardedText(
+async function guardedInput(
   action: string,
   args: Record<string, unknown>,
   operationId: string,
@@ -231,14 +199,16 @@ async function guardedText(
   const armed = await stopListener.arm(operationId, signal);
   if (!armed.ok || typeof armed.cancelEvent !== "string")
     return { ...armed, action };
-  const prepared = await prepareTextInput(action, args, signal);
+  const prepared = ["type_text", "keypress"].includes(action)
+    ? await prepareTextInput(action, args, signal)
+    : args;
   signal.throwIfAborted();
   process.stdout.write(
     `${JSON.stringify({ event: "input_state", active: true })}\n`,
   );
   let result: WorkerResponse["result"];
   try {
-    result = await executeText(
+    result = await executePointer(
       action,
       prepared,
       armed.cancelEvent,
@@ -250,6 +220,8 @@ async function guardedText(
     void stopOperation(operationId).catch(() => undefined);
     throw error;
   }
+  // Failure leaves the input lease pending; only the native cleanup ACK permits
+  // this notification, worker retirement and eventual desktop ownership release.
   process.stdout.write(
     `${JSON.stringify({ event: "input_state", active: false })}\n`,
   );
@@ -403,7 +375,7 @@ async function dispatch(
           return;
         }
       }
-      result = await guardedText(
+      result = await guardedInput(
         request.action,
         request.args,
         operationId,
@@ -452,7 +424,7 @@ async function dispatch(
           return;
         }
       }
-      const result = await guardedPointer(
+      const result = await guardedInput(
         request.action,
         request.args,
         operationId,
@@ -521,7 +493,7 @@ async function dispatch(
       ["invoke", "scroll"].includes(request.action)
     ) {
       const pointerAction = request.action === "invoke" ? "click" : "scroll";
-      const result = await guardedPointer(
+      const result = await guardedInput(
         pointerAction,
         { ...request.args, dispatch: "foreground" },
         operationId,
@@ -553,7 +525,7 @@ async function dispatch(
         "activate",
       ])
         if (request.args[key] !== undefined) textArgs[key] = request.args[key];
-      const result = await guardedText(
+      const result = await guardedInput(
         "type_text",
         textArgs,
         operationId,

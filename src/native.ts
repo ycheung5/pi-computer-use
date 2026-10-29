@@ -20,7 +20,13 @@ export async function compileNative(
   const digest = createHash("sha256");
   for (const source of sources) {
     digest.update(source);
-    digest.update(await readFile(source));
+    try {
+      digest.update(await readFile(source));
+    } catch (error) {
+      throw new Error(`NATIVE_RESOURCE_MISSING: required resource ${source}`, {
+        cause: error,
+      });
+    }
   }
   digest.update(references.join("\n"));
   const hash = digest.digest("hex").slice(0, 20);
@@ -144,8 +150,8 @@ class NativeDesktopClient extends WorkerClient {
 }
 export const nativeDesktop = new NativeDesktopClient({
   launch: async (signal) => {
-    const names = ["windows.cs"];
-    for (const name of [
+    const names = [
+      "windows.cs",
       "accessibility.cs",
       "capture.cs",
       "controls.cs",
@@ -153,16 +159,7 @@ export const nativeDesktop = new NativeDesktopClient({
       "pointer.cs",
       "browser-indicators.cs",
       "text.cs",
-    ]) {
-      try {
-        await access(
-          fileURLToPath(new URL(`../assets/${name}`, import.meta.url)),
-        );
-        names.push(name);
-      } catch {
-        /* Optional capability source is absent in an earlier package slice. */
-      }
-    }
+    ];
     const framework = join(
       process.env.WINDIR ?? "",
       "Microsoft.NET",
