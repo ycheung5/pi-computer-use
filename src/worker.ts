@@ -11,6 +11,7 @@ import {
   disposeBrowser,
   isBrowserRequest,
 } from "./browser.js";
+import { browserActionTools } from "./browser-actions.js";
 import { screenshot, screenshotParameters } from "./capture.js";
 import {
   disposeDesktop,
@@ -75,6 +76,7 @@ const settings = new PersonalSettingsManager(
       ...controlTools,
       ...pointerTools,
       ...waitTools,
+      ...browserActionTools,
     ].map(
       (tool) =>
         [

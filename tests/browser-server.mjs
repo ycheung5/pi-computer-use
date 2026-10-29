@@ -1,5 +1,20 @@
 // Dedicated local browser fixture; no external requests or user profiles.
+
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const directory = await mkdtemp(join(tmpdir(), "pi-browser-read-"));
+const settings = join(directory, "settings.json");
+await writeFile(
+  settings,
+  JSON.stringify({
+    browserApp: process.argv[2] ?? "edge",
+    browserVisible: process.argv[3] === "true",
+    browserSignIn: false,
+  }),
+);
 
 const server = createServer((request, response) => {
   response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -10,7 +25,16 @@ const server = createServer((request, response) => {
   );
 });
 server.listen(0, "127.0.0.1", () =>
-  console.log(`http://127.0.0.1:${server.address().port}/`),
+  console.log(
+    JSON.stringify({
+      url: `http://127.0.0.1:${server.address().port}/`,
+      settings,
+    }),
+  ),
 );
 process.stdin.resume();
-process.stdin.on("end", () => server.close());
+process.stdin.on("end", () =>
+  server.close(async () => {
+    await rm(directory, { recursive: true, force: true });
+  }),
+);
