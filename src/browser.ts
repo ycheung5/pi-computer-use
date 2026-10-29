@@ -571,7 +571,9 @@ async function firefoxOutline(
       const entry = await element.evaluate((node) => {
         if (
           !(node instanceof HTMLElement) ||
-          node.closest("[hidden],[inert],script,style,noscript,template") ||
+          node.closest(
+            '[hidden],[inert],[aria-hidden="true"],script,style,noscript,template',
+          ) ||
           getComputedStyle(node).display === "none" ||
           getComputedStyle(node).visibility === "hidden"
         )
@@ -591,7 +593,13 @@ async function firefoxOutline(
           li: "listitem",
           ul: "list",
           ol: "list",
-          label: "label",
+          table: "table",
+          tr: "row",
+          th: "columnheader",
+          td: "cell",
+          main: "main",
+          nav: "navigation",
+          summary: "button",
           h1: "heading",
           h2: "heading",
           h3: "heading",
@@ -611,8 +619,10 @@ async function firefoxOutline(
                 number: "spinbutton",
                 hidden: "none",
               }[type] ?? "textbox")
-            : implicit[tag]);
-        if (!role || role === "none") return null;
+            : node.isContentEditable
+              ? "textbox"
+              : implicit[tag]);
+        if (!role || role === "none" || role === "presentation") return null;
         const labelled = (node.getAttribute("aria-labelledby") ?? "")
           .split(/\s+/)
           .map((id) => document.getElementById(id)?.textContent?.trim() ?? "")
@@ -646,7 +656,12 @@ async function firefoxOutline(
           name: name.slice(0, 1000),
           depth,
           ...("value" in node
-            ? { value: String((node as HTMLInputElement).value) }
+            ? {
+                value:
+                  tag === "input" && type === "password"
+                    ? ""
+                    : String((node as HTMLInputElement).value),
+              }
             : {}),
           ...("disabled" in node
             ? { disabled: (node as HTMLInputElement).disabled }
@@ -2257,7 +2272,12 @@ export async function browse(
         element.evaluate((node) => ({
           tag: node.tagName.toLowerCase(),
           text: node.textContent?.trim().slice(0, 2000),
-          value: "value" in node ? String(node.value) : undefined,
+          value:
+            node instanceof HTMLInputElement && node.type === "password"
+              ? "[redacted]"
+              : "value" in node
+                ? String(node.value)
+                : undefined,
           link: node instanceof HTMLAnchorElement ? node.href : undefined,
         })),
         signal,

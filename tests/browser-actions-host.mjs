@@ -69,6 +69,11 @@ try {
     value: source.url,
   });
   assert.equal(opened.ok, true, JSON.stringify(opened));
+  if (process.env.PI_CU_BROWSER_APP === "firefox")
+    assert.ok(
+      !JSON.stringify(opened).includes("fixture-secret-value"),
+      "password values are redacted from Firefox outlines",
+    );
   const tab = opened.tab.id;
   const launched = (await call("list_windows", {})).browserLane.browsers[0];
   assert.equal(launched.app, process.env.PI_CU_BROWSER_APP);
@@ -96,6 +101,13 @@ try {
     assert.ok(entry, JSON.stringify(found));
     return entry.id;
   };
+  if (process.env.PI_CU_BROWSER_APP === "firefox") {
+    const password = await find("Password", "textbox");
+    assert.equal(
+      (await call("element_info", { elementId: password })).element.value,
+      "[redacted]",
+    );
+  }
   const increment = await find("Increment", "button");
   const clicked = await call("click", { elementId: increment });
   assert.equal(clicked.ok, true, JSON.stringify(clicked));
