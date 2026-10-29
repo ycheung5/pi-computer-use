@@ -3,6 +3,8 @@ using System.Threading;
 using System.Windows.Forms;
 class BackgroundForm : Form { protected override bool ShowWithoutActivation { get { return true; } } }
 class ControlsFixture {
+  [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
+  [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
   [STAThread] static void Main(string[] args) {
     Console.OutputEncoding=new System.Text.UTF8Encoding(false);
     BackgroundForm form=new BackgroundForm { Text=args[0],Width=520,Height=400 };
@@ -23,8 +25,15 @@ class ControlsFixture {
     form.Controls.Add(drag);form.Controls.Add(release);
     form.Controls.Add(edit);form.Controls.Add(readOnly);form.Controls.Add(status);form.Controls.Add(button);form.Controls.Add(unsupported);form.Controls.Add(scrollStatus);form.Controls.Add(panel);
     form.Shown+=delegate {Console.WriteLine(form.Handle.ToInt64());Console.Out.Flush();};
-    BackgroundForm cover=null;
-    ThreadPool.QueueUserWorkItem(delegate {string command;while((command=Console.ReadLine())!=null){if(command=="stop")break;if(command=="shift")form.BeginInvoke((Action)delegate {form.Left+=20;form.Top+=15;Console.WriteLine("shifted");Console.Out.Flush();});if(command=="cover")form.BeginInvoke((Action)delegate {cover=new BackgroundForm {Text="Pointer guard cover",StartPosition=FormStartPosition.Manual,Bounds=form.Bounds,TopMost=true};cover.Show();Console.WriteLine("covered");Console.Out.Flush();});if(command=="remove")form.BeginInvoke((Action)delegate {form.Controls.Remove(button);button.Dispose();Console.WriteLine("removed");Console.Out.Flush();});}form.BeginInvoke((Action)delegate{if(cover!=null)cover.Close();form.Close();});});
+    BackgroundForm cover=null,popup=null,sibling=null;
+    LinkLabel switchSibling=new LinkLabel {AccessibleName="Switch sibling",Text="Switch sibling",Left=280,Top=70,Width=180};
+    switchSibling.LinkClicked+=delegate {if(sibling!=null){SetForegroundWindow(sibling.Handle);status.Text=status.AccessibleName=GetForegroundWindow()==sibling.Handle?"Sibling selected":"Sibling activation refused";}};form.Controls.Add(switchSibling);
+    ThreadPool.QueueUserWorkItem(delegate {string command;while((command=Console.ReadLine())!=null){if(command=="stop")break;if(command=="popup")form.BeginInvoke((Action)delegate {
+      popup=new BackgroundForm {Text="Owned popup",StartPosition=FormStartPosition.Manual,Left=form.Right+10,Top=form.Top,Width=180,Height=140,TopMost=true};
+      if(popup.Right>Screen.FromControl(form).WorkingArea.Right){popup.Left=form.Left;popup.Top=form.Bottom+10;}
+      Button item=new Button {Text="Popup action",AccessibleName="Popup action",Left=10,Top=10,Width=130};item.Click+=delegate {status.Text=status.AccessibleName="Popup clicked";form.Enabled=true;popup.Close();};popup.Controls.Add(item);popup.Show(form);form.Enabled=false;popup.Enabled=true;
+      var point=item.PointToScreen(new System.Drawing.Point(item.Width/2,item.Height/2));Console.WriteLine("popup:"+point.X+":"+point.Y);Console.Out.Flush();
+    });if(command=="foreground")form.BeginInvoke((Action)delegate {Console.WriteLine("foreground:"+GetForegroundWindow().ToInt64());Console.Out.Flush();});if(command=="sibling")form.BeginInvoke((Action)delegate {sibling=new BackgroundForm {Text="Existing sibling",Width=200,Height=120};sibling.Show();Console.WriteLine("sibling:"+sibling.Handle.ToInt64());Console.Out.Flush();});if(command=="shift")form.BeginInvoke((Action)delegate {form.Left+=20;form.Top+=15;Console.WriteLine("shifted");Console.Out.Flush();});if(command=="cover")form.BeginInvoke((Action)delegate {cover=new BackgroundForm {Text="Pointer guard cover",StartPosition=FormStartPosition.Manual,Bounds=form.Bounds,TopMost=true};cover.Show();Console.WriteLine("covered");Console.Out.Flush();});if(command=="remove")form.BeginInvoke((Action)delegate {form.Controls.Remove(button);button.Dispose();Console.WriteLine("removed");Console.Out.Flush();});}form.BeginInvoke((Action)delegate{if(cover!=null)cover.Close();if(popup!=null)popup.Close();if(sibling!=null)sibling.Close();form.Close();});});
     System.Windows.Forms.Timer timeout=new System.Windows.Forms.Timer {Interval=60000};timeout.Tick+=delegate{form.Close();};timeout.Start();Application.Run(form);
   }
 }

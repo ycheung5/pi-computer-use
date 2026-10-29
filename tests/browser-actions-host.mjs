@@ -104,6 +104,33 @@ try {
     assert.ok(entry, JSON.stringify(found));
     return entry.id;
   };
+  const aliases = await find("Alias keys", "textbox");
+  assert.equal((await call("focus", { elementId: aliases })).ok, true);
+  for (const [alias, expected] of [
+    ["return", "Enter"],
+    ["del", "Delete"],
+    ["pgup", "PageUp"],
+    ["pgdn", "PageDown"],
+    ["arrowup", "ArrowUp"],
+    ["arrowdown", "ArrowDown"],
+    ["arrowleft", "ArrowLeft"],
+    ["arrowright", "ArrowRight"],
+  ]) {
+    const result = await call("keypress", { browserTab: tab, keys: [alias] });
+    assert.equal(result.ok, true, JSON.stringify({ alias, result }));
+    const seen = await call("find", {
+      browserTab: tab,
+      query: `Key:${expected}`,
+    });
+    assert.ok(
+      seen.results.some(
+        (node) =>
+          node.name === `Key:${expected}` ||
+          node.text?.includes(`Key:${expected}`),
+      ),
+      JSON.stringify(seen),
+    );
+  }
   const password = await find("Password", "textbox");
   assert.equal(
     (await call("element_info", { elementId: password })).element.value,
@@ -202,7 +229,10 @@ try {
     (await call("type_text", { browserTab: tab, text: "fixture answer" })).ok,
     true,
   );
-  const accepted = await call("keypress", { browserTab: tab, keys: ["enter"] });
+  const accepted = await call("keypress", {
+    browserTab: tab,
+    keys: ["return"],
+  });
   assert.equal(accepted.ok, true, JSON.stringify(accepted));
   assert.match(accepted.text, /Prompt: fixture answer/);
   const color = await find("Color", "combobox");
@@ -309,6 +339,25 @@ try {
     keys: ["ctrl", "l"],
   });
   assert.match(refusedShortcut.error, /BROWSER_UI_SHORTCUT/);
+  const beforeBlocked = await foreground();
+  for (const keys of [
+    ["control", "L"],
+    ["CTRL", "F4"],
+    ["control", "SHIFT", "TAB"],
+  ]) {
+    const blocked = await call("keypress", { browserTab: tab, keys });
+    assert.match(blocked.error, /BROWSER_UI_SHORTCUT/, JSON.stringify(blocked));
+  }
+  assert.equal(
+    await foreground(),
+    beforeBlocked,
+    "blocked aliases preserve native foreground",
+  );
+  assert.equal(
+    (await call("snapshot", { browserTab: tab, includeScreenshot: false })).ok,
+    true,
+    "blocked aliases keep the original tab usable",
+  );
   const timedOut = await call("wait_for", {
     browserTab: tab,
     condition: "text",

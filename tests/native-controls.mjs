@@ -2,10 +2,10 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import computerUse from "../dist/extension.js";
 import { computerUseHost } from "./native-host.mjs";
 
@@ -57,6 +57,12 @@ const find = async (query, controlType) => {
   assert.equal(result.ok, true, JSON.stringify(result));
   return result.matches;
 };
+const fixtureCommand = async (command) => {
+  const reply = once(fixture.stdout, "data");
+  fixture.stdin.write(`${command}\n`);
+  return (await reply)[0].toString().trim();
+};
+let siblingRestoration = { observed: false };
 try {
   const edit = (await find("Background editor", "Edit"))[0];
   assert.ok(edit);
@@ -110,6 +116,72 @@ try {
   });
   assert.equal(wrong.ok, false);
   assert.match(wrong.error, /identity|owner/i);
+  const previous = (await call("list_windows", {})).windows.find(
+    (window) => window.hasKeyboardFocus,
+  );
+  const sibling = Number((await fixtureCommand("sibling")).split(":")[1]);
+  const activated = await call("activate_window", {});
+  if (activated.ok) {
+    const switcher = (await find("Switch sibling", "Hyperlink"))[0];
+    const switched = await call("invoke", {
+      elementId: switcher.id,
+      fallbackClick: false,
+    });
+    const after = Number((await fixtureCommand("foreground")).split(":")[1]);
+    const actual = (await find("Sibling selected", "Text")).length > 0;
+    if (actual) {
+      assert.ok(
+        switched.foreground === "unchanged" ||
+          switched.foreground.startsWith("left:"),
+        JSON.stringify(switched),
+      );
+      assert.equal(
+        after,
+        sibling,
+        "do not restore over another pre-existing root in the same PID",
+      );
+      siblingRestoration = { observed: true };
+    } else
+      siblingRestoration = {
+        observed: false,
+        reason: "Windows refused sibling activation",
+      };
+    if (previous && after === sibling)
+      await call("activate_window", {
+        nativeWindowHandle: previous.nativeWindowHandle,
+        processId: previous.processId,
+      });
+  } else
+    siblingRestoration = { observed: false, reason: String(activated.error) };
+  // A damaged installed package must fail at the required resource, rather than
+  // silently compile an obsolete subset and fail later in a different action.
+  const staged = join(folder, "damaged-package");
+  await cp(
+    fileURLToPath(new URL("../dist/", import.meta.url)),
+    join(staged, "dist"),
+    { recursive: true },
+  );
+  await cp(
+    fileURLToPath(new URL("../assets/", import.meta.url)),
+    join(staged, "assets"),
+    { recursive: true },
+  );
+  await writeFile(join(staged, "package.json"), '{"type":"module"}');
+  await unlink(join(staged, "assets", "controls.cs"));
+  const damaged = await import(
+    pathToFileURL(join(staged, "dist", "native.js")).href
+  );
+  try {
+    await assert.rejects(
+      damaged.nativeDesktop.execute("list_windows", {
+        maxWindows: 1,
+        includeInvisible: false,
+      }),
+      /NATIVE_RESOURCE_MISSING.*controls.cs/,
+    );
+  } finally {
+    await damaged.nativeDesktop.dispose();
+  }
   const removed = once(fixture.stdout, "data");
   fixture.stdin.write("remove\n");
   await removed;
@@ -126,6 +198,8 @@ try {
       readOnly: true,
       stale: true,
       unsupportedFallbackDisabled: true,
+      siblingRestoration,
+      requiredResourceFailure: true,
       physicalInput: false,
     }),
   );

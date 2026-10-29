@@ -107,6 +107,23 @@ try {
   assert.match(wrong.error, /IDENTITY/);
   const label = (await find("Unsupported label", "Text"))[0];
   assert.ok(label);
+  const popupReply = once(fixture.stdout, "data");
+  fixture.stdin.write("popup\n");
+  const [, popupX, popupY] = (await popupReply)[0]
+    .toString()
+    .trim()
+    .split(":")
+    .map(Number);
+  const popupClick = await call("click", {
+    x: popupX,
+    y: popupY,
+    dispatch: "background",
+  });
+  assert.equal(popupClick.ok, true, JSON.stringify(popupClick));
+  assert.ok(
+    (await find("Popup clicked", "Text")).length,
+    "source target can address its owned popup outside its frame",
+  );
   const covered = once(fixture.stdout, "data");
   fixture.stdin.write("cover\n");
   await covered;
@@ -129,6 +146,7 @@ try {
       movedWindowHoming: true,
       outsidePoint: true,
       coveredPoint: true,
+      sameProcessPopupOutsideFrame: true,
       wrongOwner: true,
       stale: true,
       physicalInput: false,
