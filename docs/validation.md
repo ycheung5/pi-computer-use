@@ -76,6 +76,25 @@ The benchmark creates its own non-activating native Edit fixture. It compares re
 
 Both engines receive an untimed warmup before measured new-process samples. Runtime downloads, helper file compilation caches and OS caches are therefore warm; process-cold means a new controller process, not installation-cold or clean OS. Health payloads differ, so health timing alone is not an equivalent-feature comparison. Native-ready and verified-workflow timings compare useful equivalent effects. Pi model/agent overhead is excluded. JSON includes versions, OS/CPU, artifact hashes, individual samples, aggregates and methodology. Use at least three repetitions; no statistical significance is claimed from three samples. Set `PI_CU_RELEASE_OUTPUT` for `benchmark.json`.
 
+## Dedicated physical-input runners
+
+These runners require **Windows Node on a dedicated interactive test desktop**. A WSL `npm` command normally runs Linux Node and is not the right entry point. Build the checkout and call the health tool once to provision the verified private runtime. Then open Windows PowerShell on the dedicated desktop, change to the built checkout, read the runner sources, and use the tested Windows x64 runtime:
+
+```powershell
+$piCuRuntime = Join-Path $env:LOCALAPPDATA 'pi-computer-use\runtime\node-22.23.4-win-x64\node.exe'
+$env:PI_CU_DEDICATED_INPUT_DESKTOP = '1'
+try {
+    & $piCuRuntime .\tests\native-pointer-physical.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Pointer checks failed; stop and inspect the output.' }
+    & $piCuRuntime .\tests\native-text-physical.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Text/clipboard checks failed; inspect the output.' }
+} finally {
+    Remove-Item Env:PI_CU_DEDICATED_INPUT_DESKTOP
+}
+```
+
+This path matches the tested runtime pin in this release; use the package's verified runtime if that pin changes. These commands send real input and the text runner replaces clipboard contents temporarily. They have **not** been run on the ordinary user desktop. Record their output alongside the remaining manual checks below; passing scripted cases alone is not full acceptance.
+
 ## Manual release gates
 
 These remain **pending until a named person records the environment, steps, expected/actual results and evidence**. The user planned to perform acceptance testing.

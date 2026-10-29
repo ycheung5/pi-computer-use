@@ -1,4 +1,4 @@
-// Background actions only, against dedicated disposable controls. No physical input.
+// Opt-in dedicated-desktop checks: sends real pointer input. Read docs/pointer.md first.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
