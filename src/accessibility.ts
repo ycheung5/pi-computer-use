@@ -25,6 +25,9 @@ const view = {
   },
   includeOffscreen: { type: "boolean", default: false },
 } satisfies Record<string, Property>;
+const browser = {
+  browserTab: { type: "string", minLength: 1 },
+} satisfies Record<string, Property>;
 const detail = {
   detailLevel: {
     type: "string",
@@ -52,11 +55,12 @@ const definitions: Record<
   { properties: Record<string, Property>; required?: string[] }
 > = {
   accessibility_tree: {
-    properties: { ...target, ...view, ...detail, ...tree },
+    properties: { ...target, ...browser, ...view, ...detail, ...tree },
   },
   snapshot: {
     properties: {
       ...target,
+      ...browser,
       ...view,
       ...detail,
       ...tree,
@@ -70,6 +74,7 @@ const definitions: Record<
   find: {
     properties: {
       ...target,
+      ...browser,
       ...view,
       ...tree,
       query: { type: "string", minLength: 1 },

@@ -16,7 +16,9 @@
     "docs/windows.md",
     "docs/ownership.md",
     "assets/",
-    "docs/stopping.md"
+    "docs/stopping.md",
+    "docs/browser.md",
+    "assets/puppeteer-LICENSE.txt"
   ],
   "pi": {
     "extensions": [
@@ -43,7 +45,8 @@
     "test:ownership": "node tests/ownership-host.mjs",
     "test:native:capture": "node tests/native-capture.mjs",
     "test:native:ocr": "node tests/native-ocr.mjs",
-    "test:stop": "node tests/stop-host.mjs"
+    "test:stop": "node tests/stop-host.mjs",
+    "test:browser": "node tests/browser-host.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
@@ -60,5 +63,8 @@
   "overrides": {
     "undici": "8.12.2",
     "esbuild": "0.28.1"
+  },
+  "dependencies": {
+    "puppeteer-core": "25.16.0"
   }
 }
