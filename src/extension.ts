@@ -5,6 +5,7 @@ import { controlTools, observationTools } from "./accessibility.js";
 import { screenshotContent } from "./capture.js";
 import { WorkerClient, type WorkerClientOptions } from "./client.js";
 import { nativeWorkerLaunch } from "./launcher.js";
+import { ocrParameters } from "./ocr.js";
 
 export function registerComputerUse(
   pi: Pick<ExtensionAPI, "registerTool" | "on"> &
@@ -153,7 +154,9 @@ export function registerComputerUse(
       name: `windows_computer_use_${action}`,
       label: action.replaceAll("_", " "),
       description:
-        "Operate freshly observed Windows controls in the background. Unsupported physical fallbacks are explicitly gated; dispatch alone does not verify task success.",
+        action === "set_value"
+          ? 'Set a native control value or browser field; "new-tab" opens an isolated browser tab and "<tab>:address" navigates it. Physical fallbacks stay guarded.'
+          : "Operate freshly observed controls in the background. Unsupported physical fallbacks are explicitly gated; dispatch alone does not verify task success.",
       parameters: Type.Unsafe<Record<string, unknown>>(parameters),
       executionMode: "sequential",
       async execute(_toolCallId, args, signal, _onUpdate, ctx) {
@@ -177,6 +180,7 @@ export function registerComputerUse(
           default: "active_window",
         }),
       ),
+      browserTab: Type.Optional(Type.String({ minLength: 1 })),
       windowTitle: Type.Optional(Type.String({ minLength: 1 })),
       processId: Type.Optional(Type.Integer({ minimum: 1 })),
       nativeWindowHandle: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -190,6 +194,17 @@ export function registerComputerUse(
       return screenshotContent(
         await executeDesktop("screenshot", args, signal, ctx),
       );
+    },
+  });
+  pi.registerTool({
+    name: "windows_computer_use_ocr",
+    label: "OCR",
+    description:
+      "Read screen text with literal query matching and screen-space bounds. OCR candidates are not control IDs; occluded captures remain inconclusive.",
+    parameters: Type.Unsafe<Record<string, unknown>>(ocrParameters),
+    executionMode: "sequential",
+    async execute(_id, args, signal, _onUpdate, ctx) {
+      return screenshotContent(await executeDesktop("ocr", args, signal, ctx));
     },
   });
   pi.on("session_shutdown", async () => {

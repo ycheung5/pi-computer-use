@@ -17,6 +17,7 @@ Read the row matching the task; follow section links before reading whole docume
 | Stop command, listener and physical-input gate | [Stopping](stopping.md) |
 | Desktop ownership and operation lifecycle | [Ownership](ownership.md) |
 | Native window discovery and validation | [Windows discovery](windows.md), [accessibility observations](windows.md#accessibility-observations) |
+| Browser read channel and fixtures | [Browser](browser.md) |
 | Domain-document consumer rules | [Domain docs](agents/domain.md) |
 
 ## Repository layout
