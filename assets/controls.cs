@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Threading;
 using System.Runtime.InteropServices;
 using System.Windows.Automation;
 
@@ -15,28 +17,82 @@ partial class WindowsBridge {
   [DllImport("user32.dll",EntryPoint="SendMessageTimeoutW",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr ControlText(IntPtr window,uint message,UIntPtr wParam,string text,uint flags,uint timeout,out UIntPtr result);
   [DllImport("user32.dll")] static extern int GetScrollPos(IntPtr window,int bar);
 
+  // Shared in-process observer: never calls UIA and never captures text.
+  // Only our tagged SendInput and exactly expected SetCursorPos moves are
+  // excluded; physical and foreign injected input both invalidate restoration.
+  static readonly UIntPtr OwnedInputMarker=new UIntPtr(0x50494355);
+  sealed class InteractionGuard {
+    delegate IntPtr Hook(int code,IntPtr message,IntPtr data);
+    [StructLayout(LayoutKind.Sequential)] struct Mouse {public ControlPoint Point;public uint Data,Flags,Time;public UIntPtr Extra;}
+    [StructLayout(LayoutKind.Sequential)] struct Key {public uint Code,Scan,Flags,Time;public UIntPtr Extra;}
+    [StructLayout(LayoutKind.Sequential)] struct Message {public IntPtr Window;public uint Id;public UIntPtr W;public IntPtr L;public uint Time;public ControlPoint Point;public uint Private;}
+    [DllImport("user32.dll",SetLastError=true)] static extern IntPtr SetWindowsHookEx(int kind,Hook callback,IntPtr module,uint thread);
+    [DllImport("user32.dll")] static extern bool UnhookWindowsHookEx(IntPtr hook);
+    [DllImport("user32.dll")] static extern IntPtr CallNextHookEx(IntPtr hook,int code,IntPtr message,IntPtr data);
+    [DllImport("user32.dll")] static extern int GetMessage(out Message message,IntPtr window,uint first,uint last);
+    [DllImport("user32.dll")] static extern bool TranslateMessage(ref Message message);
+    [DllImport("user32.dll")] static extern IntPtr DispatchMessage(ref Message message);
+    [DllImport("kernel32.dll",CharSet=CharSet.Unicode)] static extern IntPtr GetModuleHandle(string name);
+    sealed class ExpectedMove {public int X,Y;public long Until;}
+    static readonly object gate=new object();
+    static readonly Queue<ExpectedMove> expected=new Queue<ExpectedMove>();
+    static readonly ManualResetEvent ready=new ManualResetEvent(false);
+    static readonly Hook mouseCallback=OnMouse,keyCallback=OnKey;
+    static bool started;static volatile bool available;static long activity;
+    readonly long baseline;
+    static IntPtr OnMouse(int code,IntPtr message,IntPtr data) {
+      if(code>=0) {
+        Mouse input=(Mouse)Marshal.PtrToStructure(data,typeof(Mouse));bool ours=(input.Flags & 1)!=0 && input.Extra==OwnedInputMarker;
+        if(!ours && message.ToInt64()==0x200)lock(gate) {
+          long now=Stopwatch.GetTimestamp();while(expected.Count>0 && expected.Peek().Until<now)expected.Dequeue();
+          ExpectedMove[] moves=expected.ToArray();for(int i=0;i<moves.Length;i++)if(moves[i].X==input.Point.X && moves[i].Y==input.Point.Y){for(int remove=0;remove<=i;remove++)expected.Dequeue();ours=true;break;}
+        }
+        if(!ours)Interlocked.Increment(ref activity);
+      }
+      return CallNextHookEx(IntPtr.Zero,code,message,data);
+    }
+    static IntPtr OnKey(int code,IntPtr message,IntPtr data) {
+      if(code>=0){Key input=(Key)Marshal.PtrToStructure(data,typeof(Key));if((input.Flags & 0x10)==0 || input.Extra!=OwnedInputMarker)Interlocked.Increment(ref activity);}
+      return CallNextHookEx(IntPtr.Zero,code,message,data);
+    }
+    static void Ensure() {
+      lock(gate)if(!started){started=true;Thread thread=new Thread(delegate(){
+        IntPtr mouse=SetWindowsHookEx(14,mouseCallback,GetModuleHandle(null),0),key=SetWindowsHookEx(13,keyCallback,GetModuleHandle(null),0);
+        available=mouse!=IntPtr.Zero && key!=IntPtr.Zero;ready.Set();
+        try {if(available){Message message;while(GetMessage(out message,IntPtr.Zero,0,0)>0){TranslateMessage(ref message);DispatchMessage(ref message);}}}
+        finally {available=false;if(mouse!=IntPtr.Zero)UnhookWindowsHookEx(mouse);if(key!=IntPtr.Zero)UnhookWindowsHookEx(key);}
+      });thread.IsBackground=true;thread.Start();}
+      if(!ready.WaitOne(1000) || !available)throw new InvalidOperationException("USER_ACTIVITY_OBSERVER_UNAVAILABLE: no input sent");
+    }
+    public InteractionGuard(){Ensure();baseline=Interlocked.Read(ref activity);}
+    public bool Undisturbed {get {return available && baseline==Interlocked.Read(ref activity);}}
+    public void Check(){if(!Undisturbed)throw new InvalidOperationException("USER_INPUT_CHANGED: intervening input stopped automation");}
+    public static bool Move(int x,int y) {
+      lock(gate)expected.Enqueue(new ExpectedMove{X=x,Y=y,Until=Stopwatch.GetTimestamp()+Stopwatch.Frequency/10});
+      return SetCursorPos(x,y);
+    }
+  }
+
   static HashSet<long> ControlPopups(uint owner,IntPtr target) {
     HashSet<long> found=new HashSet<long>();
     EnumWindows(delegate(IntPtr window,IntPtr ignored) { if(window!=target && IsWindowVisible(window) && WindowOwner(window)==owner && (GetWindow(window,4)!=IntPtr.Zero || (ControlStyle(window,-16).ToInt64() & 0x80000000L)!=0))found.Add(window.ToInt64());return true; },IntPtr.Zero);
     return found;
   }
-  static void RestoreControlState(Dictionary<string,object> result,IntPtr before,ControlPoint pointer,IntPtr window,AutomationElement element,HashSet<long> popups,bool keep) {
+  static void RestoreControlState(Dictionary<string,object> result,IntPtr before,ControlPoint pointer,IntPtr window,HashSet<long> popups,bool keep,InteractionGuard interaction) {
     ControlPoint now;
-    if(GetCursorPos(out now) && (now.X!=pointer.X || now.Y!=pointer.Y)) {
-      try { if(element!=null && element.Current.BoundingRectangle.Contains(new System.Windows.Point(now.X,now.Y))) { SetCursorPos(pointer.X,pointer.Y);result["pointer"]="returned (provider moved it)"; } else result["pointer"]="left where user or provider moved it"; }
-      catch(Exception error) {result["pointer"]="left: provider state unavailable ("+error.Message+")";}
-    } else result["pointer"]="unchanged";
+    result["pointer"]=GetCursorPos(out now) && now.X==pointer.X && now.Y==pointer.Y?"unchanged":"left: movement was not proven to be ours";
     IntPtr after=GetForegroundWindow();
-    if(after==before) {result["foreground"]="unchanged";return;}
-    if(keep) {result["foreground"]="kept (activate:true)";return;}
-    if(window==IntPtr.Zero || WindowOwner(after)!=WindowOwner(window)) {result["foreground"]="left: another process is in front";return;}
+    if(after==before){result["foreground"]="unchanged";return;}
+    if(window==IntPtr.Zero || after!=window){result["foreground"]="left: another window is in front";return;}
+    if(keep){result["foreground"]="kept (activate:true)";return;}
+    if(interaction==null || !interaction.Undisturbed){result["foreground"]="left: user activity or unavailable movement evidence";return;}
     uint ignoredOwner;uint thread=GetWindowThreadProcessId(window,out ignoredOwner);
-    ControlGuiInfo info=new ControlGuiInfo { Size=(uint)Marshal.SizeOf(typeof(ControlGuiInfo)) };
+    ControlGuiInfo info=new ControlGuiInfo {Size=(uint)Marshal.SizeOf(typeof(ControlGuiInfo))};
     bool menu=GetGUIThreadInfo(thread,ref info) && (info.Flags & 0x1C)!=0;
     HashSet<long> opened=ControlPopups(WindowOwner(window),window);opened.ExceptWith(popups);
-    if(menu || opened.Count>0) {result["foreground"]="kept: action opened menu or dialog";return;}
-    if(before!=IntPtr.Zero && IsWindow(before) && SetForegroundWindow(before)) result["foreground"]="returned (provider activated target)";
-    else result["foreground"]="kept: Windows refused restoration or prior window disappeared";
+    if(menu || opened.Count>0){result["foreground"]="kept: action opened menu or dialog";return;}
+    if(before!=IntPtr.Zero && IsWindow(before) && interaction.Undisturbed && SetForegroundWindow(before))result["foreground"]="returned (provider activated intended target)";
+    else result["foreground"]="kept: restoration refused or prior window disappeared";
   }
   static bool NativeButton(AutomationElement element) {
     IntPtr handle=new IntPtr(element.Current.NativeWindowHandle);if(handle==IntPtr.Zero)return false;
@@ -90,9 +146,10 @@ partial class WindowsBridge {
   }
   static object ExecuteControl(string action,Dictionary<string,object> args) {
     Dictionary<string,object> result=Result(true,action);
-    IntPtr before=GetForegroundWindow(),window=IntPtr.Zero;ControlPoint pointer;GetCursorPos(out pointer);
-    AutomationElement element=null;HashSet<long> popups=new HashSet<long>();
+    IntPtr before=IntPtr.Zero,window=IntPtr.Zero;ControlPoint pointer=new ControlPoint();
+    AutomationElement element=null;HashSet<long> popups=new HashSet<long>();InteractionGuard interaction=null;
     try {
+      interaction=new InteractionGuard();before=GetForegroundWindow();GetCursorPos(out pointer);
       PruneElements();element=ResolveObservedElement(TextOption(args,"elementId",""),args,out window);popups=ControlPopups(WindowOwner(window),window);
       if(!element.Current.IsEnabled)throw new InvalidOperationException("ELEMENT_DISABLED: control is disabled");
       object raw;
@@ -128,7 +185,7 @@ partial class WindowsBridge {
       else result["error"]=error.Message;
       if(error.Message.StartsWith("WCU_NEEDS_INPUT",StringComparison.Ordinal))result["inputRequired"]=true;
     }
-    finally {RestoreControlState(result,before,pointer,window,element,popups,Option(args,"activate",false));}
+    finally {RestoreControlState(result,before,pointer,window,popups,Option(args,"activate",false),interaction);}
     return result;
   }
 }

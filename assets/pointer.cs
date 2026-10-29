@@ -16,7 +16,7 @@ partial class WindowsBridge {
   [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
   [DllImport("user32.dll")] static extern uint GetDoubleClickTime();
   static void PointerSend(uint flags,int data) {
-    PointerInput item=new PointerInput {Type=0,Data=new InputUnion { Mouse=new MouseInput { Flags=flags,Data=unchecked((uint)data) }}};
+    PointerInput item=new PointerInput {Type=0,Data=new InputUnion { Mouse=new MouseInput { Flags=flags,Data=unchecked((uint)data),Extra=OwnedInputMarker }}};
     if(SendInput(1,new PointerInput[]{item},Marshal.SizeOf(typeof(PointerInput)))!=1)throw new InvalidOperationException("INPUT_DISPATCH_UNCONFIRMED: Windows rejected input; observe before retrying");
   }
   static string pointerOperation="";
@@ -61,16 +61,20 @@ partial class WindowsBridge {
     },IntPtr.Zero);
     return underneath;
   }
+  static bool PointerRootAllowed(IntPtr root,IntPtr source,uint owner) {
+    if(root==IntPtr.Zero || !IsWindow(root) || !IsWindowEnabled(root) || WindowOwner(root)!=owner)return false;
+    if(root==source)return true;
+    return IsWindowVisible(root) && ControlPopups(owner,source).Contains(root.ToInt64());
+  }
   static void PointerCheck(EventWaitHandle cancel,IntPtr window,uint owner,ControlPoint point,bool foreground,bool requireForeground=true) {
     if(pointerListener==null || pointerListener.HasExited)throw new InvalidOperationException("STOP_LISTENER_UNAVAILABLE: listener exited; stop input");
     if(cancel.WaitOne(0))throw new InvalidOperationException("COMPUTER_USE_STOPPED");
-    if(!IsWindow(window) || WindowOwner(window)!=owner || !IsWindowEnabled(window) || !IsWindowVisible(window) || IsIconic(window))throw new InvalidOperationException("TARGET_IDENTITY_CHANGED: intended window is unavailable");
-    if(foreground && requireForeground && GetForegroundWindow()!=window)throw new InvalidOperationException("TARGET_FOREGROUND_CHANGED: user or another application changed foreground");
-    Rect bounds;if(!GetWindowRect(window,out bounds) || point.X<bounds.Left || point.X>=bounds.Right || point.Y<bounds.Top || point.Y>=bounds.Bottom)throw new InvalidOperationException("POINT_OUTSIDE_TARGET");
-    if(!foreground)return;
-    IntPtr hit=PointerWindowAt(point,pointerListener.Id);
-    // Same-process overlapping windows are still occlusion: check root identity.
-    if(hit==IntPtr.Zero || GetAncestor(hit,2)!=window || WindowOwner(hit)!=owner)throw new InvalidOperationException("POINT_OCCLUDED: point is covered by another window");
+    if(owner==(uint)pointerListener.Id || !IsWindow(window) || WindowOwner(window)!=owner || !IsWindowVisible(window) || IsIconic(window))throw new InvalidOperationException("TARGET_IDENTITY_CHANGED: intended source window is unavailable");
+    if(foreground && requireForeground && !PointerRootAllowed(GetForegroundWindow(),window,owner))throw new InvalidOperationException("TARGET_FOREGROUND_CHANGED: intended app is no longer in front");
+    Rect bounds;bool inside=GetWindowRect(window,out bounds) && point.X>=bounds.Left && point.X<bounds.Right && point.Y>=bounds.Top && point.Y<bounds.Bottom;
+    if(!foreground && inside)return;
+    IntPtr hit=PointerWindowAt(point,pointerListener.Id),root=GetAncestor(hit,2);
+    if(!PointerRootAllowed(root,window,owner))throw new InvalidOperationException(inside?"POINT_OCCLUDED: another window covers the point":"POINT_OUTSIDE_TARGET: point is neither source nor its visible menu/dialog");
   }
   static ControlPoint PointerLocation(Dictionary<string,object> args,AutomationElement element) {
     if(args.ContainsKey("x") && args.ContainsKey("y"))return new ControlPoint {X=NumberOption(args,"x",0),Y=NumberOption(args,"y",0)};
@@ -83,13 +87,18 @@ partial class WindowsBridge {
   static bool BackgroundPointer(string action,Dictionary<string,object> args,AutomationElement element,IntPtr window,Dictionary<string,object> result) {
     ControlPoint screen=PointerLocation(args,element),client=screen;
     if(element==null)screen=HomePointerPoint(window,screen,result);
-    Rect bounds;if(!GetWindowRect(window,out bounds) || screen.X<bounds.Left || screen.X>=bounds.Right || screen.Y<bounds.Top || screen.Y>=bounds.Bottom)throw new InvalidOperationException("POINT_OUTSIDE_TARGET");
-    IntPtr recipient=element==null?window:new IntPtr(element.Current.NativeWindowHandle);
+    Rect bounds;IntPtr destination=window;
+    if(!GetWindowRect(window,out bounds))throw new InvalidOperationException("TARGET_IDENTITY_CHANGED");
+    if(screen.X<bounds.Left || screen.X>=bounds.Right || screen.Y<bounds.Top || screen.Y>=bounds.Bottom) {
+      destination=GetAncestor(WindowFromPoint(screen),2);
+      if(!PointerRootAllowed(destination,window,WindowOwner(window)))throw new InvalidOperationException("POINT_OUTSIDE_TARGET");
+    }
+    IntPtr recipient=element==null?destination:new IntPtr(element.Current.NativeWindowHandle);
     if(recipient==IntPtr.Zero)return false;
     if(element==null) {
       for(int level=0;level<64;level++) {client=screen;if(!ScreenToClient(recipient,ref client))return false;IntPtr child=ChildWindowFromPointEx(recipient,client,3);if(child==IntPtr.Zero || child==recipient)break;recipient=child;}
     }
-    if(WindowOwner(recipient)!=WindowOwner(window) || GetAncestor(recipient,2)!=window)throw new InvalidOperationException("ELEMENT_WRONG_OWNER");
+    if(WindowOwner(recipient)!=WindowOwner(window) || !PointerRootAllowed(GetAncestor(recipient,2),window,WindowOwner(window)))throw new InvalidOperationException("ELEMENT_WRONG_OWNER");
     client=screen;if(!ScreenToClient(recipient,ref client) || client.X<0 || client.Y<0 || client.X>32767 || client.Y>32767)return false;
     string button=TextOption(args,"button","left");uint down=button=="right"?0x204U:button=="middle"?0x207U:0x201U;
     uint key=button=="right"?2U:button=="middle"?16U:1U;
@@ -103,12 +112,14 @@ partial class WindowsBridge {
   }
   static object ExecutePointer(string action,Dictionary<string,object> args) {
     Dictionary<string,object> result=Result(true,action);result["cleanupConfirmed"]=true;
-    IntPtr window=IntPtr.Zero,before=GetForegroundWindow();uint owner=0;
-    ControlPoint original;GetCursorPos(out original);ControlPoint last=original;
+    IntPtr window=IntPtr.Zero,before=IntPtr.Zero;uint owner=0;
+    ControlPoint original=new ControlPoint(),last=original;
     bool moved=false,held=false,releaseFailed=false,activated=false;uint up=4;
     AutomationElement element=null;HashSet<long> popups=new HashSet<long>();
+    InteractionGuard interaction=null;
     EventWaitHandle cancel=null;
     try {
+      interaction=new InteractionGuard();before=GetForegroundWindow();GetCursorPos(out original);last=original;
       // Resolve without activation: validate identity and point before any takeover.
       Dictionary<string,object> quiet=new Dictionary<string,object>(args);quiet["activate"]=false;
       if(args.ContainsKey("elementId"))element=ResolveObservedElement(TextOption(args,"elementId",""),quiet,out window);
@@ -154,7 +165,7 @@ partial class WindowsBridge {
         if(p.X<left || p.Y<top || p.X>=left+GetSystemMetrics(78) || p.Y>=top+GetSystemMetrics(79))throw new InvalidOperationException("POINT_OUTSIDE_DESKTOP");
       }
       PointerCheck(cancel,window,owner,path[0],false);
-      if(GetForegroundWindow()!=window && (action!="move" || Option(args,"activate",false))) {
+      if(!PointerRootAllowed(GetForegroundWindow(),window,owner) && (action!="move" || Option(args,"activate",false))) {
         if(!SetForegroundWindow(window) || GetForegroundWindow()!=window)throw new InvalidOperationException("TARGET_ACTIVATION_REFUSED");
         activated=true;
       }
@@ -162,18 +173,19 @@ partial class WindowsBridge {
       int repetitions=action=="double_click"?2:1;
       for(int iteration=0;iteration<repetitions;iteration++) {
         for(int i=0;i<path.Count;i++) {
+          interaction.Check();
           ControlPoint p=path[i],current;GetCursorPos(out current);
           if(moved && (current.X!=last.X || current.Y!=last.Y))throw new InvalidOperationException("USER_INPUT_CHANGED: pointer moved during automation");
           if(action=="drag" && i>0) {
             if(cancel.WaitOne(0) || pointerListener.HasExited)throw new InvalidOperationException("COMPUTER_USE_STOPPED");
-            if(!IsWindow(window) || WindowOwner(window)!=owner || GetForegroundWindow()!=window)throw new InvalidOperationException("TARGET_IDENTITY_CHANGED: source or foreground changed during drag");
+            if(!IsWindow(window) || WindowOwner(window)!=owner)throw new InvalidOperationException("TARGET_IDENTITY_CHANGED: source changed during drag");
           } else PointerCheck(cancel,window,owner,p,true,action!="move" || Option(args,"activate",false));
           NotifyPhysicalInput(true);
-          if(!SetCursorPos(p.X,p.Y))throw new InvalidOperationException("POINTER_MOVE_FAILED");
-          moved=true;last=p;
+          if(!InteractionGuard.Move(p.X,p.Y))throw new InvalidOperationException("POINTER_MOVE_FAILED");
+          moved=true;last=p;interaction.Check();
           if(action=="drag" && i>0) {
             if(cancel.WaitOne(0) || pointerListener.HasExited)throw new InvalidOperationException("COMPUTER_USE_STOPPED");
-            if(!IsWindow(window) || WindowOwner(window)!=owner || GetForegroundWindow()!=window)throw new InvalidOperationException("TARGET_IDENTITY_CHANGED: source or foreground changed during drag");
+            if(!IsWindow(window) || WindowOwner(window)!=owner)throw new InvalidOperationException("TARGET_IDENTITY_CHANGED: source changed during drag");
           } else PointerCheck(cancel,window,owner,p,true,action!="move" || Option(args,"activate",false));
           if(action=="click" || action=="double_click" || (action=="drag" && i==0)) {
             // Set held before the down attempt: uncertain dispatch still requires an up.
@@ -198,9 +210,9 @@ partial class WindowsBridge {
       uint ignored;uint thread=GetWindowThreadProcessId(window,out ignored);ControlGuiInfo info=new ControlGuiInfo {Size=(uint)Marshal.SizeOf(typeof(ControlGuiInfo))};
       HashSet<long> opened=window==IntPtr.Zero?new HashSet<long>():ControlPopups(owner,window);opened.ExceptWith(popups);
       bool popup=opened.Count>0 || (thread!=0 && GetGUIThreadInfo(thread,ref info) && (info.Flags & 0x1C)!=0);
-      if(moved && action!="move" && same && !popup)result["pointer"]=SetCursorPos(original.X,original.Y)?"returned":"restoration refused";
+      if(!releaseFailed && moved && action!="move" && same && !popup && interaction!=null && interaction.Undisturbed)result["pointer"]=InteractionGuard.Move(original.X,original.Y)?"returned":"restoration refused";
       else result["pointer"]=action=="move" && moved?"kept: requested hover":moved?"left: user moved pointer or action opened a popup":"unchanged";
-      if(activated && !Option(args,"activate",false) && GetForegroundWindow()==window && same && !popup && IsWindow(before))result["foreground"]=SetForegroundWindow(before)?"returned":"restoration refused";
+      if(!releaseFailed && activated && !Option(args,"activate",false) && GetForegroundWindow()==window && same && !popup && interaction!=null && interaction.Undisturbed && IsWindow(before))result["foreground"]=SetForegroundWindow(before)?"returned":"restoration refused";
       else result["foreground"]=activated?"kept: requested, user changed focus, or popup opened":"unchanged";
       if(!releaseFailed)NotifyPhysicalInput(false);
     }
