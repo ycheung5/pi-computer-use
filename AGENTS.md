@@ -6,7 +6,7 @@ Start with [docs/README.md](docs/README.md) and read only the sections relevant 
 
 ## Structure
 
-This repository currently contains documentation only. Add application code in `src/`, tests in `tests/`, and packaged resources in `assets/` when needed. Start with flat, responsibility-named modules; introduce subdirectories only when concrete complexity warrants them. Keep host-specific integrations separate from reusable logic.
+Application code lives in `src/`, tests in `tests/`, and packaged resources in `assets/`. Keep flat, responsibility-named modules; introduce subdirectories only when concrete complexity warrants them. Keep host-specific integrations separate from reusable logic.
 
 Maintain the documentation index when adding or moving docs. Keep each requirement in the spec, delivery detail in the plan, and rationale in an ADR; link rather than duplicate.
 
