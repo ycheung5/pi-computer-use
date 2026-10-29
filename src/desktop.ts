@@ -40,3 +40,9 @@ export async function listWindows(
 export async function disposeDesktop(): Promise<void> {
   await nativeDesktop.dispose();
 }
+
+export async function retireDesktop(): Promise<void> {
+  await nativeDesktop.retire(
+    "COMPUTER_USE_STOPPED: native desktop bridge retired after cancellation",
+  );
+}

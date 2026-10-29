@@ -16,8 +16,10 @@
     "assets/node-LICENSE.txt",
     "assets/windows.cs",
     "assets/ownership.cs",
+    "assets/stop.cs",
     "docs/windows.md",
-    "docs/ownership.md"
+    "docs/ownership.md",
+    "docs/stopping.md"
   ],
   "pi": {
     "extensions": [
@@ -39,7 +41,8 @@
     "test:native": "node tests/native-health.mjs",
     "test:native:windows": "node tests/native-windows.mjs",
     "test:wsl": "node tests/wsl-health.mjs",
-    "test:ownership": "node tests/ownership-host.mjs"
+    "test:ownership": "node tests/ownership-host.mjs",
+    "test:stop": "node tests/stop-host.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

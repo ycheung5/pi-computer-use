@@ -5,12 +5,67 @@ import { WorkerClient, type WorkerClientOptions } from "./client.js";
 import { nativeWorkerLaunch } from "./launcher.js";
 
 export function registerComputerUse(
-  pi: Pick<ExtensionAPI, "registerTool" | "on">,
+  pi: Pick<ExtensionAPI, "registerTool" | "on"> &
+    Partial<Pick<ExtensionAPI, "registerCommand">>,
   options: WorkerClientOptions = { launch: nativeWorkerLaunch },
 ): void {
-  const worker = new WorkerClient(options);
   let operationId = randomUUID();
   let operationActive = false;
+  let stopped = false;
+  let operationAbort = new AbortController();
+  let abortRun: (() => void) | undefined;
+  const worker = new WorkerClient({
+    ...options,
+    onStop(id) {
+      options.onStop?.(id);
+      if (id === operationId) stopOperation(false);
+    },
+  });
+  const stopOperation = (notifyWorker = true) => {
+    if (stopped) return;
+    stopped = true;
+    if (notifyWorker) worker.stopOperation(operationId);
+    operationAbort.abort(
+      new Error(
+        "COMPUTER_USE_STOPPED: user stopped this operation; wait for new user input",
+      ),
+    );
+    abortRun?.();
+  };
+  const executeDesktop = async (
+    action: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+    ctx?: { abort: () => void },
+  ) => {
+    if (stopped)
+      throw new Error("COMPUTER_USE_STOPPED: wait for new user input");
+    if (typeof ctx?.abort === "function") abortRun = () => ctx.abort();
+    operationActive = true;
+    const abort = () => stopOperation();
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+    try {
+      return await worker.execute(
+        action,
+        args,
+        signal
+          ? AbortSignal.any([operationAbort.signal, signal])
+          : operationAbort.signal,
+        operationId,
+      );
+    } finally {
+      signal?.removeEventListener("abort", abort);
+    }
+  };
+  pi.registerCommand?.("computer-stop", {
+    description:
+      "Stop the current computer-use operation without waiting for its tools",
+    async handler(_args, ctx) {
+      stopOperation();
+      if (typeof ctx?.abort === "function") ctx.abort();
+    },
+  });
   const endOperation = async () => {
     if (!operationActive) return;
     operationActive = false;
@@ -20,8 +75,11 @@ export function registerComputerUse(
     if (event.messageType !== "user") return;
     await endOperation();
     operationId = randomUUID();
+    stopped = false;
+    operationAbort = new AbortController();
   });
-  pi.on("agent_settled", async () => {
+  pi.on("agent_settled", async (event) => {
+    if (event.aborted) stopOperation();
     await endOperation();
   });
   pi.registerTool({
@@ -52,14 +110,8 @@ export function registerComputerUse(
       ),
     }),
     executionMode: "sequential",
-    async execute(_toolCallId, args, signal) {
-      operationActive = true;
-      const result = await worker.execute(
-        "list_windows",
-        args,
-        signal,
-        operationId,
-      );
+    async execute(_toolCallId, args, signal, _onUpdate, ctx) {
+      const result = await executeDesktop("list_windows", args, signal, ctx);
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
         details: result,
