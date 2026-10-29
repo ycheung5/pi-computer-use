@@ -189,6 +189,10 @@ function validate(
     }
     settings[key] = value;
   }
+  if (settings.browserApp === "firefox" && settings.browserVisible) {
+    settings.browserVisible = false;
+    notices.push("Experimental Firefox automatic launches are headless");
+  }
   if (settings.toolPreset === "auto")
     settings.toolPreset =
       (settings.enabledTools as string[]).length === TOOL_NAMES.length

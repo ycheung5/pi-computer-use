@@ -58,7 +58,8 @@
     "test:native:pointer:physical": "node tests/native-pointer-physical.mjs",
     "test:native:text": "node tests/native-text.mjs",
     "test:native:text:physical": "node tests/native-text-physical.mjs",
-    "test:browser:actions": "node tests/browser-actions-host.mjs"
+    "test:browser:actions": "node tests/browser-actions-host.mjs",
+    "test:browser:firefox:endpoint": "node tests/browser-firefox-endpoint.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

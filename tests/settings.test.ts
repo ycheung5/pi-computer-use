@@ -296,3 +296,33 @@ test("custom presets can deny management itself and queued saves apply after act
     await rm(folder, { recursive: true, force: true });
   }
 });
+
+test("experimental Firefox settings report automatic headless operation", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "pi-cu-firefox-settings-"));
+  const file = join(folder, "settings.json");
+  const worker = new WorkerClient({
+    launch: async () => ({
+      executable: process.execPath,
+      args: [
+        "--import",
+        "tsx",
+        "--input-type=module",
+        "-e",
+        `process.env.PI_CU_SETTINGS_FILE=${JSON.stringify(file)};await import(${JSON.stringify(fileURLToPath(new URL("../src/worker.ts", import.meta.url)))});`,
+      ],
+    }),
+  });
+  try {
+    const result = await worker.execute("settings_update", {
+      changes: { browserApp: "firefox", browserVisible: true },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(
+      (result.settings as { browserVisible: boolean }).browserVisible,
+      false,
+    );
+  } finally {
+    await worker.dispose();
+    await rm(folder, { recursive: true, force: true });
+  }
+});
