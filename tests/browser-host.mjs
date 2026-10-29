@@ -43,6 +43,7 @@ const source = await new Promise((resolve, reject) => {
 });
 const url = source.url;
 process.env.PI_CU_SETTINGS_FILE = source.settings;
+process.env.WSLENV = `${process.env.WSLENV ?? ""}:PI_CU_SETTINGS_FILE:PI_CU_BROWSER_EXECUTABLE`;
 const host = computerUseHost();
 registerComputerUse(host.api);
 const client = {
@@ -96,6 +97,24 @@ try {
   });
   assert.equal(opened.ok, true, JSON.stringify(opened));
   const tab = opened.tab.id;
+  const launched = (await client.execute("list_windows", {})).browserLane
+    .browsers[0];
+  assert.equal(launched.app, process.env.PI_CU_BROWSER_APP);
+  assert.match(launched.version, /\d+\./);
+  assert.match(
+    launched.executable,
+    process.env.PI_CU_BROWSER_APP === "firefox"
+      ? /firefox\.exe$/i
+      : process.env.PI_CU_BROWSER_APP === "edge"
+        ? /msedge\.exe$/i
+        : /chrome\.exe$/i,
+  );
+  assert.equal(
+    launched.headless,
+    process.env.PI_CU_BROWSER_APP === "firefox" ||
+      process.env.PI_CU_BROWSER_VISIBLE === "false",
+  );
+
   const tree = await client.execute("accessibility_tree", { browserTab: tab });
   assert.equal(tree.ok, true, JSON.stringify(tree));
   assert.match(tree.text, /Fixture heading/);
@@ -119,7 +138,12 @@ try {
   assert.equal(shot.ok, true, JSON.stringify(shot));
   const png = Buffer.from(shot.screenshot.base64, "base64");
   assert.equal(png.readUInt32BE(16), shot.screenshot.width);
-  assert.ok(shot.screenshot.width <= 300, "browser image respects maxWidth");
+  if (app === "firefox") {
+    assert.match(shot.screenshot.limitation, /ignores maxWidth/);
+    assert.equal(tree.source, "browser-dom-heuristic");
+    assert.equal(listing.browserLane.browsers[0].visible, false);
+  } else
+    assert.ok(shot.screenshot.width <= 300, "browser image respects maxWidth");
   assert.equal(shot.screenshot.coordinateSpace, "page");
   const after = await foreground();
   assert.equal(
