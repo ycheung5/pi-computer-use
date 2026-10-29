@@ -37,6 +37,9 @@ export class WorkerClient {
   private readonly pending = new Map<number, Pending>();
   private nextId = 0;
   private disposed = false;
+  private failure: Error | undefined;
+  private retirementFailure: Error | undefined;
+  private retirement: Promise<void> | undefined;
   private readonly lifetime = new AbortController();
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -47,6 +50,9 @@ export class WorkerClient {
   ): Promise<ChildProcessWithoutNullStreams> {
     if (this.disposed) throw new Error("WORKER_DISPOSED: session has closed");
     signal?.throwIfAborted();
+    if (this.retirement) await this.retirement;
+    if (this.retirementFailure) throw this.retirementFailure;
+    if (this.child && this.failure) await this.retire(this.failure.message);
     if (this.child) return this.child;
     const launchSignal = signal
       ? AbortSignal.any([signal, this.lifetime.signal])
@@ -118,7 +124,11 @@ export class WorkerClient {
           }
         });
         child.once("error", (error) =>
-          this.fail(child, new Error(`WORKER_START_FAILED: ${error.message}`)),
+          this.fail(
+            child,
+            new Error(`WORKER_START_FAILED: ${error.message}`),
+            child.pid === undefined,
+          ),
         );
         child.once("close", (code) =>
           this.fail(
@@ -126,6 +136,7 @@ export class WorkerClient {
             new Error(
               `WORKER_EXITED: code ${code}${diagnostic ? `; ${diagnostic.trim()}` : ""}`,
             ),
+            true,
           ),
         );
         child.stdin.on("error", (error) =>
@@ -139,9 +150,17 @@ export class WorkerClient {
     return this.starting;
   }
 
-  private fail(child: ChildProcessWithoutNullStreams, error: Error): void {
+  private fail(
+    child: ChildProcessWithoutNullStreams,
+    error: Error,
+    confirmedExit = false,
+  ): void {
     if (this.child !== child) return;
-    this.child = undefined;
+    if (confirmedExit) {
+      this.child = undefined;
+      this.failure = undefined;
+      this.retirementFailure = undefined;
+    } else this.failure = error;
     for (const [id, pending] of this.pending) {
       this.pending.delete(id);
       pending.cleanup();
@@ -231,10 +250,11 @@ export class WorkerClient {
   }
 
   async retire(reason = "WORKER_RETIRED: operation stopped"): Promise<void> {
+    if (this.retirement) return this.retirement;
     const child = this.child;
     if (!child) return;
     this.fail(child, new Error(reason));
-    await new Promise<void>((resolve, reject) => {
+    this.retirement = new Promise<void>((resolve, reject) => {
       let forced: ReturnType<typeof setTimeout> | undefined;
       const timer = setTimeout(() => {
         child.kill();
@@ -255,10 +275,18 @@ export class WorkerClient {
       });
       child.stdin.end();
     });
+    try {
+      await this.retirement;
+    } catch (error) {
+      this.retirementFailure =
+        error instanceof Error ? error : new Error(String(error));
+      throw error;
+    } finally {
+      this.retirement = undefined;
+    }
   }
 
   async dispose(): Promise<void> {
-    if (this.disposed) return;
     this.disposed = true;
     this.lifetime.abort(new Error("WORKER_DISPOSED: session has closed"));
     await this.starting?.catch(() => undefined);

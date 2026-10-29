@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline";
-import { observeDesktop } from "./accessibility.js";
+import { executeAccessibility } from "./accessibility.js";
 import {
   browse,
   browserListing,
@@ -88,18 +88,9 @@ async function dispatch(
     return;
   }
   if (
-    [
-      "click",
-      "double_click",
-      "move",
-      "drag",
-      "scroll",
-      "type_text",
-      "keypress",
-      "focus",
-      "invoke",
-      "set_value",
-    ].includes(request.action) &&
+    ["click", "double_click", "move", "drag", "type_text", "keypress"].includes(
+      request.action,
+    ) &&
     !isBrowserRequest(request.args)
   ) {
     process.stdout.write(
@@ -134,8 +125,16 @@ async function dispatch(
                       "accessibility_tree",
                       "find",
                       "element_info",
+                      "focus",
+                      "invoke",
+                      "set_value",
+                      "scroll",
                     ].includes(request.action)
-                  ? await observeDesktop(request.action, request.args, signal)
+                  ? await executeAccessibility(
+                      request.action,
+                      request.args,
+                      signal,
+                    )
                   : {
                       ok: false,
                       action: request.action,
@@ -210,12 +209,17 @@ input.on("line", (line) => {
     });
 });
 input.on("close", () => {
-  void queue.finally(async () => {
-    await stopping.catch(() => undefined);
-    await disposeBrowser();
-    await disposeDesktop();
-    await disposeOcr();
-    await stopListener.dispose();
-    await disposeOwnership();
-  });
+  void queue
+    .then(async () => {
+      await stopping;
+      await disposeBrowser();
+      await disposeDesktop();
+      await disposeOcr();
+      await stopListener.dispose();
+      await disposeOwnership();
+    })
+    .catch((error) => {
+      // Keep native handles and ownership alive if safe exit cannot be proved.
+      process.stderr.write(`CLEANUP_UNCONFIRMED: ${String(error)}\n`);
+    });
 });

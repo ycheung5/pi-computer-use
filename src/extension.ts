@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { observationTools } from "./accessibility.js";
+import { controlTools, observationTools } from "./accessibility.js";
 import { screenshotContent } from "./capture.js";
 import { WorkerClient, type WorkerClientOptions } from "./client.js";
 import { nativeWorkerLaunch } from "./launcher.js";
@@ -135,27 +135,6 @@ export function registerComputerUse(
       };
     },
   });
-  pi.registerTool({
-    name: "windows_computer_use_set_value",
-    label: "Set Value",
-    description:
-      'Browser navigation: elementId "new-tab" opens an isolated background tab; "<tab>:address" navigates it. Use returned tab IDs with browserTab for page observations. Native control values are added by the desktop action slice.',
-    parameters: Type.Object({
-      elementId: Type.String({ minLength: 1 }),
-      value: Type.String(),
-      fallbackType: Type.Optional(Type.Boolean({ default: true })),
-      restoreClipboard: Type.Optional(Type.Boolean({ default: true })),
-    }),
-    executionMode: "sequential",
-    async execute(_toolCallId, args, signal, _onUpdate, ctx) {
-      const result = await executeDesktop("set_value", args, signal, ctx);
-      return {
-        content: [{ type: "text", text: JSON.stringify(result) }],
-        details: result,
-        isError: !result.ok,
-      };
-    },
-  });
   for (const { action, parameters } of observationTools) {
     pi.registerTool({
       name: `windows_computer_use_${action}`,
@@ -167,6 +146,26 @@ export function registerComputerUse(
       async execute(_toolCallId, args, signal, _onUpdate, ctx) {
         const result = await executeDesktop(action, args, signal, ctx);
         return screenshotContent(result);
+      },
+    });
+  }
+  for (const { action, parameters } of controlTools) {
+    pi.registerTool({
+      name: `windows_computer_use_${action}`,
+      label: action.replaceAll("_", " "),
+      description:
+        action === "set_value"
+          ? 'Set a native control value or browser field; "new-tab" opens an isolated browser tab and "<tab>:address" navigates it. Physical fallbacks stay guarded.'
+          : "Operate freshly observed controls in the background. Unsupported physical fallbacks are explicitly gated; dispatch alone does not verify task success.",
+      parameters: Type.Unsafe<Record<string, unknown>>(parameters),
+      executionMode: "sequential",
+      async execute(_toolCallId, args, signal, _onUpdate, ctx) {
+        const result = await executeDesktop(action, args, signal, ctx);
+        return {
+          content: [{ type: "text", text: JSON.stringify(result) }],
+          details: result,
+          isError: !result.ok,
+        };
       },
     });
   }

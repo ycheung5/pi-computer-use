@@ -50,6 +50,18 @@ Chromium observations probe renderer accessibility and report `webContent` readi
 
 Live evidence: Windows 11 x64, .NET Framework bridge, native form fixtures and installed Edge passed on 2026-10-29. Elevated/UAC target access and five-minute real-time expiry remain release cases. Snapshot now includes a separate PNG by default, preserves explicit UIA failure when an image is attached, and honors `includeScreenshot: false`. Like the reference, `captureWindow: false` defaults to desktop pixels; `captureWindow: true` captures the selected window. Sparse empty-find OCR composition remains assigned to the OCR slice, with `ocrFallbackPending` explicit until integrated. Browser-channel routing is added by the browser slices, not inferred from desktop UIA support.
 
+## Background controls
+
+`focus`, `invoke`, `set_value` and element-targeted `scroll` operate only on fresh observed references and validate the requested owning window. Native Win32 buttons use background button messages, native edit fields use selection/replacement messages without clipboard or keyboard input, and scrolling prefers the nearest native scrollable control before UIA ScrollPattern. Other controls use their supported UIA patterns. Expand/collapse is idempotent; scroll-into-view uses ScrollItemPattern.
+
+A guard records foreground/pointer state around provider calls and attempts restoration when the target's provider took them. It preserves a newly opened menu/dialog, an explicit `activate: true`, and intervening user changes. Windows may refuse foreground restoration; result metadata states what happened. A pointer change outside the control is left alone rather than assumed to belong to automation.
+
+Results report `verification: sent`, not task completion. Use an explicit observation/wait to verify effects. Read-only, disabled, stale and wrong-owner controls fail explicitly. An unavailable background pattern returns `WCU_NEEDS_INPUT` with `inputRequired: true` only when the requested fallback permits it; no physical input is sent. Coordinate scrolling and all physical fallback execution stay gated pending the guarded-input slice.
+
+Run `npm run test:native:controls` with Windows Node after build. It creates a dedicated form, proves Unicode native editing, button dispatch, focus, actual element-scroll state change, read-only refusal, unsupported-pattern/fallback distinction and wrong-owner/stale rejection through registered Pi tools, then closes the fixture. It sends no physical input. Expand/collapse across provider families and menu/dialog/user-interference restoration require additional release fixtures/manual cases; this test does not claim universal provider coverage.
+
+Before targetless physical input is enabled, propagate operation identity into native last-input-window tracking: returning the user's foreground must not redirect the agent's later typing or observations to that user's window. That state is not introduced by these background-only actions.
+
 ## OCR and sparse accessibility fallback
 
 `windows_computer_use_ocr` captures through the same screenshot module, then recognizes that PNG in a separate WinRT OCR process. Options preserve the reference target/scope conventions, `maxWidth: 1920` (0–7680), optional literal `query`, `resolveControl: false` and `includeScreenshot: false`. Output lines/words and matched union boxes use physical screen coordinates, applying both horizontal and vertical image scales. Text matching ignores case and whitespace, supports contiguous CJK word runs, treats regex characters literally, and returns at most three line matches.

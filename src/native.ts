@@ -115,7 +115,7 @@ export async function compileNative(
 export const nativeDesktop = new WorkerClient({
   launch: async (signal) => {
     const names = ["windows.cs"];
-    for (const name of ["accessibility.cs", "capture.cs"]) {
+    for (const name of ["accessibility.cs", "capture.cs", "controls.cs"]) {
       try {
         await access(
           fileURLToPath(new URL(`../assets/${name}`, import.meta.url)),
