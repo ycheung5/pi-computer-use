@@ -10,7 +10,7 @@ The explicit stop control bypasses the worker request queue. The worker blocks t
 
 ## Physical input contract
 
-Pointer actions now use the cancellation event and report `inputReady: true` with an explicit `readyActions` list; keyboard actions remain gated. See [pointer guards and physical acceptance](pointer.md). Each enabled action must:
+Pointer and keyboard actions use the cancellation event and report `inputReady: true` with an explicit `readyActions` list. See [pointer guards](pointer.md) and [text/clipboard cleanup](text.md) for pending physical acceptance. Each enabled action must:
 
 1. Arms the independent listener before sending input and checks the operation's cancellation event.
 2. Checks cancellation between input steps and releases every held key/button in `finally`.

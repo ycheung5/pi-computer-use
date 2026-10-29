@@ -22,7 +22,7 @@ try {
   assert.equal(prepared.hookInstalled, true);
   assert.equal(prepared.inputReady, true);
   assert.ok(prepared.readyActions.includes("drag"));
-  assert.ok(!prepared.readyActions.includes("keypress"));
+  assert.ok(prepared.readyActions.includes("keypress"));
   assert.match(prepared.cancelEvent, /^Local\\PiComputerUseStop-/);
   worker.stopOperation(operation);
   const deadline = Date.now() + 3000;

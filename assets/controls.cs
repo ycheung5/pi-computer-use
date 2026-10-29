@@ -96,7 +96,7 @@ partial class WindowsBridge {
       PruneElements();element=ResolveObservedElement(TextOption(args,"elementId",""),args,out window);popups=ControlPopups(WindowOwner(window),window);
       if(!element.Current.IsEnabled)throw new InvalidOperationException("ELEMENT_DISABLED: control is disabled");
       object raw;
-      if(action=="focus") {element.SetFocus();result["method"]="uia_focus";}
+      if(action=="focus") {ForgetTextFocus();element.SetFocus();RememberTextFocus(window,new IntPtr(element.Current.NativeWindowHandle));result["method"]="uia_focus";}
       else if(action=="set_value") {
         if(element.TryGetCurrentPattern(ValuePattern.Pattern,out raw) && ((ValuePattern)raw).Current.IsReadOnly)throw new InvalidOperationException("READ_ONLY: control does not accept value changes");
         if(NativeValue(element,TextOption(args,"value","")))result["method"]="native_edit";
