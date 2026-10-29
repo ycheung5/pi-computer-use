@@ -89,12 +89,12 @@ These remain **pending until a named person records the environment, steps, expe
 - [ ] Human visual indicator lifetime, large cursor, screenshot exclusion, monitor changes and remote/screen-sharing/recording visibility. Confirm actual Chromium border/page cues; API success is not visual acceptance.
 - [ ] Interactive sign-in in dedicated kept profiles and clear-profile workflow; daily profiles remain untouched. Cookie fixtures are not human login-flow proof.
 - [ ] Missing OCR languages, protected/elevated windows and unsupported provider behavior report limitations honestly.
-- [ ] Resolve any visible-browser foreground preservation failure before release; do not waive it because headless tests passed.
+- [ ] Complete broader visible-browser foreground preservation acceptance, including native dialogs and user interference. The focused nonmodal check below passed; it does not establish every visible workflow.
 - [ ] Record representative user workflows and benchmark regressions, then user acceptance. No overall release/parity completion claim until unresolved gates are addressed or explicitly accepted.
 
 ## Review trace and evidence
 
-Independent review at integration `3771e77` separated Standards and Spec axes. Standards found no hard rule breaches and two judgement calls (duplicate guarded-input lifecycle and obsolete optional native-source handling). Spec found user-interference restoration and browser key-alias gaps. Root additionally identified popup targeting/drag activation parity cases. A single corrective worktree handles those findings; this validation slice does not silently rewrite feature behavior. Record its commit and rerun relevant checks after integration; physical restoration/drag acceptance remains pending even after passive fixes.
+Independent review at integration `3771e77` separated Standards and Spec axes. Standards found no hard rule breaches and two judgement calls (duplicate guarded-input lifecycle and obsolete optional native-source handling). Spec found user-interference restoration and browser key-alias gaps. Root additionally identified popup targeting/drag activation parity cases. Corrective work landed in `5fd9d12` and `29a8a13`, merged as `a7ae50f`. Independent re-review of that candidate reported **Standards: zero unresolved findings; Spec: zero unresolved findings**. Physical restoration/drag acceptance remains pending even after passive fixes and clean reviews.
 
 Initial production preflight at `b988e86` passed real Pi CLI health/list execution and cleanup on both hosts using a production omit-peer install. Updated checked-in runners must be rerun against the final corrected integration before release. See the generated sanitized reports for exact versions/timings rather than promoting historical successful runs into current full-parity evidence.
 
@@ -113,3 +113,19 @@ The three-sample same-machine background benchmark produced these means (millise
 Environment: same private Node executable and AMD Ryzen 9 7940HS/Windows build 26200; alternating engine order, warm compilation/runtime caches. These numbers support only the benchmarked background-edit path; they are not whole-product speedups, installation-cold measurements or physical/browser/model-driven workflow evidence. Rerun the checked-in harness after corrective changes rather than extrapolating these samples.
 
 Seventeen serialized passive suites also passed on this validation slice: native health/windows/accessibility/capture/OCR/controls/waits/window-management/pointer-guards/text, cross-host ownership/stopping/settings/offscreen indicators, and headless Edge reads/actions/profiles. These are the named configured runners in the coverage map; Chromium/Firefox cross-browser results from their feature slices remain documented in [browser validation](browser.md), and must be rechecked where corrective changes affect them.
+
+## Corrected-candidate rechecks
+
+Against `a7ae50f` on 2026-10-29, configured type/lint checks and 42 portable tests passed, the production package's 83 entries had no broken documentation links, and schema comparison still matched all 25 reference tools/parameters. Real Pi CLI loading and health/list execution passed again from both WSL2 and native Windows processes with dev/peer dependencies omitted, empty stderr, final settlement and confirmed worker exit. This remains a clean package install on the existing machine, not a clean-OS or physical acceptance claim.
+
+Representative Firefox 144.0 read/actions and external-endpoint preservation passed using the official unmodified executable staged on the Windows local filesystem. A previous attempt to spawn its UNC-extracted executable failed before browser actions; it was not accepted as a product result. Shared Chromium-only cue assertions were corrected in the action fixture so Firefox's documented lack of cues is tested rather than dereferenced as an assumed Chromium capability. Full Firefox actions, including the restored key aliases, and external process/tab preservation then passed.
+
+Targeted corrected native controls, same-process popup guards, background text and window management passed without physical input or clipboard mutation. These checks supplement the earlier passive batch; the entire batch was not repeated without a new concern.
+
+Corrected headless Edge actions also passed. Because shared activation/restoration code changed the timed path, the same three-sample benchmark was rerun: reference/Pi means were health **2233.11/389.47 ms**, native-ready **2860.27/1028.12 ms**, warm find **205.20/25.53 ms**, direct background dispatch **151.65/12.55 ms**, and verified workflow **355.06/28.65 ms**. The methodology and limitations above are unchanged; no broad performance or physical-workflow claim follows from these fixture samples.
+
+### Focused visible foreground diagnosis
+
+Run `npm run test:browser:foreground` with Windows Node after building, serialized with other live fixtures. It starts an isolated visible Edge profile and samples foreground HWND/PID/process plus last-input tick before opening, after opening/reading/value-setting/nonmodal click, after settlement and after disposal. PowerShell probe windows are hidden and their unused stdin is closed; probe PIDs are included to expose console contamination. No native dialogs, physical input, clipboard actions or daily profiles are involved.
+
+The corrected candidate retained the **same original foreground HWND/PID and last-input tick through every sampled stage**; the owned browser PID and each probe PID were different. Classification: `preserved`. The previous broad visible fixture's HWND change was not reproduced in this controlled case. Its earlier cause is not proven to be a product defect, a probe console or user/native-dialog interference; do not infer a general cause from the focused pass. Human visual cues, dialogs and broader visible foreground acceptance remain manual gates.
