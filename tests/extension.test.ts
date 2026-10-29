@@ -94,6 +94,8 @@ test("Pi observation tools expose argument failures through normal execution", a
       "find",
       "element_info",
       "ocr",
+      "wait",
+      "wait_for",
     ]) {
       const tool = tools.find(
         (item) => item.name === `windows_computer_use_${action}`,

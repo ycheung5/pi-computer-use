@@ -181,15 +181,32 @@ export class WorkerClient {
     signal?.throwIfAborted();
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.fail(
-          child,
-          new Error(
-            `WORKER_TIMEOUT: ${action} exceeded the execution deadline; input was not replayed`,
-          ),
-        );
-        child.kill();
-      }, this.options.timeoutMs ?? 30_000);
+      const timer = setTimeout(
+        () => {
+          this.fail(
+            child,
+            new Error(
+              `WORKER_TIMEOUT: ${action} exceeded the execution deadline; input was not replayed`,
+            ),
+          );
+          child.kill();
+        },
+        Math.max(
+          this.options.timeoutMs ?? 30_000,
+          action === "wait" &&
+            Number.isSafeInteger(args.milliseconds ?? 500) &&
+            Number(args.milliseconds ?? 500) >= 1 &&
+            Number(args.milliseconds ?? 500) <= 30000
+            ? Number(args.milliseconds ?? 500) + 2000
+            : 0,
+          action === "wait_for" &&
+            Number.isSafeInteger(args.timeoutMs ?? 5000) &&
+            Number(args.timeoutMs ?? 5000) >= 100 &&
+            Number(args.timeoutMs ?? 5000) <= 60000
+            ? Number(args.timeoutMs ?? 5000) + 10000
+            : 0,
+        ),
+      );
       const abort = () => {
         const pending = this.pending.get(id);
         if (!pending) return;

@@ -43,7 +43,8 @@
     "test:ownership": "node tests/ownership-host.mjs",
     "test:native:capture": "node tests/native-capture.mjs",
     "test:native:ocr": "node tests/native-ocr.mjs",
-    "test:stop": "node tests/stop-host.mjs"
+    "test:stop": "node tests/stop-host.mjs",
+    "test:native:waits": "node tests/native-waits.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
