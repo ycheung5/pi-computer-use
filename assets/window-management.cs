@@ -20,8 +20,29 @@ partial class WindowsBridge {
     StringBuilder title=new StringBuilder(2048);GetWindowText(window,title,title.Capacity);
     return new Dictionary<string,object>{{"nativeWindowHandle",window.ToInt64()},{"processId",owner},{"name",title.ToString()},{"boundingBox",new Dictionary<string,object>{{"x",bounds.Left},{"y",bounds.Top},{"width",bounds.Right-bounds.Left},{"height",bounds.Bottom-bounds.Top}}}};
   }
+  // Read only the documented, 8-byte-aligned WTSINFOEX level-1 prefix;
+  // account-name fields are never copied or reported.
+  [StructLayout(LayoutKind.Explicit,Size=20)]struct ManagementSessionHeader {
+    [FieldOffset(0)]public uint Level;[FieldOffset(8)]public uint Session;
+    [FieldOffset(12)]public uint Connection;[FieldOffset(16)]public int Flags;
+  }
+  [DllImport("kernel32.dll",EntryPoint="GetCurrentProcessId")]static extern uint ManagementProcessId();
+  [DllImport("kernel32.dll",EntryPoint="ProcessIdToSessionId")]static extern bool ManagementSessionId(uint process,out uint session);
+  [DllImport("wtsapi32.dll",EntryPoint="WTSQuerySessionInformationW")]static extern bool ManagementQuerySession(IntPtr server,uint session,int kind,out IntPtr buffer,out uint bytes);
+  [DllImport("wtsapi32.dll",EntryPoint="WTSFreeMemory")]static extern void ManagementFreeSession(IntPtr buffer);
+  static void ManagementEnsureUnlockedSession() {
+    uint session;if(!ManagementSessionId(ManagementProcessId(),out session))return;
+    IntPtr buffer=IntPtr.Zero;uint bytes;
+    try {
+      if(!ManagementQuerySession(IntPtr.Zero,session,25,out buffer,out bytes) || buffer==IntPtr.Zero || bytes<20)return;
+      ManagementSessionHeader state=(ManagementSessionHeader)Marshal.PtrToStructure(buffer,typeof(ManagementSessionHeader));
+      if(state.Level==1 && state.Session==session && state.Flags==0)throw new InvalidOperationException("DESKTOP_SESSION_LOCKED: unlock Windows before requesting foreground input");
+    }finally {if(buffer!=IntPtr.Zero)ManagementFreeSession(buffer);}
+    // Unknown/unavailable session state does not invent a lock diagnosis;
+    // the existing identity, foreground and input guards still apply.
+  }
   static bool ManagementActivate(IntPtr window,uint owner) {
-    ManagementAssert(window,owner);
+    ManagementAssert(window,owner);ManagementEnsureUnlockedSession();
     if(IsIconic(window))ManagementShow(window,9);
     if(GetForegroundWindow()==window)return true;
     SetForegroundWindow(window);

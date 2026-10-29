@@ -153,6 +153,7 @@ partial class WindowsBridge {
       IntPtr listenerHandle=pointerListener.Handle; // retain process identity against PID reuse
       cancel=EventWaitHandle.OpenExisting(TextOption(args,"_cancelEvent",""));
       if(cancel.WaitOne(0))throw new InvalidOperationException("COMPUTER_USE_STOPPED");
+      ManagementEnsureUnlockedSession();
       foreach(int key in new int[]{1,2,4,16,17,18,91,92})if(GetAsyncKeyState(key)<0)throw new InvalidOperationException("USER_INPUT_ACTIVE: a mouse button or modifier is already held");
       List<ControlPoint> path=new List<ControlPoint>();
       if(action=="drag")foreach(Dictionary<string,object> p in (IEnumerable)args["path"])path.Add(new ControlPoint {X=Convert.ToInt32(p["x"]),Y=Convert.ToInt32(p["y"])});

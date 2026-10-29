@@ -107,3 +107,11 @@ The control fixture also stages a package with a missing native source and check
 Some Windows controls expose newer control types that the .NET Framework UIA client cannot name. These nodes retain their available properties and children with `controlType: "Unknown"` and `controlTypeUnavailable: true`. Observations report `unknownControlTypes`, remain inconclusive, and cannot establish absence. An unknown type does not make an observed element stale.
 
 Run `npm run test:native:nullable-uia` with Windows Node after building. Its passive custom-provider fixture checks snapshot retention, inspection, traversal beyond an unknown type, and inconclusive disappearance waits. It performs no activation, screenshots or physical input.
+
+## Locked-session refusals
+
+A locked Windows session returns an error containing `DESKTOP_SESSION_LOCKED` before foreground activation, physical pointer input or physical text/key input. The helper reads only the WTS session-state prefix, without copying account-name fields. Unknown/unavailable WTS state is not reported as locked; existing target, foreground and input guards remain active. Read-only snapshots/screenshots can still return background application data while Windows is locked, which does not prove that the app can receive physical input. Unlock Windows and refresh observations before testing interactive behavior.
+
+On Windows after building, `PI_CU_EXPECT_LOCKED_SESSION=1 npm run test:native:session:locked` checks the explicitly locked case against a disposable fixture. Set the environment variable using your shell's syntax. The runner does not lock/unlock the workstation. It checks activation, pointer and text refusals, cleanup, and a quiet fixture observation. If the initial activation does not report a locked session, it aborts before further actions. This is a lock-diagnosis test, not proof of unlocked activation or foreground restoration.
+
+The diagnosis uses Microsoft's documented [WTSINFOEX session flags](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/ns-wtsapi32-wtsinfoex_level1_w). In the reproduced Windows 11 case, WTS reported locked and the foreground process was LockApp; input-thread attachment returned access denied. Unlocked-session refusals still require separate diagnosis.

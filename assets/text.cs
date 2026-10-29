@@ -162,6 +162,7 @@ partial class WindowsBridge {
       if(TextOption(args,"_cancelEvent","").Length==0)throw new InvalidOperationException("WCU_NEEDS_INPUT: physical text/key input requires independent stopping");
       cancel=EventWaitHandle.OpenExisting(Convert.ToString(args["_cancelEvent"]));listener=Process.GetProcessById(NumberOption(args,"_stopProcessId",0));IntPtr listenerHandle=listener.Handle;
       if(cancel.WaitOne(0) || listener.HasExited)throw new InvalidOperationException("COMPUTER_USE_STOPPED");
+      ManagementEnsureUnlockedSession();
       foreach(int key in new int[]{1,2,4,16,17,18,91,92})if(GetAsyncKeyState(key)<0)throw new InvalidOperationException("USER_INPUT_ACTIVE: button or modifier already held");
       interaction.Check();
       if(GetForegroundWindow()!=window && (!ManagementActivate(window,owner) || GetForegroundWindow()!=window))throw new InvalidOperationException("TARGET_ACTIVATION_REFUSED");
