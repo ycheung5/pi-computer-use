@@ -20,7 +20,8 @@
     "docs/browser.md",
     "assets/puppeteer-LICENSE.txt",
     "docs/pointer.md",
-    "docs/settings.md"
+    "docs/settings.md",
+    "docs/text.md"
   ],
   "pi": {
     "extensions": [
@@ -53,7 +54,9 @@
     "test:native:waits": "node tests/native-waits.mjs",
     "test:native:pointer:guards": "node tests/native-pointer-guards.mjs",
     "test:native:pointer:physical": "node tests/native-pointer-physical.mjs",
-    "test:settings": "node tests/settings-host.mjs"
+    "test:settings": "node tests/settings-host.mjs",
+    "test:native:text": "node tests/native-text.mjs",
+    "test:native:text:physical": "node tests/native-text-physical.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

@@ -34,6 +34,12 @@ import {
 import type { WorkerRequest, WorkerResponse } from "./protocol.js";
 import { PersonalSettingsManager } from "./settings.js";
 import { StopListener } from "./stop.js";
+import {
+  executeText,
+  prepareTextInput,
+  textTools,
+  validateText,
+} from "./text.js";
 import { waitDesktop, waitTools } from "./waits.js";
 
 const settings = new PersonalSettingsManager(
@@ -74,6 +80,7 @@ const settings = new PersonalSettingsManager(
       ...observationTools,
       ...controlTools,
       ...pointerTools,
+      ...textTools,
       ...waitTools,
     ].map(
       (tool) =>
@@ -156,13 +163,53 @@ async function guardedPointer(
   process.stdout.write(
     `${JSON.stringify({ event: "input_state", active: true })}\n`,
   );
-  const result = await executePointer(
-    action,
-    args,
-    armed.cancelEvent,
-    operationId,
-    Number(armed.listenerProcessId),
+  let result: WorkerResponse["result"];
+  try {
+    result = await executePointer(
+      action,
+      args,
+      armed.cancelEvent,
+      operationId,
+      Number(armed.listenerProcessId),
+    );
+  } catch (error) {
+    void stopOperation(operationId).catch(() => undefined);
+    throw error;
+  }
+  process.stdout.write(
+    `${JSON.stringify({ event: "input_state", active: false })}\n`,
   );
+  return result;
+}
+
+async function guardedText(
+  action: string,
+  args: Record<string, unknown>,
+  operationId: string,
+  signal: AbortSignal,
+): Promise<WorkerResponse["result"]> {
+  const armed = await stopListener.arm(operationId, signal);
+  if (!armed.ok || typeof armed.cancelEvent !== "string")
+    return { ...armed, action };
+  const prepared = await prepareTextInput(action, args, signal);
+  signal.throwIfAborted();
+  process.stdout.write(
+    `${JSON.stringify({ event: "input_state", active: true })}\n`,
+  );
+  let result: WorkerResponse["result"];
+  try {
+    result = await executeText(
+      action,
+      prepared,
+      armed.cancelEvent,
+      operationId,
+      Number(armed.listenerProcessId),
+      signal,
+    );
+  } catch (error) {
+    void stopOperation(operationId).catch(() => undefined);
+    throw error;
+  }
   process.stdout.write(
     `${JSON.stringify({ event: "input_state", active: false })}\n`,
   );
@@ -244,9 +291,43 @@ async function dispatch(
     ["type_text", "keypress"].includes(request.action) &&
     !isBrowserRequest(request.args)
   ) {
-    process.stdout.write(
-      `${JSON.stringify({ id: request.id, result: { ok: false, action: request.action, error: "INPUT_SAFETY_NOT_READY: action requires cooperative native cleanup before enabling input" } })}\n`,
+    const invalid = validateText(request.action, request.args);
+    if (invalid) {
+      process.stdout.write(
+        `${JSON.stringify({ id: request.id, result: invalid })}\n`,
+      );
+      return;
+    }
+    let result: WorkerResponse["result"];
+    if (
+      (request.action === "type_text" &&
+        ["auto", "background"].includes(
+          String(request.args.method ?? "auto"),
+        )) ||
+      request.args.dispatch === "background"
+    ) {
+      result = await executeText(
+        request.action,
+        request.args,
+        "",
+        operationId,
+        undefined,
+        signal,
+      );
+      if (result.inputRequired !== true) {
+        rememberTarget(operationId, result);
+        process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
+        return;
+      }
+    }
+    result = await guardedText(
+      request.action,
+      request.args,
+      operationId,
+      signal,
     );
+    rememberTarget(operationId, result);
+    process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
     return;
   }
   if (
@@ -363,6 +444,38 @@ async function dispatch(
     response.result = {
       ...result,
       action: request.action,
+      method: result.ok ? `fallback:${String(result.method)}` : result.method,
+    };
+  }
+  if (
+    !isBrowserRequest(request.args) &&
+    request.action === "set_value" &&
+    response.result.inputRequired === true
+  ) {
+    const textArgs: Record<string, unknown> = {
+      text: request.args.value,
+      method: "clipboard",
+      focusMode: "preserve",
+      restoreClipboard: request.args.restoreClipboard ?? true,
+      _elementId: request.args.elementId,
+      _replaceAll: true,
+    };
+    for (const key of [
+      "windowTitle",
+      "processId",
+      "nativeWindowHandle",
+      "activate",
+    ])
+      if (request.args[key] !== undefined) textArgs[key] = request.args[key];
+    const result = await guardedText(
+      "type_text",
+      textArgs,
+      operationId,
+      signal,
+    );
+    response.result = {
+      ...result,
+      action: "set_value",
       method: result.ok ? `fallback:${String(result.method)}` : result.method,
     };
   }

@@ -24,3 +24,5 @@ The first `windows_computer_use_health` call downloads a private, pinned Windows
 
 Guarded pointer checks: `npm run test:native:pointer:guards` sends no physical input. The opt-in `npm run test:native:pointer:physical` requires a dedicated interactive desktop and `PI_CU_DEDICATED_INPUT_DESKTOP=1`; see [pointer validation](docs/pointer.md). Physical acceptance remains pending.
 Personal preferences are shared across projects and hosts. Use `/computer-settings show`, `/computer-settings edit`, or `/computer-settings set {"toolPreset":"lazy"}`. The management tool can describe and load capabilities allowed by the saved selection. See [settings and tool loading](docs/settings.md) for policy, recovery and validation.
+
+Text checks: `npm run test:native:text` uses only passive fixtures. The opt-in `npm run test:native:text:physical` requires `PI_CU_DEDICATED_INPUT_DESKTOP=1` on a dedicated interactive desktop and mutates its clipboard; see [text validation](docs/text.md). Physical/clipboard acceptance remains pending.

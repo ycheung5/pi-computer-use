@@ -15,6 +15,7 @@ import {
   readPersonalSettings,
   TOOL_PREFIX,
 } from "./settings.js";
+import { textTools } from "./text.js";
 import { waitTools } from "./waits.js";
 
 export function registerComputerUse(
@@ -245,7 +246,11 @@ export function registerComputerUse(
       },
     });
   }
-  for (const { action, parameters } of [...controlTools, ...pointerTools]) {
+  for (const { action, parameters } of [
+    ...controlTools,
+    ...pointerTools,
+    ...textTools,
+  ]) {
     registerTool({
       name: `windows_computer_use_${action}`,
       label: action.replaceAll("_", " "),
