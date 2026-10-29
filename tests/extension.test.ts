@@ -93,6 +93,7 @@ test("Pi observation tools expose argument failures through normal execution", a
       "accessibility_tree",
       "find",
       "element_info",
+      "ocr",
     ]) {
       const tool = tools.find(
         (item) => item.name === `windows_computer_use_${action}`,

@@ -5,6 +5,7 @@ import { observationTools } from "./accessibility.js";
 import { screenshotContent } from "./capture.js";
 import { WorkerClient, type WorkerClientOptions } from "./client.js";
 import { nativeWorkerLaunch } from "./launcher.js";
+import { ocrParameters } from "./ocr.js";
 
 export function registerComputerUse(
   pi: Pick<ExtensionAPI, "registerTool" | "on">,
@@ -112,6 +113,17 @@ export function registerComputerUse(
       return screenshotContent(
         await executeDesktop("screenshot", args, signal),
       );
+    },
+  });
+  pi.registerTool({
+    name: "windows_computer_use_ocr",
+    label: "OCR",
+    description:
+      "Read screen text with literal query matching and screen-space bounds. OCR candidates are not control IDs; occluded captures remain inconclusive.",
+    parameters: Type.Unsafe<Record<string, unknown>>(ocrParameters),
+    executionMode: "sequential",
+    async execute(_id, args, signal) {
+      return screenshotContent(await executeDesktop("ocr", args, signal));
     },
   });
   pi.on("session_shutdown", async () => {

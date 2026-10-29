@@ -40,7 +40,8 @@
     "test:native:accessibility": "node tests/native-accessibility.mjs",
     "test:native:chromium": "node tests/native-chromium-accessibility.mjs",
     "test:ownership": "node tests/ownership-host.mjs",
-    "test:native:capture": "node tests/native-capture.mjs"
+    "test:native:capture": "node tests/native-capture.mjs",
+    "test:native:ocr": "node tests/native-ocr.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
