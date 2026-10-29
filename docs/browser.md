@@ -16,7 +16,7 @@ Executed in this workspace: Edge and Chrome headless/visible from WSL2; visible 
 
 ## Configuration and limits
 
-Until the personal settings command is implemented, `PI_CU_BROWSER_APP=default|edge|chrome` chooses the installed browser, `PI_CU_BROWSER_VISIBLE=false` selects headless, and `PI_CU_BROWSER_EXECUTABLE` overrides the executable path. These are local environment settings, not model tool parameters. Default is a visible browser following the Windows Chrome/Edge default, with installed-browser fallback.
+Use `/computer-settings` to select browserApp and browserVisible in personal settings. Default is a visible browser following the Windows Chrome/Edge default, with installed-browser fallback. `PI_CU_BROWSER_EXECUTABLE` is an optional local executable-path override, not a model tool parameter. Fixtures use isolated settings files and never modify personal settings.
 
 The Chromium outline comes from the accessibility tree. Traversal returns explicit truncation at budgets, but fetching an underlying AX tree or native browser protocol command can outlast the traversal budget; worker deadlines remain the outer safeguard. Page text is untrusted. An outline/page change proves neither user intent nor objective success. Browsers may activate for native dialogs; interaction behavior is validated in its own slice.
 
@@ -35,3 +35,5 @@ An open JavaScript dialog blocks other page reads/actions. `keypress` Enter acce
 File inputs take existing absolute Windows file paths, one per line or separated by `|`. An intercepted chooser reports an observed input ID instead of opening the OS file dialog. Chromium downloads report their state/name/file metadata under the package's Windows downloads directory; action-triggered popups return new tab IDs. None of these operations uses the user's daily browser profile.
 
 Run `npm run test:browser:actions -- edge` or `-- chrome` after building. The default action fixture is headless; append `--visible` for the visible-browser check. It exercises text/chords, occlusion (including a page override of elementFromPoint), disabled/readonly controls, select/checkbox, dialogs, scroll/waits, transfers, popup/close and operation cancellation recovery through the Pi tool/worker interfaces. Live suites are serialized externally with the shared lab lock when multiple development agents use the same desktop.
+
+Action validation executed: full headless Edge/Chrome fixture from WSL2 and full headless Edge fixture from a Windows Node host, including operation cancellation and new-user recovery. Physical keyboard/mouse input was not used.

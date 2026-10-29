@@ -19,6 +19,7 @@
     "docs/stopping.md",
     "docs/browser.md",
     "assets/puppeteer-LICENSE.txt",
+    "docs/pointer.md",
     "docs/settings.md"
   ],
   "pi": {
@@ -50,6 +51,8 @@
     "test:browser": "node tests/browser-host.mjs",
     "test:native:controls": "node tests/native-controls.mjs",
     "test:native:waits": "node tests/native-waits.mjs",
+    "test:native:pointer:guards": "node tests/native-pointer-guards.mjs",
+    "test:native:pointer:physical": "node tests/native-pointer-physical.mjs",
     "test:settings": "node tests/settings-host.mjs",
     "test:browser:actions": "node tests/browser-actions-host.mjs"
   },

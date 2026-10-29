@@ -48,7 +48,21 @@ const call = async (action, args, signal) => {
   const result = await tool.execute(action, args, signal, undefined, {});
   return result.details;
 };
+const foreground = async () => {
+  const script =
+    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class PiActionForeground { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); }'; [Console]::Write([PiActionForeground]::GetForegroundWindow().ToInt64())";
+  return (
+    await run("powershell.exe", [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-EncodedCommand",
+      Buffer.from(script, "utf16le").toString("base64"),
+    ])
+  ).stdout.trim();
+};
 try {
+  const originalForeground = await foreground();
   const opened = await call("set_value", {
     elementId: "new-tab",
     value: source.url,
@@ -119,6 +133,11 @@ try {
     elementId: await find("Disabled action", "button"),
   });
   assert.match(disabled.error, /BROWSER_ELEMENT_DISABLED/);
+  assert.equal(
+    await foreground(),
+    originalForeground,
+    "ordinary page input preserves native foreground",
+  );
   const prompted = await call("click", {
     elementId: await find("Prompt action", "button"),
   });
@@ -230,10 +249,7 @@ try {
     timeoutMs: 100,
     intervalMs: 50,
   });
-  assert.ok(
-    ["timeout", "inconclusive"].includes(timedOut.verification),
-    JSON.stringify(timedOut),
-  );
+  assert.equal(timedOut.verification, "timeout", JSON.stringify(timedOut));
   const cancelled = new AbortController();
   const pending = call(
     "wait_for",

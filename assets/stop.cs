@@ -67,7 +67,7 @@ class StopBridge {
             else if (action == "disarm") { if (wanted == operation) armed = false; }
             else if (action != "status") throw new InvalidOperationException("UNKNOWN_ACTION");
             Send(new Dictionary<string,object> {{"id",request["id"]},{"result",new Dictionary<string,object> {
-              {"ok",true},{"action",action},{"hookInstalled",true},{"armed",armed},{"stopped",stopped},{"operationId",operation},{"cancelEventSet",cancelled != null && cancelled.WaitOne(0)}
+              {"ok",true},{"action",action},{"listenerProcessId",System.Diagnostics.Process.GetCurrentProcess().Id},{"hookInstalled",true},{"armed",armed},{"stopped",stopped},{"operationId",operation},{"cancelEventSet",cancelled != null && cancelled.WaitOne(0)}
             }}});
           }
         } catch(Exception error) {

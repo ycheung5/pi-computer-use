@@ -19,12 +19,19 @@ import {
   listWindowsParameters,
   retireDesktop,
 } from "./desktop.js";
+import { runNativeOperation } from "./native.js";
 import { disposeOcr, ocrDesktop, ocrParameters } from "./ocr.js";
 import {
   acquireDesktop,
   disposeOwnership,
   releaseDesktop,
 } from "./ownership.js";
+import {
+  awaitPointerCleanup,
+  executePointer,
+  pointerTools,
+  validatePointer,
+} from "./pointer.js";
 import type { WorkerRequest, WorkerResponse } from "./protocol.js";
 import { PersonalSettingsManager } from "./settings.js";
 import { StopListener } from "./stop.js";
@@ -67,6 +74,7 @@ const settings = new PersonalSettingsManager(
     ...[
       ...observationTools,
       ...controlTools,
+      ...pointerTools,
       ...waitTools,
       ...browserActionTools,
     ].map(
@@ -88,6 +96,24 @@ const requests = new Map<
   { controller: AbortController; operationId: string }
 >();
 const blocked = new Set<string>();
+const lastTargets = new Map<
+  string,
+  { nativeWindowHandle: number; processId: number }
+>();
+function rememberTarget(
+  operationId: string,
+  result: import("./protocol.js").WorkerResult,
+): void {
+  if (
+    result.ok &&
+    Number.isSafeInteger(result.inputTargetHandle) &&
+    Number.isSafeInteger(result.inputTargetProcessId)
+  )
+    lastTargets.set(operationId, {
+      nativeWindowHandle: Number(result.inputTargetHandle),
+      processId: Number(result.inputTargetProcessId),
+    });
+}
 let stopping: Promise<void> = Promise.resolve();
 const stopListener = new StopListener((operationId) => {
   void stopOperation(operationId).catch((error) =>
@@ -108,6 +134,7 @@ async function stopOperation(operationId: string): Promise<void> {
       for (const request of requests.values())
         if (request.operationId === operationId)
           request.controller.abort(new Error("COMPUTER_USE_STOPPED"));
+      await awaitPointerCleanup();
       await retireDesktop();
     }
   });
@@ -118,6 +145,32 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+async function guardedPointer(
+  action: string,
+  args: Record<string, unknown>,
+  operationId: string,
+  signal: AbortSignal,
+): Promise<import("./protocol.js").WorkerResult> {
+  const armed = await stopListener.arm(operationId, signal);
+  if (!armed.ok || typeof armed.cancelEvent !== "string")
+    return { ...armed, action };
+  signal.throwIfAborted();
+  process.stdout.write(
+    `${JSON.stringify({ event: "input_state", active: true })}\n`,
+  );
+  const result = await executePointer(
+    action,
+    args,
+    armed.cancelEvent,
+    operationId,
+    Number(armed.listenerProcessId),
+  );
+  process.stdout.write(
+    `${JSON.stringify({ event: "input_state", active: false })}\n`,
+  );
+  return result;
+}
+
 async function dispatch(
   request: WorkerRequest,
   signal: AbortSignal,
@@ -126,8 +179,10 @@ async function dispatch(
   const operationId = request.operationId ?? `worker-${process.pid}`;
   if (request.action === "operation_end") {
     await stopping;
+    await awaitPointerCleanup();
     await stopListener.disarm(operationId);
     const result = await releaseDesktop(operationId);
+    if (result.ok) lastTargets.delete(operationId);
     process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
     return;
   }
@@ -169,20 +224,80 @@ async function dispatch(
       return;
     }
   }
+  const previous = lastTargets.get(operationId);
+  if (
+    previous &&
+    !isBrowserRequest(request.args) &&
+    request.args.scope !== "desktop" &&
+    !["list_windows", "health", "operation_end", "wait"].includes(
+      request.action,
+    ) &&
+    !["windowTitle", "processId", "nativeWindowHandle", "elementId"].some(
+      (key) => request.args[key] !== undefined,
+    )
+  )
+    request.args = { ...request.args, ...previous };
   if (request.action === "prepare_input") {
     const result = await stopListener.arm(operationId, signal);
     process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
     return;
   }
   if (
-    ["click", "double_click", "move", "drag", "type_text", "keypress"].includes(
-      request.action,
-    ) &&
+    ["type_text", "keypress"].includes(request.action) &&
     !isBrowserRequest(request.args)
   ) {
     process.stdout.write(
       `${JSON.stringify({ id: request.id, result: { ok: false, action: request.action, error: "INPUT_SAFETY_NOT_READY: action requires cooperative native cleanup before enabling input" } })}\n`,
     );
+    return;
+  }
+  if (
+    !isBrowserRequest(request.args) &&
+    (["click", "double_click", "move", "drag"].includes(request.action) ||
+      (request.action === "scroll" && !request.args.elementId))
+  ) {
+    const invalid = validatePointer(request.action, request.args);
+    if (invalid) {
+      process.stdout.write(
+        `${JSON.stringify({ id: request.id, result: invalid })}\n`,
+      );
+      return;
+    }
+    // Only the explicit needs-input result permits escalation/retry. No timeout,
+    // stale/disabled/covered-point error can trigger replay.
+    if (
+      (request.args.dispatch === "background" ||
+        (request.action === "click" &&
+          request.args.elementId &&
+          (request.args.button ?? "left") === "left" &&
+          !request.args.activate &&
+          request.args.dispatch !== "foreground")) &&
+      ["click", "double_click"].includes(request.action)
+    ) {
+      const quiet = await executePointer(
+        request.action,
+        request.args,
+        "",
+        operationId,
+        undefined,
+        signal,
+      );
+      if (!quiet.inputRequired || request.args.dispatch === "background") {
+        rememberTarget(operationId, quiet);
+        process.stdout.write(
+          `${JSON.stringify({ id: request.id, result: quiet })}\n`,
+        );
+        return;
+      }
+    }
+    const result = await guardedPointer(
+      request.action,
+      request.args,
+      operationId,
+      signal,
+    );
+    rememberTarget(operationId, result);
+    process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
     return;
   }
   const response: WorkerResponse = {
@@ -235,6 +350,25 @@ async function dispatch(
                         error: "UNKNOWN_ACTION",
                       },
   };
+  if (
+    !isBrowserRequest(request.args) &&
+    response.result.inputRequired === true &&
+    ["invoke", "scroll"].includes(request.action)
+  ) {
+    const pointerAction = request.action === "invoke" ? "click" : "scroll";
+    const result = await guardedPointer(
+      pointerAction,
+      { ...request.args, dispatch: "foreground" },
+      operationId,
+      signal,
+    );
+    response.result = {
+      ...result,
+      action: request.action,
+      method: result.ok ? `fallback:${String(result.method)}` : result.method,
+    };
+  }
+  rememberTarget(operationId, response.result);
   process.stdout.write(`${JSON.stringify(response)}\n`);
 }
 
@@ -292,7 +426,11 @@ input.on("line", (line) => {
     operationId: request.operationId ?? `worker-${process.pid}`,
   });
   queue = queue
-    .then(() => dispatch(request, controller.signal))
+    .then(() =>
+      runNativeOperation(request.operationId ?? `worker-${process.pid}`, () =>
+        dispatch(request, controller.signal),
+      ),
+    )
     .catch((error) => {
       process.stdout.write(
         `${JSON.stringify({ id: request.id, result: { ok: false, action: request.action, error: controller.signal.aborted ? "COMPUTER_USE_STOPPED" : String(error) } })}\n`,
@@ -307,6 +445,7 @@ input.on("close", () => {
     .then(async () => {
       await stopping;
       await disposeBrowser();
+      await awaitPointerCleanup();
       await disposeDesktop();
       await disposeOcr();
       await stopListener.dispose();

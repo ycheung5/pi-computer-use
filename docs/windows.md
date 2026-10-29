@@ -24,7 +24,7 @@ Worker request envelopes and listing arguments are validated at execution, indep
 
 TypeScript owns dispatch and lifecycle. A focused C# bridge performs Win32 enumeration on an MTA thread through a persistent JSON-line process. The package contains fresh bridge source, compiled lazily with the Windows .NET Framework64 compiler into a source-versioned cache below `%LOCALAPPDATA%\pi-computer-use\native`. No separately installed .NET SDK is required on the tested Windows 11 baseline. Missing compiler/data-directory and compilation failures are explicit; cache and compilation are not assumed to work on untested Windows configurations.
 
-Keeping the helper persistent gives subsequent accessibility slices a place for apartment-owned element references. Helper stdin closure ends it; worker disposal closes its transport. The native helper has an execution watchdog, and cancellation rejects a request without replaying it. Input-safe stopping and desktop ownership are separate later tickets; this slice sends no physical input.
+Keeping the helper persistent gives subsequent accessibility slices a place for apartment-owned element references. Helper stdin closure ends it; worker disposal closes its transport. The native helper has an execution watchdog, and cancellation rejects a request without replaying it. [Desktop ownership](ownership.md), [stopping](stopping.md) and [guarded pointer actions](pointer.md) now extend this bridge; discovery itself sends no physical input.
 
 ## Validation
 

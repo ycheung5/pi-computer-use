@@ -430,7 +430,8 @@ async function pageOutline(
   const deadline =
     Date.now() +
     (typeof args.treeTimeoutMs === "number" ? args.treeTimeoutMs : 5000);
-  const depth = typeof args.maxDepth === "number" ? args.maxDepth : 6;
+  // Reference browser outlines use a node budget; maxDepth belongs to UIA traversal.
+  const depth = Number.POSITIVE_INFINITY;
   const generation = tab.document;
   const root = await withCancellation(
     tab.page.accessibility.snapshot({ interestingOnly: false }),
@@ -966,6 +967,8 @@ async function pressBrowserKeys(
       held.push(modifier);
     }
     signal?.throwIfAborted();
+    if (generation !== tab.document)
+      return fail("STALE_BROWSER_REFERENCE", "page navigated before key input");
     await withCancellation(
       tab.page.keyboard.press(key as import("puppeteer-core").KeyInput),
       signal,
@@ -985,6 +988,12 @@ async function setBrowserValue(
   value: string,
   signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
+  const generation = tab.document;
+  const guard = () => {
+    signal?.throwIfAborted();
+    if (generation !== tab.document)
+      fail("STALE_BROWSER_REFERENCE", "page navigated before field input");
+  };
   const kind = await callElement(
     tab,
     element,
@@ -1055,6 +1064,7 @@ async function setBrowserValue(
           "file input requires existing absolute Windows file paths",
         );
     }
+    guard();
     await untilDialog(
       tab,
       () => (element as ElementHandle<HTMLInputElement>).uploadFile(...files),
@@ -1093,6 +1103,7 @@ async function setBrowserValue(
           "select a different radio option to clear the selected one",
         );
       const point = await targetPoint(tab, element, signal);
+      guard();
       await untilDialog(
         tab,
         () => tab.page.mouse.click(point.x, point.y),
@@ -1234,6 +1245,7 @@ async function setBrowserValue(
     signal,
   );
   if (tab.dialog) return {};
+  guard();
   if (value)
     await untilDialog(
       tab,
@@ -1642,6 +1654,7 @@ export async function browse(
       return actionEvidence(tab, { ...base, tab: describeTab(tab) }, signal);
     }
     if (action === "focus" || action === "type_text" || action === "keypress") {
+      const generation = tab.document;
       const element = id ? tab.elements.get(id) : undefined;
       let detail: Record<string, unknown> = {};
       if (action === "focus") {
@@ -1697,6 +1710,12 @@ export async function browse(
             "BROWSER_NO_FOCUSED_FIELD",
             "focus an editable field before typing",
           );
+        if (generation !== tab.document)
+          return fail(
+            "STALE_BROWSER_REFERENCE",
+            "page navigated before text input",
+          );
+        signal?.throwIfAborted();
         await untilDialog(
           tab,
           () => tab.cdp.send("Input.insertText", { text: String(args.text) }),
