@@ -45,7 +45,7 @@ All tool rows share schema comparison above and portable public tool/worker test
 | move | pointer, browser-actions | Same pointer/browser runners; physical hover/restoration pending |
 | drag | pointer | Dedicated physical runner only for real effects; bounds/identity/refusal tests are not drag acceptance |
 | scroll | controls, pointer, browser-actions | `test:native:controls`, `test:browser:actions`; physical fallback pending |
-| type_text | text, browser-actions | `test:native:text`, `test:browser:actions`; clipboard/physical runner pending |
+| type_text | text, browser-actions | `test:native:text`, `test:native:notepad:unicode`, `test:browser:actions`; broader clipboard/physical runner pending |
 | keypress | text, browser-actions | `test:native:text`, `test:browser:actions`; real chords, release and Esc interaction pending |
 | focus | controls, browser-actions | `test:native:controls`, `test:browser:actions`; diverse UIA provider behavior pending |
 | invoke | controls, pointer, browser-actions | Same controls/browser/guard runners; expand/collapse and physical fallback acceptance pending |
@@ -148,3 +148,7 @@ Corrected headless Edge actions also passed. Because shared activation/restorati
 Run `npm run test:browser:foreground` with Windows Node after building, serialized with other live fixtures. It starts an isolated visible Edge profile and samples foreground HWND/PID/process plus last-input tick before opening, after opening/reading/value-setting/nonmodal click, after settlement and after disposal. PowerShell probe windows are hidden and their unused stdin is closed; probe PIDs are included to expose console contamination. No native dialogs, physical input, clipboard actions or daily profiles are involved.
 
 The corrected candidate retained the **same original foreground HWND/PID and last-input tick through every sampled stage**; the owned browser PID and each probe PID were different. Classification: `preserved`. The previous broad visible fixture's HWND change was not reproduced in this controlled case. Its earlier cause is not proven to be a product defect, a probe console or user/native-dialog interference; do not infer a general cause from the focused pass. Human visual cues, dialogs and broader visible foreground acceptance remain manual gates.
+
+## Notepad Unicode acceptance regression
+
+On 2026-10-29, explicit `sendinput` typing reproduced corrupted text in installed modern Notepad while a standard WinForms editor received the same string correctly. The opt-in [Notepad regression](text.md#notepad-unicode-regression) failed on the original source, then passed with cancellable 10 ms pacing for the exact acceptance string and a longer ASCII/CJK/accent/emoji sequence. UIA values and independently saved test-file bytes agreed. Only uniquely named temporary test tabs/files were edited, saved and closed; the clipboard and existing documents were untouched. This is targeted worker-interface evidence, not a completed Pi-session retest or proof that automatic activation, physical Esc, clipboard restoration and all other physical-input paths pass.

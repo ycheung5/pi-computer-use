@@ -171,8 +171,9 @@ partial class WindowsBridge {
       if(action=="type_text")RememberTextFocus(window,expectedFocus);
       if(action=="keypress") {Chord((IEnumerable)args["keys"],cancel,listener,window,owner,held,interaction);result["method"]="sendinput-keychord";}
       else if(method=="sendinput") {
-        int sent=0;
-        foreach(char character in text) {TextCheck(cancel,listener,window,owner,expectedFocus,true,interaction);HeldKey unicode=new HeldKey{Scan=character,Flags=4};Down(held,unicode);Up(held,unicode);sent++;if(sent%32==0 && cancel.WaitOne(1))throw new InvalidOperationException("COMPUTER_USE_STOPPED");}
+        // Unpaced Unicode packets corrupt text in modern Notepad. Space complete
+        // down/up pairs while retaining cancellation and per-character target checks.
+        foreach(char character in text) {TextCheck(cancel,listener,window,owner,expectedFocus,true,interaction);HeldKey unicode=new HeldKey{Scan=character,Flags=4};Down(held,unicode);Up(held,unicode);if(cancel.WaitOne(10))throw new InvalidOperationException("COMPUTER_USE_STOPPED");}
         result["method"]="sendinput-unicode";
       }else {
         // All UIA focus/provider calls finish BEFORE clipboard replacement.
