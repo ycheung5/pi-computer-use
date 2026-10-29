@@ -191,10 +191,15 @@ input.on("line", (line) => {
     });
 });
 input.on("close", () => {
-  void queue.finally(async () => {
-    await stopping.catch(() => undefined);
-    await disposeDesktop();
-    await stopListener.dispose();
-    await disposeOwnership();
-  });
+  void queue
+    .then(async () => {
+      await stopping;
+      await disposeDesktop();
+      await stopListener.dispose();
+      await disposeOwnership();
+    })
+    .catch((error) => {
+      // Keep native handles and ownership alive if safe exit cannot be proved.
+      process.stderr.write(`CLEANUP_UNCONFIRMED: ${String(error)}\n`);
+    });
 });
