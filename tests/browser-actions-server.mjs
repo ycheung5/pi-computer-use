@@ -21,6 +21,7 @@ const html = `<!doctype html><title>Browser action fixture</title>
 <h1>Browser action fixture</h1><p id="count">Count: 0</p><button id="increment" onclick="count.textContent='Count: '+(++window.counter)">Increment</button>
 <button onclick="document.elementFromPoint=()=>increment;cover.hidden=false">Cover target</button><button id="cover" hidden style="position:fixed;inset:0;z-index:100;background:white" onclick="cover.hidden=true">Remove cover</button>
 <label>Password<input type="password" value="fixture-secret-value"></label><label>Multiline<textarea></textarea></label><input type="file" aria-label="Direct upload"><label>Editor<input id="editor" value="initial"></label><label>Read only<input readonly value="locked"></label><button disabled>Disabled action</button>
+<label>Alias keys<textarea onkeydown="keyevents.textContent='Key:'+event.key;event.preventDefault()"></textarea></label><p id="keyevents">Key:none</p>
 <label>Color<select id="colors"><option value="red">Red</option><option value="green">Green</option><option disabled>Unavailable</option></select></label><label>Accept checkbox<input id="check" type="checkbox"></label>
 <label>Date field<input type="date" value="2026-01-01"></label>
 <button onclick="answer.textContent='Prompt: '+prompt('Fixture prompt','default')">Prompt action</button><p id="answer">No prompt yet</p>

@@ -1445,7 +1445,18 @@ async function pressBrowserKeys(
       "INVALID_ARGUMENTS",
       "keypress needs exactly one non-modifier key",
     );
-  const lower = main.toLowerCase();
+  const aliases: Record<string, string> = {
+    return: "enter",
+    del: "delete",
+    pgup: "pageup",
+    pgdn: "pagedown",
+    arrowup: "up",
+    arrowdown: "down",
+    arrowleft: "left",
+    arrowright: "right",
+  };
+  const raw = main.toLowerCase();
+  const lower = aliases[raw] ?? raw;
   if (tab.dialog) {
     if (!["enter", "escape", "esc"].includes(lower))
       return fail(
