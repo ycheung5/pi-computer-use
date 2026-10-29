@@ -5,16 +5,23 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WorkerClient, type WorkerLaunch } from "./client.js";
 
-async function compile(signal?: AbortSignal): Promise<WorkerLaunch> {
+export async function compileNative(
+  sourceNames: string[],
+  references: string[] = [],
+  signal?: AbortSignal,
+): Promise<WorkerLaunch> {
   if (process.platform !== "win32")
     throw new Error("UNSUPPORTED_HOST: native desktop access requires Windows");
-  const source = fileURLToPath(
-    new URL("../assets/windows.cs", import.meta.url),
+  const sources = sourceNames.map((name) =>
+    fileURLToPath(new URL(`../assets/${name}`, import.meta.url)),
   );
-  const hash = createHash("sha256")
-    .update(await readFile(source))
-    .digest("hex")
-    .slice(0, 20);
+  const digest = createHash("sha256");
+  for (const source of sources) {
+    digest.update(source);
+    digest.update(await readFile(source));
+  }
+  digest.update(references.join("\n"));
+  const hash = digest.digest("hex").slice(0, 20);
   const data = process.env.LOCALAPPDATA;
   const windows = process.env.WINDIR;
   if (!data || !windows)
@@ -55,7 +62,8 @@ async function compile(signal?: AbortSignal): Promise<WorkerLaunch> {
           "/target:exe",
           `/out:${temporary}`,
           "/r:System.Web.Extensions.dll",
-          source,
+          ...references.map((reference) => `/r:${reference}`),
+          ...sources,
         ],
         {
           stdio: ["ignore", "pipe", "pipe"],
@@ -105,6 +113,37 @@ async function compile(signal?: AbortSignal): Promise<WorkerLaunch> {
 }
 
 export const nativeDesktop = new WorkerClient({
-  launch: compile,
-  timeoutMs: 25_000,
+  launch: async (signal) => {
+    const names = ["windows.cs"];
+    for (const name of ["accessibility.cs", "capture.cs"]) {
+      try {
+        await access(
+          fileURLToPath(new URL(`../assets/${name}`, import.meta.url)),
+        );
+        names.push(name);
+      } catch {
+        /* Optional capability source is absent in an earlier package slice. */
+      }
+    }
+    const framework = join(
+      process.env.WINDIR ?? "",
+      "Microsoft.NET",
+      "Framework64",
+      "v4.0.30319",
+    );
+    return compileNative(
+      names,
+      [
+        "System.Drawing.dll",
+        "System.Windows.Forms.dll",
+        ...[
+          "WindowsBase.dll",
+          "UIAutomationClient.dll",
+          "UIAutomationTypes.dll",
+        ].map((name) => join(framework, "WPF", name)),
+      ],
+      signal,
+    );
+  },
+  timeoutMs: 40_000,
 });
