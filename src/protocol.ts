@@ -2,6 +2,7 @@ export interface WorkerRequest {
   id: number;
   action: string;
   args: Record<string, unknown>;
+  operationId?: string;
 }
 
 export interface WorkerResult {

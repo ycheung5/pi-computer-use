@@ -1,5 +1,10 @@
 import { createInterface } from "node:readline";
 import { disposeDesktop, listWindows } from "./desktop.js";
+import {
+  acquireDesktop,
+  disposeOwnership,
+  releaseDesktop,
+} from "./ownership.js";
 import type { WorkerRequest, WorkerResponse } from "./protocol.js";
 
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -15,6 +20,21 @@ async function dispatch(
   signal: AbortSignal,
 ): Promise<void> {
   signal.throwIfAborted();
+  const operationId = request.operationId ?? `worker-${process.pid}`;
+  if (request.action === "operation_end") {
+    const result = await releaseDesktop(operationId);
+    process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
+    return;
+  }
+  if (request.action !== "health" && process.platform === "win32") {
+    const ownership = await acquireDesktop(operationId, signal);
+    if (!ownership.ok) {
+      process.stdout.write(
+        `${JSON.stringify({ id: request.id, result: { ...ownership, action: request.action } })}\n`,
+      );
+      return;
+    }
+  }
   const response: WorkerResponse = {
     id: request.id,
     result:
@@ -51,7 +71,14 @@ input.on("line", (line) => {
     );
     return;
   }
-  if (typeof parsed.action !== "string" || !isObject(parsed.args)) {
+  if (
+    typeof parsed.action !== "string" ||
+    !isObject(parsed.args) ||
+    (parsed.operationId !== undefined &&
+      (typeof parsed.operationId !== "string" ||
+        parsed.operationId.length < 1 ||
+        parsed.operationId.length > 200))
+  ) {
     process.stdout.write(
       `${JSON.stringify({ id: parsed.id, result: { ok: false, action: typeof parsed.action === "string" ? parsed.action : "invalid_request", error: "INVALID_REQUEST: action must be a string and args must be an object" } })}\n`,
     );
@@ -76,5 +103,8 @@ input.on("line", (line) => {
     });
 });
 input.on("close", () => {
-  void queue.finally(disposeDesktop);
+  void queue.finally(async () => {
+    await disposeDesktop();
+    await disposeOwnership();
+  });
 });
