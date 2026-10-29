@@ -37,10 +37,12 @@ Mixed-DPI/display changes, physical stopping, actual click-through and third-par
 
 Owned Chromium pages use a Pi favicon while active and a small page-coordinate click marker in an isolated, closed shadow root. The host is `aria-hidden` and every marker layer uses `pointer-events: none`. Native browser actions remain quiet: these page cues do not arm desktop stopping or show desktop overlays. Page screenshots hide the marker and restore it in `finally`; results report whether hiding was confirmed.
 
-Visible owned Chromium processes receive a Pi-blue Windows 11 DWM **border** tint, without installing a browser extension or changing the user's daily browser theme. Only windows belonging to the retained Puppeteer child process are considered. Tab cues and owned-frame tint are removed/restored at operation settlement or stop. Cosmetic failures remain visible as presentation warnings rather than being misreported as successful decoration or replaying an action. Experimental Firefox and external endpoints retain their documented lack of browser presentation cues.
+Visible owned Chromium processes receive a Pi-blue Windows 11 DWM **border** tint, without installing a browser extension or changing the user's daily browser theme. Only windows belonging to the retained Puppeteer child process are considered. Tab cues and owned-frame tint are removed/restored at operation settlement or stop. Cosmetic failures remain visible as presentation warnings rather than being misreported as successful decoration or replaying an action. Experimental Firefox has no browser presentation cues. External Chromium endpoints may receive page cues, but their browser frames are never tinted.
 
 Headless browser fixtures verify badge/marker state, accessibility hiding, closed-shadow isolation, pointer pass-through, screenshot suspension and operation cleanup. Actual browser-border appearance and page-marker visibility still belong to manual visual acceptance.
 
 ![Offscreen native statusbar fixture](../assets/indicator-preview.png)
 
 Offscreen native statusbar fixture; not full desktop acceptance.
+
+A visible Edge fixture confirmed the owned DWM call accepted the border tint and the page/screenshot cue assertions passed. Its broader foreground-preservation assertion changed HWND across browser launch and is unresolved; this is not evidence of completed visual/focus acceptance. Headless action and cue lifecycle fixtures passed.

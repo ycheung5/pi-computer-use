@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { access, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { access, mkdir, readFile, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
@@ -16,7 +16,15 @@ import type {
 import { observationTools } from "./accessibility.js";
 import { normalizeBrowserAction } from "./browser-actions.js";
 import { updateBrowserIndicator } from "./browser-indicators.js";
+import {
+  acquireBrowserProfile,
+  type BrowserProfile,
+  browserIdleMs,
+  recordProfileBrowser,
+  releaseBrowserProfile,
+} from "./browser-profiles.js";
 import { nativeDesktop } from "./native.js";
+
 import type { WorkerResult } from "./protocol.js";
 
 // Pinned Puppeteer BiDi exposes its isolated realm internally. Keep the narrow
@@ -80,7 +88,9 @@ interface Session {
   id: string;
   app: string;
   executable: string;
-  profile: string;
+  profile?: BrowserProfile;
+  idleTimer?: ReturnType<typeof setTimeout>;
+  idleError?: string;
   browser: Browser;
   context: BrowserContext;
   cdp: CDPSession;
@@ -92,6 +102,51 @@ const ownedSessions = new Set<Session>();
 let session: Session | undefined;
 let starting: Promise<Session> | undefined;
 let closed = false;
+let activeBrowserCalls = 0;
+let retiring: Promise<void> | undefined;
+let retirementError: string | undefined;
+function armIdle(current: Session): void {
+  clearTimeout(current.idleTimer);
+  if (closed || activeBrowserCalls || session !== current) return;
+  current.idleTimer = setTimeout(() => {
+    if (activeBrowserCalls || session !== current) return;
+    session = undefined;
+    retiring = closeSession(current)
+      .catch((error) => {
+        retirementError =
+          error instanceof Error ? error.message : String(error);
+      })
+      .finally(() => {
+        retiring = undefined;
+      });
+  }, browserIdleMs());
+  current.idleTimer.unref();
+}
+async function closeSession(current: Session): Promise<void> {
+  clearTimeout(current.idleTimer);
+  await clearSessionIndicators(current);
+  current.tabs.clear();
+  const child = current.browser.process();
+  if (current.external) {
+    await current.browser.disconnect();
+  } else {
+    await current.browser.close().catch(() => undefined);
+    // Only release a profile after its own process has actually exited. Never
+    // kill a PID from a stale lease or silently clean a live orphan's profile.
+    const deadline = Date.now() + 3000;
+    while (
+      child &&
+      child.exitCode === null &&
+      child.signalCode === null &&
+      Date.now() < deadline
+    )
+      await delay(50);
+    if (current.profile)
+      await releaseBrowserProfile(current.profile, child?.pid);
+  }
+  ownedSessions.delete(current);
+}
+
 let browserConfiguration:
   | { browserApp: string; browserVisible: boolean; browserSignIn: boolean }
   | undefined;
@@ -277,6 +332,10 @@ async function discoverBrowser(
 async function ensureSession(signal?: AbortSignal): Promise<Session> {
   signal?.throwIfAborted();
   if (closed) return fail("BROWSER_CLOSED", "worker is shutting down");
+  await retiring;
+  if (retirementError) return fail("BROWSER_CLEANUP_FAILED", retirementError);
+  for (const previous of ownedSessions)
+    if (!previous.browser.connected) await closeSession(previous);
   if (session?.browser.connected) return session;
   starting ??= (async () => {
     if (process.platform !== "win32")
@@ -309,9 +368,14 @@ async function ensureSession(signal?: AbortSignal): Promise<Session> {
     const local = process.env.LOCALAPPDATA;
     if (!local)
       return fail("BROWSER_SETUP_FAILED", "Windows LOCALAPPDATA is required");
-    const root = join(local, "pi-computer-use", "browser");
-    await mkdir(root, { recursive: true });
-    const profile = await mkdtemp(join(root, "temporary-"));
+    browserIdleMs();
+    const profile = endpointUrl
+      ? undefined
+      : await acquireBrowserProfile(
+          app,
+          executable,
+          browserConfiguration?.browserSignIn ?? false,
+        );
     let browser: Browser | undefined;
     try {
       browser = endpointUrl
@@ -337,7 +401,7 @@ async function ensureSession(signal?: AbortSignal): Promise<Session> {
             handleSIGINT: false,
             handleSIGTERM: false,
             handleSIGHUP: false,
-            userDataDir: profile,
+            userDataDir: profile?.path,
             args:
               app === "firefox"
                 ? []
@@ -351,8 +415,12 @@ async function ensureSession(signal?: AbortSignal): Promise<Session> {
                     "--disable-renderer-backgrounding",
                   ],
           });
+      if (profile) await recordProfileBrowser(profile, browser.process()?.pid);
       signal?.throwIfAborted();
-      const context = await browser.createBrowserContext();
+      const context =
+        profile?.kept || endpointUrl
+          ? browser.defaultBrowserContext()
+          : await browser.createBrowserContext();
       const cdp =
         app === "firefox"
           ? undefined
@@ -402,6 +470,9 @@ async function ensureSession(signal?: AbortSignal): Promise<Session> {
         if (event.state !== "inProgress")
           current.downloadRecords.delete(event.guid);
       });
+      if (endpointUrl)
+        for (const page of await browser.pages())
+          await attachPage(current, page);
       browser.on("disconnected", () => {
         current.tabs.clear();
         if (session === current) session = undefined;
@@ -412,12 +483,13 @@ async function ensureSession(signal?: AbortSignal): Promise<Session> {
     } catch (error) {
       if (endpointUrl) await browser?.disconnect().catch(() => undefined);
       else await browser?.close().catch(() => undefined);
-      await rm(profile, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 100,
-      });
+      if (profile && browser)
+        await releaseBrowserProfile(profile, browser.process()?.pid);
+      // A failed launch with no confirmed process remains conservatively locked.
+      if (profile && !browser)
+        throw new Error(
+          `${error instanceof Error ? error.message : String(error)}; BROWSER_PROFILE_RETAINED: launch cleanup is unconfirmed at ${profile.path}`,
+        );
       throw error;
     }
   })().finally(() => {
@@ -890,52 +962,54 @@ async function browserCue(
 }
 
 export async function clearBrowserIndicators(): Promise<void> {
+  for (const current of ownedSessions) await clearSessionIndicators(current);
+}
+
+async function clearSessionIndicators(current: Session): Promise<void> {
   const signal = AbortSignal.timeout(1500);
-  for (const current of ownedSessions) {
-    await Promise.all(
-      [...current.tabs.values()]
-        .filter(
-          (tab) => !tab.page.isClosed() && tab.presentation?.active !== false,
-        )
-        .map(async (tab) => {
-          try {
-            const report = await browserCue(tab, "clear", undefined, signal);
-            tab.presentation =
-              report.active === false
-                ? report
-                : { ...report, cleanupPending: true };
-          } catch (error) {
-            tab.presentation = {
-              ...tab.presentation,
-              cleanupPending: true,
-              warning: String(error),
-            };
-          }
-        }),
-    );
-    const child = current.browser.process();
-    if (
-      !current.external &&
-      child?.pid &&
-      child.exitCode === null &&
-      child.signalCode === null &&
-      current.framePresentation
-    ) {
-      try {
-        const cleared = await nativeDesktop.execute(
-          "browser_frame",
-          { processId: child.pid, clear: true },
-          signal,
-        );
-        current.framePresentation = cleared.ok
-          ? undefined
-          : { ...current.framePresentation, cleanupWarning: cleared.error };
-      } catch (error) {
-        current.framePresentation = {
-          ...current.framePresentation,
-          cleanupWarning: String(error),
-        };
-      }
+  await Promise.all(
+    [...current.tabs.values()]
+      .filter(
+        (tab) => !tab.page.isClosed() && tab.presentation?.active !== false,
+      )
+      .map(async (tab) => {
+        try {
+          const report = await browserCue(tab, "clear", undefined, signal);
+          tab.presentation =
+            report.active === false
+              ? report
+              : { ...report, cleanupPending: true };
+        } catch (error) {
+          tab.presentation = {
+            ...tab.presentation,
+            cleanupPending: true,
+            warning: String(error),
+          };
+        }
+      }),
+  );
+  const child = current.browser.process();
+  if (
+    !current.external &&
+    child?.pid &&
+    child.exitCode === null &&
+    child.signalCode === null &&
+    current.framePresentation
+  ) {
+    try {
+      const cleared = await nativeDesktop.execute(
+        "browser_frame",
+        { processId: child.pid, clear: true },
+        signal,
+      );
+      current.framePresentation = cleared.ok
+        ? undefined
+        : { ...current.framePresentation, cleanupWarning: cleared.error };
+    } catch (error) {
+      current.framePresentation = {
+        ...current.framePresentation,
+        cleanupWarning: String(error),
+      };
     }
   }
 }
@@ -1019,10 +1093,15 @@ async function screenshot(
 }
 
 export async function browserListing(): Promise<Record<string, unknown>> {
+  if (!session && process.env.PI_CU_BROWSER_BIDI_URL) {
+    const connected = await ensureSession();
+    armIdle(connected);
+  }
   const current = session;
   if (!current?.browser.connected)
     return {
       browsers: [],
+      ...(retirementError ? { cleanupError: retirementError } : {}),
       hint: 'set_value elementId "new-tab" value "https://..." opens an isolated background tab',
     };
   return {
@@ -1031,6 +1110,10 @@ export async function browserListing(): Promise<Record<string, unknown>> {
         id: current.id,
         processId: current.browser.process()?.pid,
         app: current.app,
+        profile: current.profile
+          ? { kept: current.profile.kept, path: current.profile.path }
+          : { external: true },
+        idleMs: browserIdleMs(),
         executable: current.executable,
         version: await current.browser.version(),
         headless: current.browser
@@ -1046,7 +1129,7 @@ export async function browserListing(): Promise<Record<string, unknown>> {
             : browserConfiguration
               ? browserConfiguration.browserVisible
               : process.env.PI_CU_BROWSER_VISIBLE !== "false",
-        isolated: true,
+        isolated: !current.external,
         tabs: await Promise.all(
           [...current.tabs.values()].map(async (tab) => ({
             ...describeTab(tab),
@@ -2033,6 +2116,8 @@ export async function browse(
   args: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<WorkerResult> {
+  activeBrowserCalls++;
+  clearTimeout(session?.idleTimer);
   try {
     signal?.throwIfAborted();
     if (
@@ -2175,7 +2260,11 @@ export async function browse(
           verification: "sent",
           ...detail,
         };
-      return actionEvidence(tab, { ...base, tab: describeTab(tab) }, signal);
+      return await actionEvidence(
+        tab,
+        { ...base, tab: describeTab(tab) },
+        signal,
+      );
     }
     if (action === "focus" || action === "type_text" || action === "keypress") {
       const generation = tab.document;
@@ -2256,7 +2345,7 @@ export async function browse(
               () => pressBrowserKeys(tab, args.keys as string[], signal),
               signal,
             )) ?? {});
-      return actionEvidence(tab, base, signal, detail);
+      return await actionEvidence(tab, base, signal, detail);
     }
     if (action === "set_value") {
       const element = id ? tab.elements.get(id) : undefined;
@@ -2271,7 +2360,7 @@ export async function browse(
         String(args.value),
         signal,
       );
-      return actionEvidence(tab, base, signal, detail);
+      return await actionEvidence(tab, base, signal, detail);
     }
     if (["click", "double_click", "invoke", "move"].includes(action)) {
       const element = id ? tab.elements.get(id) : undefined;
@@ -2333,7 +2422,7 @@ export async function browse(
         if (option?.error)
           return fail("BROWSER_OPTION_DISABLED", "the option is disabled");
         if (option || tab.dialog)
-          return actionEvidence(tab, base, signal, option ?? {});
+          return await actionEvidence(tab, base, signal, option ?? {});
       }
       const generation = tab.document;
       const point = await targetPoint(tab, element, signal);
@@ -2354,7 +2443,7 @@ export async function browse(
               }),
         signal,
       );
-      return actionEvidence(tab, base, signal);
+      return await actionEvidence(tab, base, signal);
     }
     if (action === "scroll") {
       const element = id ? tab.elements.get(id) : undefined;
@@ -2364,9 +2453,9 @@ export async function browse(
           "element was not observed in this document",
         );
       const detail = await scrollBrowser(tab, element, args, signal);
-      return actionEvidence(tab, base, signal, detail);
+      return await actionEvidence(tab, base, signal, detail);
     }
-    if (action === "wait_for") return waitForBrowser(tab, args, signal);
+    if (action === "wait_for") return await waitForBrowser(tab, args, signal);
     if (action === "activate_window") {
       await withCancellation(tab.page.bringToFront(), signal);
       return { ...base, activated: true, verification: "sent" };
@@ -2466,33 +2555,17 @@ export async function browse(
           ? error.message
           : String(error),
     };
+  } finally {
+    activeBrowserCalls--;
+    if (session) armIdle(session);
   }
 }
 
 export async function disposeBrowser(): Promise<void> {
   closed = true;
   await starting?.catch(() => undefined);
-  await clearBrowserIndicators();
+  await retiring;
   session = undefined;
-  for (const current of ownedSessions) {
-    current.tabs.clear();
-    const child = current.browser.process();
-    if (current.external) {
-      await current.context.close().catch(() => undefined);
-      await current.browser.disconnect().catch(() => undefined);
-    } else await current.browser.close().catch(() => undefined);
-    if (child?.pid && child.exitCode === null && child.signalCode === null) {
-      await run("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
-        windowsHide: true,
-        timeout: 5000,
-      }).catch(() => undefined);
-    }
-    await rm(current.profile, {
-      recursive: true,
-      force: true,
-      maxRetries: 10,
-      retryDelay: 100,
-    });
-    ownedSessions.delete(current);
-  }
+  for (const current of ownedSessions) await closeSession(current);
+  retirementError = undefined;
 }
