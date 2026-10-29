@@ -16,8 +16,9 @@ partial class StopBridge {
       SetStyle(ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.UserPaint,true);
     }
     protected override bool ShowWithoutActivation { get { return true; } }
-    protected override CreateParams CreateParams { get { CreateParams value=base.CreateParams;value.ExStyle|=0x08000000|0x00000080|0x00000020;return value; } }
+    protected override CreateParams CreateParams { get { CreateParams value=base.CreateParams;value.ExStyle|=0x08000000|0x00000080|0x00000020|0x00080000;return value; } }
     public void LayoutAt(Rectangle bounds,float scale) {
+      if(Bounds==bounds && DpiScale==scale)return;
       DpiScale=scale;Bounds=bounds;
       if(frame) {
         Region ring=new Region(ClientRectangle);int edge=Math.Max(3,(int)(7*scale));
@@ -43,6 +44,8 @@ partial class StopBridge {
     [StructLayout(LayoutKind.Sequential)] struct CursorInfo { public int Size,Flags;public IntPtr Cursor;public Point Position; }
     [StructLayout(LayoutKind.Sequential)] struct IconInfo { public bool Icon;public uint HotX,HotY;public IntPtr Mask,Color; }
     [StructLayout(LayoutKind.Sequential)] struct BitmapInfo { public int Type,Width,Height,WidthBytes;public ushort Planes,BitsPixel;public IntPtr Bits; }
+    [DllImport("user32.dll")] static extern bool EnableWindow(IntPtr window,bool enabled);
+    [DllImport("user32.dll")] static extern bool SetLayeredWindowAttributes(IntPtr window,uint key,byte alpha,uint flags);
     [DllImport("user32.dll")] static extern bool SetWindowDisplayAffinity(IntPtr window,uint affinity);
     [DllImport("user32.dll")] static extern IntPtr MonitorFromPoint(Point point,uint flags);
     [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor,int type,out uint x,out uint y);
@@ -58,6 +61,7 @@ partial class StopBridge {
     IndicatorWindow pointer;
     bool screenEnabled=true,pointerEnabled=true,remoteVisible=true,held,suspended,preview,renderChecked;
     int captureSuspensions;
+    string previewPath;
     bool? affinityApplied=null;
     string caption="Pi is controlling the computer",position="top",layoutKey="";
     int endDelay=800;
@@ -83,7 +87,10 @@ partial class StopBridge {
       if(!show) {
         using(IndicatorWindow sample=new IndicatorWindow(false))
         using(Bitmap pixels=new Bitmap(320,42)) {
-          sample.Caption=caption;sample.LayoutAt(new Rectangle(0,0,320,42),1);sample.DrawToBitmap(pixels,new Rectangle(0,0,320,42));
+          sample.Caption=caption+"  ·  Esc to stop";sample.LayoutAt(new Rectangle(0,0,320,42),1);sample.DrawToBitmap(pixels,new Rectangle(0,0,320,42));
+          if(previewPath!=null)try{System.IO.File.Delete(previewPath);}catch(System.IO.IOException){}
+          previewPath=System.IO.Path.Combine(System.IO.Path.GetTempPath(),"pi-cu-indicator-preview-"+Guid.NewGuid().ToString("N")+".png");
+          pixels.Save(previewPath,System.Drawing.Imaging.ImageFormat.Png);
           renderChecked=true;
         }
         return;
@@ -131,9 +138,11 @@ partial class StopBridge {
     }
     void Apply(IndicatorWindow form,bool visible) {
       if(!visible) { form.Hide();return; }
-      if(!form.Visible)form.Show();
-      if(!SetWindowDisplayAffinity(form.Handle,remoteVisible?0U:0x11U))affinityApplied=false;
-      else if(!affinityApplied.HasValue)affinityApplied=true;
+      if(!form.Visible) {
+        form.Show();EnableWindow(form.Handle,false);SetLayeredWindowAttributes(form.Handle,0,255,2);
+        if(!SetWindowDisplayAffinity(form.Handle,remoteVisible?0U:0x11U))affinityApplied=false;
+        else if(!affinityApplied.HasValue)affinityApplied=true;
+      }
     }
     static Size CursorExtent() {
       CursorInfo cursor=new CursorInfo {Size=Marshal.SizeOf(typeof(CursorInfo))};IconInfo icon;
@@ -179,7 +188,7 @@ partial class StopBridge {
         hitTest=hitTest.HasValue?hitTest.Value && skipped:skipped;
       }
       return new Dictionary<string,object> {
-        {"held",held},{"renderChecked",renderChecked},{"preview",preview},{"suspended",suspended},{"visible",visible>0},{"visibleWindows",visible},
+        {"held",held},{"renderChecked",renderChecked},{"previewPath",previewPath},{"preview",preview},{"suspended",suspended},{"visible",visible>0},{"visibleWindows",visible},
         {"screenEnabled",screenEnabled},{"pointerEnabled",pointerEnabled},{"remoteVisible",remoteVisible},{"captureAffinityApplied",affinityApplied},
         {"text",caption},{"position",position},{"endDelayMs",endDelay},{"operationIdleMs",30000},{"previewDurationMs",2000},
         {"nonActivating",true},{"clickThrough",true},{"layout",Layout()}
@@ -188,6 +197,7 @@ partial class StopBridge {
     }
     public void Dispose() {
       timer.Dispose();foreach(IndicatorWindow form in frames)form.Dispose();foreach(IndicatorWindow form in bars)form.Dispose();if(pointer!=null)pointer.Dispose();
+      if(previewPath!=null)try{System.IO.File.Delete(previewPath);}catch(System.IO.IOException){}
     }
   }
 }

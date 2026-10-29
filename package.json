@@ -21,7 +21,8 @@
     "assets/puppeteer-LICENSE.txt",
     "docs/pointer.md",
     "docs/settings.md",
-    "docs/text.md"
+    "docs/text.md",
+    "docs/indicators.md"
   ],
   "pi": {
     "extensions": [

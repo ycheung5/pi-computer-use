@@ -1,7 +1,7 @@
 // Nonvisual helper/layout/protocol checks; visible preview is separately opt-in.
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -56,6 +56,12 @@ try {
   assert.equal(preview.armed, false);
   assert.equal(preview.presentation.visible, false);
   assert.equal(preview.presentation.renderChecked, true);
+  if (process.env.PI_CU_INDICATOR_ARTIFACT) {
+    let png = preview.presentation.previewPath;
+    if (process.platform === "linux")
+      png = (await run("wslpath", ["-u", png])).stdout.trim();
+    await writeFile(process.env.PI_CU_INDICATOR_ARTIFACT, await readFile(png));
+  }
   assert.equal(preview.presentation.text, "Pi fixture");
   assert.equal(preview.presentation.position, "bottom");
   assert.equal(preview.presentation.screenEnabled, false);
@@ -116,7 +122,24 @@ try {
     assert.equal(enabled.ok, true);
     const shown = await worker.execute("indicator_preview", { show: true });
     assert.equal(shown.presentation.visible, true);
+    assert.equal(
+      shown.presentation.clickThroughHitTestPassed,
+      true,
+      "native WindowFromPoint skips the disabled indicator bars",
+    );
     assert.equal(shown.armed, false);
+    const captured = await worker.execute(
+      "screenshot",
+      { scope: "desktop", maxWidth: 1 },
+      undefined,
+      "preview-capture",
+    );
+    assert.equal(captured.ok, true, JSON.stringify(captured));
+    const captureStatus = await worker.execute("health", {});
+    assert.equal(captureStatus.control.presentation.suspended, false);
+    assert.ok(captureStatus.control.presentation.captureSuspensions > 0);
+    assert.equal(captureStatus.control.armed, false);
+    await worker.execute("operation_end", {}, undefined, "preview-capture");
     await new Promise((resolve) => setTimeout(resolve, 2200));
     const hidden = await worker.execute("health", {});
     assert.equal(hidden.control.presentation.visible, false);

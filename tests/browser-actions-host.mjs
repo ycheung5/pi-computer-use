@@ -113,6 +113,20 @@ try {
   const clicked = await call("click", { elementId: increment });
   assert.equal(clicked.ok, true, JSON.stringify(clicked));
   assert.match(clicked.text, /Count: 1/);
+  assert.equal(clicked.presentation.tabBadge, true);
+  assert.equal(clicked.presentation.clickMarker, true);
+  assert.equal(clicked.presentation.ariaHidden, true);
+  assert.equal(clicked.presentation.pointerEvents, "none");
+  assert.equal(clicked.presentation.shadowClosed, true);
+  if (process.argv.includes("--visible"))
+    assert.ok(
+      clicked.presentation.frame.applied > 0,
+      JSON.stringify(clicked.presentation.frame),
+    );
+  const image = await call("screenshot", { browserTab: tab, maxWidth: 80 });
+  assert.equal(image.ok, true, JSON.stringify(image));
+  assert.equal(image.screenshot.indicatorsHidden, true);
+  assert.doesNotMatch(clicked.text, /π|Pi is controlling/);
   assert.equal(clicked.verification, "sent");
   const covering = await find("Cover target", "button");
   assert.equal((await call("click", { elementId: covering })).ok, true);
@@ -323,6 +337,13 @@ try {
     (await call("accessibility_tree", { browserTab: tab })).ok,
     true,
   );
+  await host.emit("agent_settled", {});
+  const afterOperation = await call("list_windows", { maxWindows: 1 });
+  const clearedTab = afterOperation.browserLane.browsers
+    .flatMap((browser) => browser.tabs)
+    .find((entry) => entry.id === tab);
+  assert.equal(clearedTab.presentation.active, false);
+  assert.equal(clearedTab.presentation.tabBadge, false);
   console.log(
     JSON.stringify({
       ok: true,

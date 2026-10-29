@@ -7,6 +7,7 @@ import {
 import {
   browse,
   browserListing,
+  clearBrowserIndicators,
   configureBrowser,
   disposeBrowser,
   isBrowserRequest,
@@ -140,6 +141,7 @@ observeNativeInput((active, operationId) => {
       );
 });
 let presentationUpdating = false;
+let presentationError: string | undefined;
 const presentationPoll = setInterval(() => {
   if (!stopListener.hasStarted || presentationUpdating) return;
   presentationUpdating = true;
@@ -147,11 +149,15 @@ const presentationPoll = setInterval(() => {
     .synchronize()
     .then(async ({ settings: current }) => {
       await stopListener.configure(current);
+      presentationError = undefined;
     })
     .catch((error) => {
       const operation = stopListener.currentOperation;
       if (operation) void stopOperation(operation).catch(() => undefined);
-      process.stderr.write(`PRESENTATION_SETTINGS_FAILED: ${String(error)}\n`);
+      const message = String(error);
+      if (message !== presentationError)
+        process.stderr.write(`PRESENTATION_SETTINGS_FAILED: ${message}\n`);
+      presentationError = message;
     })
     .finally(() => {
       presentationUpdating = false;
@@ -173,6 +179,7 @@ async function stopOperation(operationId: string): Promise<void> {
         if (request.operationId === operationId)
           request.controller.abort(new Error("COMPUTER_USE_STOPPED"));
       await awaitPointerCleanup();
+      await clearBrowserIndicators();
       await retireDesktop();
     }
   });
@@ -259,6 +266,7 @@ async function dispatch(
     await stopping;
     await awaitPointerCleanup();
     await stopListener.disarm(operationId);
+    await clearBrowserIndicators();
     const result = await releaseDesktop(operationId);
     if (result.ok) lastTargets.delete(operationId);
     process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);

@@ -44,9 +44,9 @@ export class StopListener {
       settings.stopShortcut,
     ]);
     if (this.started && key !== this.settingsKey) {
-      this.settingsKey = key;
       const result = await this.control.execute("configure", { settings });
       if (!result.ok) throw new Error(String(result.error));
+      this.settingsKey = key;
     }
     if (previous && settings.previewToken !== previous.previewToken)
       await this.preview(settings, true);

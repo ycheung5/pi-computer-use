@@ -15,6 +15,8 @@ import type {
 } from "puppeteer-core";
 import { observationTools } from "./accessibility.js";
 import { normalizeBrowserAction } from "./browser-actions.js";
+import { updateBrowserIndicator } from "./browser-indicators.js";
+import { nativeDesktop } from "./native.js";
 import type { WorkerResult } from "./protocol.js";
 
 // Pinned Puppeteer BiDi exposes its isolated realm internally. Keep the narrow
@@ -63,6 +65,7 @@ interface Tab {
   firefox?: boolean;
   frameId: string;
   isolatedContext?: number;
+  presentation?: Record<string, unknown>;
   dialog?: Dialog;
   promptText?: string;
   navigatingTo?: string;
@@ -72,6 +75,8 @@ interface Tab {
 }
 interface Session {
   external: boolean;
+  framePresentation?: Record<string, unknown>;
+  frameAttemptedAt?: number;
   id: string;
   app: string;
   executable: string;
@@ -822,6 +827,119 @@ async function pageOutline(
   };
 }
 
+async function browserCue(
+  tab: Tab,
+  mode: "mark" | "hide" | "show" | "clear",
+  point?: { x: number; y: number },
+  signal?: AbortSignal,
+): Promise<Record<string, unknown>> {
+  if (tab.firefox)
+    return {
+      active: false,
+      limitation: "Experimental Firefox has no browser presentation cues",
+    };
+  try {
+    const cueSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(1000)])
+      : AbortSignal.timeout(1000);
+    const report = await callPage(
+      tab,
+      updateBrowserIndicator,
+      { mode, point },
+      cueSignal,
+    );
+    tab.presentation = report;
+    const current = session;
+    const child = current?.browser.process();
+    if (
+      mode === "mark" &&
+      current &&
+      !current.external &&
+      child?.pid &&
+      child.exitCode === null &&
+      child.signalCode === null &&
+      !child.spawnargs.some((argument) =>
+        /^--?headless(?:=|$)/.test(argument),
+      ) &&
+      (!current.framePresentation ||
+        (Number(current.framePresentation.applied) === 0 &&
+          Date.now() - (current.frameAttemptedAt ?? 0) > 1000))
+    ) {
+      current.frameAttemptedAt = Date.now();
+      try {
+        current.framePresentation = await nativeDesktop.execute(
+          "browser_frame",
+          { processId: child.pid },
+          cueSignal,
+        );
+      } catch (error) {
+        current.framePresentation = { applied: 0, warning: String(error) };
+      }
+    }
+    if (current?.framePresentation)
+      tab.presentation = { ...report, frame: current.framePresentation };
+    return tab.presentation;
+  } catch (error) {
+    signal?.throwIfAborted();
+    tab.presentation = {
+      ...tab.presentation,
+      warning: `BROWSER_CUE_UNAVAILABLE: ${String(error)}`,
+    };
+    return tab.presentation;
+  }
+}
+
+export async function clearBrowserIndicators(): Promise<void> {
+  const signal = AbortSignal.timeout(1500);
+  for (const current of ownedSessions) {
+    await Promise.all(
+      [...current.tabs.values()]
+        .filter(
+          (tab) => !tab.page.isClosed() && tab.presentation?.active !== false,
+        )
+        .map(async (tab) => {
+          try {
+            const report = await browserCue(tab, "clear", undefined, signal);
+            tab.presentation =
+              report.active === false
+                ? report
+                : { ...report, cleanupPending: true };
+          } catch (error) {
+            tab.presentation = {
+              ...tab.presentation,
+              cleanupPending: true,
+              warning: String(error),
+            };
+          }
+        }),
+    );
+    const child = current.browser.process();
+    if (
+      !current.external &&
+      child?.pid &&
+      child.exitCode === null &&
+      child.signalCode === null &&
+      current.framePresentation
+    ) {
+      try {
+        const cleared = await nativeDesktop.execute(
+          "browser_frame",
+          { processId: child.pid, clear: true },
+          signal,
+        );
+        current.framePresentation = cleared.ok
+          ? undefined
+          : { ...current.framePresentation, cleanupWarning: cleared.error };
+      } catch (error) {
+        current.framePresentation = {
+          ...current.framePresentation,
+          cleanupWarning: String(error),
+        };
+      }
+    }
+  }
+}
+
 async function screenshot(
   tab: Tab,
   args: Record<string, unknown>,
@@ -842,55 +960,62 @@ async function screenshot(
       limitation: "Experimental Firefox viewport capture ignores maxWidth",
     };
   }
-  const viewport = await tab.page.evaluate(() => ({
-    width: innerWidth,
-    height: innerHeight,
-    pixelRatio: devicePixelRatio,
-  }));
-  const maximum = typeof args.maxWidth === "number" ? args.maxWidth : 1600;
-  let scale =
-    maximum > 0
-      ? Math.min(1, maximum / (viewport.width * viewport.pixelRatio))
-      : 1;
-  let base64 = "";
-  let width = 0;
-  let height = 0;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    base64 = await withCancellation(
-      tab.page.screenshot({
-        type: "png",
-        encoding: "base64",
-        captureBeyondViewport: true,
-        clip: {
-          x: 0,
-          y: 0,
-          width: viewport.width,
-          height: viewport.height,
-          scale,
-        },
-      }),
-      signal,
-    );
-    const bytes = Buffer.from(base64, "base64");
-    width = bytes.readUInt32BE(16);
-    height = bytes.readUInt32BE(20);
-    if (!maximum || width <= maximum) break;
-    scale *= maximum / width;
+  const hidden = await browserCue(tab, "hide", undefined, signal);
+  try {
+    const viewport = await tab.page.evaluate(() => ({
+      width: innerWidth,
+      height: innerHeight,
+      pixelRatio: devicePixelRatio,
+    }));
+    const maximum = typeof args.maxWidth === "number" ? args.maxWidth : 1600;
+    let scale =
+      maximum > 0
+        ? Math.min(1, maximum / (viewport.width * viewport.pixelRatio))
+        : 1;
+    let base64 = "";
+    let width = 0;
+    let height = 0;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      base64 = await withCancellation(
+        tab.page.screenshot({
+          type: "png",
+          encoding: "base64",
+          captureBeyondViewport: true,
+          clip: {
+            x: 0,
+            y: 0,
+            width: viewport.width,
+            height: viewport.height,
+            scale,
+          },
+        }),
+        signal,
+      );
+      const bytes = Buffer.from(base64, "base64");
+      width = bytes.readUInt32BE(16);
+      height = bytes.readUInt32BE(20);
+      if (!maximum || width <= maximum) break;
+      scale *= maximum / width;
+    }
+    if (maximum > 0 && width > maximum)
+      return fail(
+        "BROWSER_CAPTURE_FAILED",
+        "browser did not honor the requested image scale",
+      );
+    return {
+      base64,
+      mimeType: "image/png",
+      width,
+      height,
+      coordinateSpace: "page",
+      indicatorsHidden: hidden.hidden === true || hidden.active === false,
+      ...(hidden.warning ? { presentationWarning: hidden.warning } : {}),
+      imageScale: width / viewport.width,
+      bounds: { x: 0, y: 0, width: viewport.width, height: viewport.height },
+    };
+  } finally {
+    await browserCue(tab, "show", undefined, signal).catch(() => undefined);
   }
-  if (maximum > 0 && width > maximum)
-    return fail(
-      "BROWSER_CAPTURE_FAILED",
-      "browser did not honor the requested image scale",
-    );
-  return {
-    base64,
-    mimeType: "image/png",
-    width,
-    height,
-    coordinateSpace: "page",
-    imageScale: width / viewport.width,
-    bounds: { x: 0, y: 0, width: viewport.width, height: viewport.height },
-  };
 }
 
 export async function browserListing(): Promise<Record<string, unknown>> {
@@ -913,6 +1038,7 @@ export async function browserListing(): Promise<Record<string, unknown>> {
           ?.spawnargs.some((argument) => /^--?headless(?:=|$)/.test(argument)),
         experimental: current.app === "firefox",
         external: current.external,
+        presentation: current.framePresentation,
         visible: current.external
           ? undefined
           : current.app === "firefox"
@@ -924,6 +1050,7 @@ export async function browserListing(): Promise<Record<string, unknown>> {
         tabs: await Promise.all(
           [...current.tabs.values()].map(async (tab) => ({
             ...describeTab(tab),
+            presentation: tab.presentation,
             title: await tab.page.title().catch(() => ""),
           })),
         ),
@@ -1054,7 +1181,9 @@ async function targetPoint(
           : "BROWSER_NOT_VISIBLE",
       state.covering ?? state.error,
     );
-  return { x: state.x as number, y: state.y as number };
+  const point = { x: state.x as number, y: state.y as number };
+  await browserCue(tab, "mark", point, signal);
+  return point;
 }
 
 function dialogState(tab: Tab): Record<string, unknown> | undefined {
@@ -1104,6 +1233,7 @@ async function actionEvidence(
     ...detail,
     ok: true,
     action: String(base.action),
+    presentation: tab.presentation,
     verification: "sent",
     verificationNote:
       "Input was dispatched inside the page; inspect the resulting page for the expected effect.",
@@ -1969,6 +2099,7 @@ export async function browse(
               verification: "sent",
               ...detail,
             };
+          await browserCue(tab, "mark", undefined, signal);
           return {
             ok: true,
             action,
@@ -1976,6 +2107,7 @@ export async function browse(
             tab: describeTab(tab),
             background: true,
             verification: "sent",
+            presentation: tab.presentation,
             ...(await pageOutline(tab, args, signal)),
           };
         } catch (error) {
@@ -2021,12 +2153,14 @@ export async function browse(
         "INVALID_ARGUMENTS",
         "a tab address can only be used with set_value",
       );
+    await browserCue(tab, "mark", undefined, signal);
     const base = {
       ok: true,
       action,
       channel: "browser",
       tab: describeTab(tab),
       background: true,
+      presentation: tab.presentation,
     };
     if (action === "set_value" && address?.[2] === "address") {
       const detail = await navigateBrowser(
@@ -2338,6 +2472,7 @@ export async function browse(
 export async function disposeBrowser(): Promise<void> {
   closed = true;
   await starting?.catch(() => undefined);
+  await clearBrowserIndicators();
   session = undefined;
   for (const current of ownedSessions) {
     current.tabs.clear();

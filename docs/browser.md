@@ -52,3 +52,7 @@ Reference limitations remain explicit: iframe contents, closed shadow roots, can
 Proof in this workspace used an official unmodified Mozilla Firefox 144.0 Windows binary extracted into a disposable fixture directory, without running its installer or changing browser registration. WSL2 Pi tool tests passed DOM outline/find/inspection, viewport screenshots, stale IDs, explicit reconnect, CJK/emoji/multiline values, password-value redaction, guarded actions, text/chords, scroll/waits, all three JavaScript dialogs, popup/close, transfer refusal and operation cancellation/recovery. The full action suite also passed from a native Windows Pi host. A native Windows endpoint fixture rejected a non-loopback URL and preserved its externally owned process on valid disconnect. No Firefox forks/ESR or visible/sign-in workflows are claimed validated. No physical desktop input was used.
 
 For installed Firefox run `npm run test:browser -- firefox --headless` and `npm run test:browser:actions -- firefox`. An optional explicit executable is forwarded by WSL fixtures; each fixture asserts the actual launched executable/version/headless flags. Serialize live suites with the shared lab lock when multiple agents use the desktop.
+
+## Browser presentation
+
+See [browser cues](indicators.md#browser-cues) for owned Chromium frame/tab/click markers, image suppression and manual visual acceptance. Experimental Firefox and external endpoints do not receive these cues.

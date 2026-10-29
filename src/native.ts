@@ -151,6 +151,7 @@ export const nativeDesktop = new NativeDesktopClient({
       "controls.cs",
       "window-management.cs",
       "pointer.cs",
+      "browser-indicators.cs",
       "text.cs",
     ]) {
       try {
