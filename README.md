@@ -1,6 +1,6 @@
 # Pi Windows Computer Use
 
-A native Pi extension being built for Windows desktop and browser automation. The current implementation provides the Windows worker health tool; the remaining capabilities and WSL2 launcher are tracked in the [task graph](docs/tickets.md).
+A native Pi extension being built for Windows desktop and browser automation. The current implementation provides the Windows worker health tool from native Windows and WSL2 Pi; the remaining capabilities are tracked in the [task graph](docs/tickets.md).
 
 Start with the [documentation index](docs/README.md). The [specification](docs/spec.md) records agreed requirements; the [implementation plan](docs/implementation-plan.md#detailed-milestones) describes delivery and validation.
 
@@ -16,6 +16,6 @@ npm run check
 
 `npm test` runs portable public-interface tests using real subprocesses. `npm run typecheck`, `npm run lint`, `npm run format` and `npm run lint:fix` provide individual checks and formatting. A restricted environment may require permission for subprocess stdio; such a restriction is not a passing test.
 
-Build distributable contents with `npm pack` (which builds first). On Windows, try the built package in default Pi with `pi -e .`, or install the checkout with `pi install .`. The manifest loads the built extension; no other Pi extension or DSH installation is required.
+Build distributable contents with `npm pack` (which builds first). On Windows or WSL2, try the built package in default Pi with `pi -e .`, or install the checkout with `pi install .`. The manifest loads the built extension; no other Pi extension or DSH installation is required.
 
 The first `windows_computer_use_health` call downloads a private, pinned Windows Node runtime from nodejs.org, verifies its SHA-256 and starts a worker. Subsequent calls reuse it. The runtime is cached below `%LOCALAPPDATA%\pi-computer-use\runtime`; no global Windows Node installation or settings change is made. Initial provisioning requires HTTPS access to nodejs.org. See [runtime and testing](docs/runtime.md) for the protocol, diagnostics and live-check scope.

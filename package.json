@@ -32,7 +32,8 @@
     "check": "npm run typecheck && npm run lint && npm test",
     "prepack": "npm run build",
     "lint:fix": "biome check --write .",
-    "test:native": "node tests/native-health.mjs"
+    "test:native": "node tests/native-health.mjs",
+    "test:wsl": "node tests/wsl-health.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
