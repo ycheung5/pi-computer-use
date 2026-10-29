@@ -1,6 +1,6 @@
 # Pi Windows Computer Use
 
-A native Pi extension being built for Windows desktop and browser automation. The current implementation provides worker health and native window listing from native Windows and WSL2 Pi; remaining capabilities are tracked in the [task graph](docs/tickets.md).
+A native Pi extension being built for Windows desktop and browser automation from native Windows and WSL2 Pi. Follow the [task graph](docs/tickets.md) and [integration draft](https://github.com/ycheung5/pi-computer-use/pull/22) for delivery and validation; the first release is not yet accepted.
 
 Start with the [documentation index](docs/README.md). The [specification](docs/spec.md) records agreed requirements; the [implementation plan](docs/implementation-plan.md#detailed-milestones) describes delivery and validation.
 
@@ -22,4 +22,5 @@ The first `windows_computer_use_health` call downloads a private, pinned Windows
 
 `windows_computer_use_list_windows` returns native identities, bounds and responsiveness without physical input. Its helper compiles once with Windows' existing .NET Framework compiler. See [Windows discovery](docs/windows.md) for options, failure behavior and `npm run test:native:windows` fixture prerequisites.
 
+Guarded pointer checks: `npm run test:native:pointer:guards` sends no physical input. The opt-in `npm run test:native:pointer:physical` requires a dedicated interactive desktop and `PI_CU_DEDICATED_INPUT_DESKTOP=1`; see [pointer validation](docs/pointer.md). Physical acceptance remains pending.
 Personal preferences are shared across projects and hosts. Use `/computer-settings show`, `/computer-settings edit`, or `/computer-settings set {"toolPreset":"lazy"}`. The management tool can describe and load capabilities allowed by the saved selection. See [settings and tool loading](docs/settings.md) for policy, recovery and validation.

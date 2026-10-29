@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Web.Script.Serialization;
 
-// Focused Win32 bridge; owns no UI and never sends physical input.
+// Focused Win32 bridge; guarded input lives in pointer.cs.
 partial class WindowsBridge {
   delegate bool EnumWindow(IntPtr handle, IntPtr parameter);
   [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
@@ -53,6 +53,7 @@ partial class WindowsBridge {
       uint ownerAfter;
       GetWindowThreadProcessId(handle, out ownerAfter);
       if (!IsWindow(handle) || ownerAfter != pid) return true;
+      RememberPointerOrigin(handle);
       Dictionary<string, object> item = new Dictionary<string, object> {
         { "id", "uia:hwnd:" + handle.ToInt64() + ":pid:" + pid },
         { "depth", 1 }, { "name", title.ToString() }, { "className", className.ToString() },
@@ -91,10 +92,13 @@ partial class WindowsBridge {
         request = json.Deserialize<Dictionary<string, object>>(line);
         if (request.ContainsKey("cancel")) continue;
         string action = Convert.ToString(request["action"]);
+        pointerInputAction=action=="click" || action=="double_click" || action=="move" || action=="drag" || action=="scroll";
+        pointerOperation=request.ContainsKey("operationId")?Convert.ToString(request["operationId"]):"";
         object result;
         try {
           Dictionary<string, object> args = (Dictionary<string, object>)request["args"];
-          if (action == "list_windows") result = ListWindows(args);
+          if (action == "click" || action == "double_click" || action == "move" || action == "drag" || (action == "scroll" && (!args.ContainsKey("elementId") || args.ContainsKey("_cancelEvent")))) result = ExecutePointer(action,args);
+          else if (action == "list_windows") result = ListWindows(args);
           else if (action == "focus" || action == "invoke" || action == "set_value" || action == "scroll") result = ExecuteControl(action,args);
           else if (action == "launch_app" || action == "activate_window" || action == "move_window" || action == "close_window") result = ManageNativeWindow(action,args);
           else if (action == "screenshot") result = CaptureScreenshot(args);

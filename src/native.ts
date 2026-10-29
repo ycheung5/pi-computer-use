@@ -1,9 +1,11 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { access, mkdir, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WorkerClient, type WorkerLaunch } from "./client.js";
+import type { WorkerResult } from "./protocol.js";
 
 export async function compileNative(
   sourceNames: string[],
@@ -112,7 +114,29 @@ export async function compileNative(
   }
 }
 
-export const nativeDesktop = new WorkerClient({
+let inputPending = false;
+export function retainInput(): void {
+  inputPending = true;
+}
+export function confirmInputCleanup(): void {
+  inputPending = false;
+}
+
+const operationContext = new AsyncLocalStorage<string>();
+export function runNativeOperation<T>(operationId: string, action: () => T): T {
+  return operationContext.run(operationId, action);
+}
+class NativeDesktopClient extends WorkerClient {
+  override execute(
+    action: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+    operationId = operationContext.getStore(),
+  ): Promise<WorkerResult> {
+    return super.execute(action, args, signal, operationId);
+  }
+}
+export const nativeDesktop = new NativeDesktopClient({
   launch: async (signal) => {
     const names = ["windows.cs"];
     for (const name of [
@@ -120,6 +144,7 @@ export const nativeDesktop = new WorkerClient({
       "capture.cs",
       "controls.cs",
       "window-management.cs",
+      "pointer.cs",
     ]) {
       try {
         await access(
@@ -152,4 +177,5 @@ export const nativeDesktop = new WorkerClient({
     );
   },
   timeoutMs: 40_000,
+  canTerminate: () => !inputPending,
 });
