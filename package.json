@@ -54,7 +54,8 @@
     "test:settings": "node tests/settings-host.mjs",
     "test:native:management": "node tests/native-window-management.mjs",
     "test:native:pointer:guards": "node tests/native-pointer-guards.mjs",
-    "test:native:pointer:physical": "node tests/native-pointer-physical.mjs"
+    "test:native:pointer:physical": "node tests/native-pointer-physical.mjs",
+    "test:browser:actions": "node tests/browser-actions-host.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

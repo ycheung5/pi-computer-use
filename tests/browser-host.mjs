@@ -21,22 +21,28 @@ let serverPath = fileURLToPath(
 );
 if (process.platform !== "win32")
   serverPath = (await run("wslpath", ["-w", serverPath])).stdout.trim();
-const server = spawn(launch.executable, [serverPath], {
-  windowsHide: true,
-  stdio: ["pipe", "pipe", "pipe"],
-});
+const server = spawn(
+  launch.executable,
+  [serverPath, app, process.env.PI_CU_BROWSER_VISIBLE],
+  {
+    windowsHide: true,
+    stdio: ["pipe", "pipe", "pipe"],
+  },
+);
 const lines = createInterface({ input: server.stdout });
-const url = await new Promise((resolve, reject) => {
+const source = await new Promise((resolve, reject) => {
   const timer = setTimeout(
     () => reject(new Error("Fixture server startup timeout")),
     10000,
   );
   lines.once("line", (line) => {
     clearTimeout(timer);
-    resolve(line);
+    resolve(JSON.parse(line));
   });
   server.once("error", reject);
 });
+const url = source.url;
+process.env.PI_CU_SETTINGS_FILE = source.settings;
 const host = computerUseHost();
 registerComputerUse(host.api);
 const client = {
@@ -95,6 +101,7 @@ try {
   assert.match(tree.text, /Fixture heading/);
   const listing = await client.execute("list_windows", {});
   assert.equal(listing.browserLane.browsers[0].tabs[0].id, tab);
+  assert.equal(listing.browserLane.browsers[0].app, app);
   const found = await client.execute("find", {
     browserTab: tab,
     query: "Fixture editor",
