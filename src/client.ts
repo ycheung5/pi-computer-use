@@ -11,6 +11,7 @@ export interface WorkerClientOptions {
   launch: (signal?: AbortSignal) => Promise<WorkerLaunch>;
   timeoutMs?: number;
   shutdownMs?: number;
+  canTerminate?: () => boolean;
   onStop?: (operationId: string) => void;
 }
 
@@ -38,6 +39,7 @@ export class WorkerClient {
   private nextId = 0;
   private disposed = false;
   private failure: Error | undefined;
+  private inputActive = false;
   private retirementFailure: Error | undefined;
   private retirement: Promise<void> | undefined;
   private readonly lifetime = new AbortController();
@@ -82,7 +84,8 @@ export class WorkerClient {
               child,
               new Error("WORKER_PROTOCOL_ERROR: response exceeds 32 MiB"),
             );
-            child.kill();
+            if (!this.inputActive && this.options.canTerminate?.() !== false)
+              child.kill();
             return;
           }
           for (;;) {
@@ -94,7 +97,15 @@ export class WorkerClient {
               const response = JSON.parse(line) as WorkerResponse & {
                 event?: string;
                 operationId?: string;
+                active?: boolean;
               };
+              if (
+                response.event === "input_state" &&
+                typeof response.active === "boolean"
+              ) {
+                this.inputActive = response.active;
+                continue;
+              }
               if (
                 response.event === "stopped" &&
                 typeof response.operationId === "string"
@@ -119,7 +130,8 @@ export class WorkerClient {
                 child,
                 new Error("WORKER_PROTOCOL_ERROR: invalid response"),
               );
-              child.kill();
+              if (!this.inputActive && this.options.canTerminate?.() !== false)
+                child.kill();
             }
           }
         });
@@ -208,7 +220,8 @@ export class WorkerClient {
               `WORKER_TIMEOUT: ${action} exceeded the execution deadline; input was not replayed`,
             ),
           );
-          child.kill();
+          if (!this.inputActive && this.options.canTerminate?.() !== false)
+            child.kill();
         },
         Math.max(
           this.options.timeoutMs ?? 30_000,
@@ -267,6 +280,10 @@ export class WorkerClient {
   }
 
   async retire(reason = "WORKER_RETIRED: operation stopped"): Promise<void> {
+    if (this.inputActive || this.options.canTerminate?.() === false)
+      throw new Error(
+        "INPUT_CLEANUP_UNCONFIRMED: active input prevents bridge retirement",
+      );
     if (this.retirement) return this.retirement;
     const child = this.child;
     if (!child) return;
@@ -274,6 +291,14 @@ export class WorkerClient {
     this.retirement = new Promise<void>((resolve, reject) => {
       let forced: ReturnType<typeof setTimeout> | undefined;
       const timer = setTimeout(() => {
+        if (this.inputActive || this.options.canTerminate?.() === false) {
+          reject(
+            new Error(
+              "INPUT_CLEANUP_UNCONFIRMED: active input prevents bridge retirement",
+            ),
+          );
+          return;
+        }
         child.kill();
         forced = setTimeout(
           () =>

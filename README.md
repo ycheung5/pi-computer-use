@@ -22,4 +22,5 @@ The first `windows_computer_use_health` call downloads a private, pinned Windows
 
 `windows_computer_use_list_windows` returns native identities, bounds and responsiveness without physical input. Its helper compiles once with Windows' existing .NET Framework compiler. See [Windows discovery](docs/windows.md) for options, failure behavior and `npm run test:native:windows` fixture prerequisites.
 
+Guarded pointer checks: `npm run test:native:pointer:guards` sends no physical input. The opt-in `npm run test:native:pointer:physical` requires a dedicated interactive desktop and `PI_CU_DEDICATED_INPUT_DESKTOP=1`; see [pointer validation](docs/pointer.md). Physical acceptance remains pending.
 Personal preferences are shared across projects and hosts. Use `/computer-settings show`, `/computer-settings edit`, or `/computer-settings set {"toolPreset":"lazy"}`. The management tool can describe and load capabilities allowed by the saved selection. See [settings and tool loading](docs/settings.md) for policy, recovery and validation.

@@ -178,6 +178,7 @@ partial class WindowsBridge {
       };
       Dictionary<string, object> result = Result(true, "screenshot");
       result["screenshot"] = metadata;
+      if(target!=IntPtr.Zero && !failed){RememberPointerOrigin(target);RememberPointerTitle(args,target);}
       if (target != IntPtr.Zero && !failed && occluded) result["wgcTarget"] = new Dictionary<string, object> { { "nativeWindowHandle", target.ToInt64() }, { "processId", owner } };
       return result;
     } finally { if (image != null) image.Dispose(); }

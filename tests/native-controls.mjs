@@ -12,6 +12,7 @@ import { computerUseHost } from "./native-host.mjs";
 assert.equal(process.platform, "win32");
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-controls-"));
 const executable = join(folder, "fixture.exe");
+process.env.PI_CU_SETTINGS_FILE = join(folder, "settings.json");
 const compiler = join(
   process.env.WINDIR,
   "Microsoft.NET",
@@ -96,10 +97,6 @@ try {
   assert.equal(refused.ok, false);
   assert.match(refused.error, /READ_ONLY/);
   const fallback = (await find("Unsupported label"))[0];
-  const needsInput = await call("invoke", { elementId: fallback.id });
-  assert.equal(needsInput.ok, false);
-  assert.match(needsInput.error, /NEEDS_INPUT/);
-  assert.equal(needsInput.inputRequired, true);
   const noFallback = await call("invoke", {
     elementId: fallback.id,
     fallbackClick: false,
@@ -128,7 +125,7 @@ try {
       elementScroll: true,
       readOnly: true,
       stale: true,
-      physicalEscalationGated: true,
+      unsupportedFallbackDisabled: true,
       physicalInput: false,
     }),
   );

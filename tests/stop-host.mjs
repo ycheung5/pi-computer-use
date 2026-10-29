@@ -20,7 +20,9 @@ try {
   );
   assert.equal(prepared.ok, true);
   assert.equal(prepared.hookInstalled, true);
-  assert.equal(prepared.inputReady, false);
+  assert.equal(prepared.inputReady, true);
+  assert.ok(prepared.readyActions.includes("drag"));
+  assert.ok(!prepared.readyActions.includes("keypress"));
   assert.match(prepared.cancelEvent, /^Local\\PiComputerUseStop-/);
   worker.stopOperation(operation);
   const deadline = Date.now() + 3000;
@@ -55,12 +57,12 @@ try {
   assert.equal(recovered.ok, true);
   const gated = await worker.execute(
     "click",
-    { x: 0, y: 0 },
+    { x: 0, y: 0, nativeWindowHandle: 1, processId: 1 },
     undefined,
     "new-user-operation",
   );
   assert.equal(gated.ok, false);
-  assert.match(gated.error, /INPUT_SAFETY_NOT_READY/);
+  assert.match(gated.error, /TARGET_IDENTITY_CHANGED/);
   console.log(
     JSON.stringify({
       ok: true,
@@ -68,7 +70,7 @@ try {
       cancelEvent: true,
       sameOperationBlocked: true,
       newOperation: true,
-      physicalInputEnabled: false,
+      guardFailureSentPhysicalInput: false,
       physicalEsc: "manual check pending",
     }),
   );

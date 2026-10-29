@@ -10,7 +10,7 @@ The explicit stop control bypasses the worker request queue. The worker blocks t
 
 ## Physical input contract
 
-This slice does not enable physical input. `prepare_input` reports the cancellation event and `inputReady: false`. Input actions remain gated until their implementation:
+Pointer actions now use the cancellation event and report `inputReady: true` with an explicit `readyActions` list; keyboard actions remain gated. See [pointer guards and physical acceptance](pointer.md). Each enabled action must:
 
 1. Arms the independent listener before sending input and checks the operation's cancellation event.
 2. Checks cancellation between input steps and releases every held key/button in `finally`.
@@ -22,5 +22,5 @@ A blocked read-only UIA/capture process can be killed after a bounded grace peri
 ## Validation
 
 - `npm test` covers a busy disposable protocol peer, queued cancellation, same-operation rejection, custom-continuation rejection, Pi abort, new-user recovery and confirmed retirement of an unresponsive peer.
-- After `npm run build`, `npm run test:stop` verifies real Windows hook registration, named-event signaling through the normal stop control, worker rejection/recovery and the physical-input gate. It sends no keys or pointer input.
+- After `npm run build`, `npm run test:stop` verifies real Windows hook registration, named-event signaling through the normal stop control, worker rejection/recovery and a deliberately invalid pointer target refusal. It sends no keys or pointer input.
 - Actual physical Esc stopping while a fixture is busy, and key/button cleanup during physical actions, remain manual/dedicated-desktop acceptance checks. Hook registration and explicit signaling are not reported as a physical-key test.

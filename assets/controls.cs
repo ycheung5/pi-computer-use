@@ -112,8 +112,15 @@ partial class WindowsBridge {
         else if(element.TryGetCurrentPattern(TogglePattern.Pattern,out raw)){((TogglePattern)raw).Toggle();result["method"]="uia_toggle";}
         else if(element.TryGetCurrentPattern(SelectionItemPattern.Pattern,out raw)){((SelectionItemPattern)raw).Select();result["method"]="uia_select";}
         else if(element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern,out raw)){((ExpandCollapsePattern)raw).Expand();result["method"]="uia_expand";}
-        else throw new InvalidOperationException(Option(args,"fallbackClick",true)?"WCU_NEEDS_INPUT: no supported background action; guarded click required":"UNSUPPORTED_PATTERN: no supported background action");
+        else {
+          // A semantic invoke is not permission to bypass a read-only control.
+          // The pointer click path has no semantic action option and can still
+          // select/focus read-only text with its ordinary click contract.
+          if(args.ContainsKey("action") && element.TryGetCurrentPattern(ValuePattern.Pattern,out raw) && ((ValuePattern)raw).Current.IsReadOnly)throw new InvalidOperationException("READ_ONLY: semantic invoke cannot escalate on a read-only control");
+          throw new InvalidOperationException(Option(args,"fallbackClick",true)?"WCU_NEEDS_INPUT: no supported background action; guarded click required":"UNSUPPORTED_PATTERN: no supported background action");
+        }
       }
+      result["inputTargetHandle"]=window.ToInt64();result["inputTargetProcessId"]=WindowOwner(window);
       result["verification"]="sent";result["verificationNote"]="Action dispatched; use a fresh observation or explicit wait to verify its effect.";
     } catch(Exception error) {
       result["ok"]=false;

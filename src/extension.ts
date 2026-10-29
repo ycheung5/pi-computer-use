@@ -7,6 +7,7 @@ import { WorkerClient, type WorkerClientOptions } from "./client.js";
 import { listWindowsParameters } from "./desktop.js";
 import { nativeWorkerLaunch } from "./launcher.js";
 import { ocrParameters } from "./ocr.js";
+import { pointerTools } from "./pointer.js";
 import type { WorkerResult } from "./protocol.js";
 import {
   allowedToolNames,
@@ -244,14 +245,16 @@ export function registerComputerUse(
       },
     });
   }
-  for (const { action, parameters } of controlTools) {
+  for (const { action, parameters } of [...controlTools, ...pointerTools]) {
     registerTool({
       name: `windows_computer_use_${action}`,
       label: action.replaceAll("_", " "),
       description:
         action === "set_value"
           ? 'Set a native control value or browser field; "new-tab" opens an isolated browser tab and "<tab>:address" navigates it. Physical fallbacks stay guarded.'
-          : "Operate freshly observed controls in the background. Unsupported physical fallbacks are explicitly gated; dispatch alone does not verify task success.",
+          : ["click", "double_click", "move", "drag"].includes(action)
+            ? "Operate the intended desktop pointer target with identity, occlusion and cancellation guards. Background dispatch remains unverified; observe effects before retrying."
+            : "Operate freshly observed controls in the background, escalating only supported needs-input fallbacks through guarded pointer input. Observe effects to verify task success.",
       parameters: Type.Unsafe<Record<string, unknown>>(parameters),
       executionMode: "sequential",
       async execute(_toolCallId, args, signal, _onUpdate, ctx) {
