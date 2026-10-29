@@ -13,12 +13,9 @@
     "dist",
     "README.md",
     "docs/runtime.md",
-    "assets/node-LICENSE.txt",
-    "assets/windows.cs",
     "docs/windows.md",
-    "assets/accessibility.cs",
-    "assets/ownership.cs",
-    "docs/ownership.md"
+    "docs/ownership.md",
+    "assets/"
   ],
   "pi": {
     "extensions": [
@@ -42,7 +39,8 @@
     "test:wsl": "node tests/wsl-health.mjs",
     "test:native:accessibility": "node tests/native-accessibility.mjs",
     "test:native:chromium": "node tests/native-chromium-accessibility.mjs",
-    "test:ownership": "node tests/ownership-host.mjs"
+    "test:ownership": "node tests/ownership-host.mjs",
+    "test:native:capture": "node tests/native-capture.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
