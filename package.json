@@ -47,7 +47,8 @@
     "test:native:ocr": "node tests/native-ocr.mjs",
     "test:stop": "node tests/stop-host.mjs",
     "test:browser": "node tests/browser-host.mjs",
-    "test:native:controls": "node tests/native-controls.mjs"
+    "test:native:controls": "node tests/native-controls.mjs",
+    "test:native:waits": "node tests/native-waits.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

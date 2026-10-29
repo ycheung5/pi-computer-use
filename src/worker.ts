@@ -16,6 +16,7 @@ import {
 } from "./ownership.js";
 import type { WorkerRequest, WorkerResponse } from "./protocol.js";
 import { StopListener } from "./stop.js";
+import { waitDesktop } from "./waits.js";
 
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 let queue = Promise.resolve();
@@ -111,35 +112,37 @@ async function dispatch(
           }
         : isBrowserRequest(request.args)
           ? await browse(request.action, request.args, signal)
-          : request.action === "list_windows"
-            ? {
-                ...(await listWindows(request.args, signal)),
-                browserLane: await browserListing(),
-              }
-            : request.action === "ocr"
-              ? await ocrDesktop(request.args, signal)
-              : request.action === "screenshot"
-                ? await screenshot(request.args, signal)
-                : [
-                      "snapshot",
-                      "accessibility_tree",
-                      "find",
-                      "element_info",
-                      "focus",
-                      "invoke",
-                      "set_value",
-                      "scroll",
-                    ].includes(request.action)
-                  ? await executeAccessibility(
-                      request.action,
-                      request.args,
-                      signal,
-                    )
-                  : {
-                      ok: false,
-                      action: request.action,
-                      error: "UNKNOWN_ACTION",
-                    },
+          : ["wait", "wait_for"].includes(request.action)
+            ? await waitDesktop(request.action, request.args, signal)
+            : request.action === "list_windows"
+              ? {
+                  ...(await listWindows(request.args, signal)),
+                  browserLane: await browserListing(),
+                }
+              : request.action === "ocr"
+                ? await ocrDesktop(request.args, signal)
+                : request.action === "screenshot"
+                  ? await screenshot(request.args, signal)
+                  : [
+                        "snapshot",
+                        "accessibility_tree",
+                        "find",
+                        "element_info",
+                        "focus",
+                        "invoke",
+                        "set_value",
+                        "scroll",
+                      ].includes(request.action)
+                    ? await executeAccessibility(
+                        request.action,
+                        request.args,
+                        signal,
+                      )
+                    : {
+                        ok: false,
+                        action: request.action,
+                        error: "UNKNOWN_ACTION",
+                      },
   };
   process.stdout.write(`${JSON.stringify(response)}\n`);
 }

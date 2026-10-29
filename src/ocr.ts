@@ -172,6 +172,7 @@ export async function ocrDesktop(
       occludedPossible: image.occludedPossible,
       captureWarnings: image.captureWarnings,
       conclusive: image.occludedPossible !== true,
+      captureConclusive: image.occludedPossible !== true,
     };
     if (args.includeScreenshot) result.screenshot = image;
     if (args.query !== undefined) {
