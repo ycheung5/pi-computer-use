@@ -136,6 +136,27 @@ export function registerComputerUse(
       };
     },
   });
+  pi.registerTool({
+    name: "windows_computer_use_set_value",
+    label: "Set Value",
+    description:
+      'Browser navigation: elementId "new-tab" opens an isolated background tab; "<tab>:address" navigates it. Use returned tab IDs with browserTab for page observations. Native control values are added by the desktop action slice.',
+    parameters: Type.Object({
+      elementId: Type.String({ minLength: 1 }),
+      value: Type.String(),
+      fallbackType: Type.Optional(Type.Boolean({ default: true })),
+      restoreClipboard: Type.Optional(Type.Boolean({ default: true })),
+    }),
+    executionMode: "sequential",
+    async execute(_toolCallId, args, signal, _onUpdate, ctx) {
+      const result = await executeDesktop("set_value", args, signal, ctx);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: result,
+        isError: !result.ok,
+      };
+    },
+  });
   for (const { action, parameters } of observationTools) {
     pi.registerTool({
       name: `windows_computer_use_${action}`,
@@ -161,6 +182,7 @@ export function registerComputerUse(
           default: "active_window",
         }),
       ),
+      browserTab: Type.Optional(Type.String({ minLength: 1 })),
       windowTitle: Type.Optional(Type.String({ minLength: 1 })),
       processId: Type.Optional(Type.Integer({ minimum: 1 })),
       nativeWindowHandle: Type.Optional(Type.Integer({ minimum: 1 })),
