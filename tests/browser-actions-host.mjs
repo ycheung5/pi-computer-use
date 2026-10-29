@@ -19,10 +19,14 @@ let fixture = fileURLToPath(
 );
 if (process.platform !== "win32")
   fixture = (await run("wslpath", ["-w", fixture])).stdout.trim();
-const server = spawn(launch.executable, [fixture], {
-  stdio: ["pipe", "pipe", "pipe"],
-  windowsHide: true,
-});
+const server = spawn(
+  launch.executable,
+  [fixture, process.env.PI_CU_BROWSER_APP, process.env.PI_CU_BROWSER_VISIBLE],
+  {
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  },
+);
 const lines = createInterface({ input: server.stdout });
 const source = await new Promise((resolve, reject) => {
   const timer = setTimeout(
@@ -35,6 +39,7 @@ const source = await new Promise((resolve, reject) => {
   });
   server.once("error", reject);
 });
+process.env.PI_CU_SETTINGS_FILE = source.settings;
 const host = computerUseHost();
 registerComputerUse(host.api);
 const call = async (action, args, signal) => {

@@ -1,23 +1,86 @@
 import { createInterface } from "node:readline";
-import { executeAccessibility } from "./accessibility.js";
+import {
+  controlTools,
+  executeAccessibility,
+  observationTools,
+} from "./accessibility.js";
 import {
   browse,
   browserListing,
+  configureBrowser,
   disposeBrowser,
   isBrowserRequest,
 } from "./browser.js";
-import { screenshot } from "./capture.js";
-import { disposeDesktop, listWindows, retireDesktop } from "./desktop.js";
-import { disposeOcr, ocrDesktop } from "./ocr.js";
+import { browserActionTools } from "./browser-actions.js";
+import { screenshot, screenshotParameters } from "./capture.js";
+import {
+  disposeDesktop,
+  listWindows,
+  listWindowsParameters,
+  retireDesktop,
+} from "./desktop.js";
+import { disposeOcr, ocrDesktop, ocrParameters } from "./ocr.js";
 import {
   acquireDesktop,
   disposeOwnership,
   releaseDesktop,
 } from "./ownership.js";
 import type { WorkerRequest, WorkerResponse } from "./protocol.js";
+import { PersonalSettingsManager } from "./settings.js";
 import { StopListener } from "./stop.js";
-import { waitDesktop } from "./waits.js";
+import { waitDesktop, waitTools } from "./waits.js";
 
+const settings = new PersonalSettingsManager(
+  new Map<string, { description: string; parameters?: unknown }>([
+    [
+      "health",
+      {
+        description: "Check automation worker health",
+        parameters: {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        },
+      },
+    ],
+    [
+      "list_windows",
+      {
+        description: "Discover native windows and browser tabs",
+        parameters: listWindowsParameters,
+      },
+    ],
+    [
+      "screenshot",
+      {
+        description: "Capture desktop, native window or browser page",
+        parameters: screenshotParameters,
+      },
+    ],
+    [
+      "ocr",
+      {
+        description: "Read literal screen text and coordinates",
+        parameters: ocrParameters,
+      },
+    ],
+    ...[
+      ...observationTools,
+      ...controlTools,
+      ...waitTools,
+      ...browserActionTools,
+    ].map(
+      (tool) =>
+        [
+          tool.action,
+          {
+            description: `Windows computer use ${tool.action}`,
+            parameters: tool.parameters,
+          },
+        ] as const,
+    ),
+  ]),
+);
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 let queue = Promise.resolve();
 const requests = new Map<
@@ -68,6 +131,29 @@ async function dispatch(
     process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
     return;
   }
+  if (["settings_get", "settings_update", "tools"].includes(request.action)) {
+    const result = await settings.handle(request.action, request.args);
+    process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
+    return;
+  }
+  const denial = await settings.authorize(request.action);
+  if (denial) {
+    process.stdout.write(
+      `${JSON.stringify({ id: request.id, result: { ok: false, action: request.action, error: denial } })}\n`,
+    );
+    return;
+  }
+  const configuration = settings.currentSettings;
+  if (
+    configuration &&
+    process.platform === "win32" &&
+    settings.currentFileExists
+  )
+    await configureBrowser({
+      browserApp: configuration.browserApp,
+      browserVisible: configuration.browserVisible,
+      browserSignIn: configuration.browserSignIn,
+    });
   if (request.action !== "health" && blocked.has(operationId)) {
     process.stdout.write(
       `${JSON.stringify({ id: request.id, result: { ok: false, action: request.action, error: "COMPUTER_USE_STOPPED: wait for a new user operation" } })}\n`,
@@ -109,6 +195,11 @@ async function dispatch(
             processId: process.pid,
             platform: process.platform,
             nodeVersion: process.version,
+            settings: {
+              preset: settings.currentSettings?.toolPreset,
+              notices: settings.currentNotices,
+              source: settings.currentSource,
+            },
           }
         : isBrowserRequest(request.args)
           ? await browse(request.action, request.args, signal)

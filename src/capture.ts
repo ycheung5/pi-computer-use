@@ -4,6 +4,24 @@ import { WorkerClient } from "./client.js";
 import { compileNative, nativeDesktop } from "./native.js";
 import type { WorkerResult } from "./protocol.js";
 
+export const screenshotParameters = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    scope: {
+      type: "string",
+      enum: ["active_window", "desktop"],
+      default: "active_window",
+    },
+    browserTab: { type: "string", minLength: 1 },
+    windowTitle: { type: "string", minLength: 1 },
+    processId: { type: "integer", minimum: 1 },
+    nativeWindowHandle: { type: "integer", minimum: 1 },
+    activate: { type: "boolean", default: false },
+    maxWidth: { type: "integer", minimum: 0, maximum: 7680, default: 1600 },
+  },
+};
+
 function createWgc(): WorkerClient {
   return new WorkerClient({
     launch: async (signal) => {

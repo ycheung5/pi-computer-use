@@ -8,9 +8,18 @@ import { join } from "node:path";
 const folder = await mkdtemp(join(tmpdir(), "pi-browser-actions-"));
 const upload = join(folder, "fixture-upload.txt");
 await writeFile(upload, "upload fixture only");
+const settings = join(folder, "settings.json");
+await writeFile(
+  settings,
+  JSON.stringify({
+    browserApp: process.argv[2] ?? "edge",
+    browserVisible: process.argv[3] === "true",
+    browserSignIn: false,
+  }),
+);
 const html = `<!doctype html><title>Browser action fixture</title>
 <h1>Browser action fixture</h1><p id="count">Count: 0</p><button id="increment" onclick="count.textContent='Count: '+(++window.counter)">Increment</button>
-<button onclick="cover.hidden=false">Cover target</button><button id="cover" hidden style="position:fixed;inset:0;z-index:100;background:white" onclick="cover.hidden=true">Remove cover</button>
+<button onclick="document.elementFromPoint=()=>increment;cover.hidden=false">Cover target</button><button id="cover" hidden style="position:fixed;inset:0;z-index:100;background:white" onclick="cover.hidden=true">Remove cover</button>
 <label>Editor<input id="editor" value="initial"></label><label>Read only<input readonly value="locked"></label><button disabled>Disabled action</button>
 <label>Color<select id="colors"><option value="red">Red</option><option value="green">Green</option><option disabled>Unavailable</option></select></label><label>Accept checkbox<input id="check" type="checkbox"></label>
 <label>Date field<input type="date" value="2026-01-01"></label>
@@ -42,6 +51,7 @@ server.listen(0, "127.0.0.1", () =>
     JSON.stringify({
       url: `http://127.0.0.1:${server.address().port}/`,
       upload,
+      settings,
     }),
   ),
 );

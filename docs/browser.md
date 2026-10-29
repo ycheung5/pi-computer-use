@@ -2,7 +2,7 @@
 
 Pi's normal tools route to the Windows browser worker when given `browserTab` or a browser element ID. `set_value` with `elementId: new-tab` opens a URL in a dedicated browser context; `<tab>:address` navigates it. `list_windows` annotates connected browser/tab IDs. Snapshot, accessibility_tree, find, element_info and screenshot work in this channel. Snapshot emits its PNG as an image block, with base64 omitted from text metadata.
 
-Installed Chrome and Edge are discovered from Windows default-browser registration, App Paths and conventional locations. The worker uses pinned puppeteer-core 25.16.0 with explicit installed executables, CDP, no managed browser downloads and no daily profiles. Temporary profiles and an isolated browser context are created by the worker. Background target creation is explicit. This slice covers reading/navigation; browser interaction, dialogs/transfers and experimental Firefox arrive in the subsequent tickets. Persistent profiles are a separate ticket.
+Installed Chrome and Edge are discovered from Windows default-browser registration, App Paths and conventional locations. The worker uses pinned puppeteer-core 25.16.0 with explicit installed executables, CDP, no managed browser downloads and no daily profiles. Temporary profiles and an isolated browser context are created by the worker. Background target creation is explicit. The Chromium channel supports reading/navigation and guarded element interactions, page text/key input, scrolling, explicit waits, JavaScript dialogs, popups, upload/download metadata and tab closure. Experimental Firefox and persistent profiles are separate tickets. Browser drag remains unsupported as in the reference.
 
 ## Identity and coordinates
 
@@ -23,3 +23,15 @@ The Chromium outline comes from the accessibility tree. Traversal returns explic
 Own browser processes and temporary profiles are closed/removed at worker disposal. Abrupt OS termination can leave temporary profile directories; persistent profile policy and idle retirement are completed with the profile lifecycle slice. Do not describe this read slice as full browser parity.
 
 Source: [Puppeteer installation](https://pptr.dev/guides/installation), [background page options](https://pptr.dev/api/puppeteer.createpageoptions), [accessibility snapshots](https://pptr.dev/api/puppeteer.accessibility.snapshot). Puppeteer is Apache-2.0 licensed; the package includes its license notice.
+
+## Chromium interactions
+
+Use observed browser element IDs for click, double-click, hover, focus, invoke and field values; browserTab selects the page for typing, keypress, scrolling and waits. Inputs stay inside the browser protocol. Target/disabled/readonly/occlusion checks run in a separate browser world so page code cannot simply replace the guard's DOM methods. The Windows worker serializes calls, retains operation ownership and honors stop/cancellation before subsequent inputs.
+
+Ordinary browser actions return a bounded fresh outline/page-change report with `verification: sent`; this is evidence to inspect, not proof of the user's objective. Explicit waits return observed, timeout or inconclusive when budgets prevent proving absence. A post-action observation failure is recorded separately without replaying the action. Pending navigation is reported as still loading rather than navigated successfully.
+
+An open JavaScript dialog blocks other page reads/actions. `keypress` Enter accepts it and Escape dismisses it; `type_text` supplies a prompt answer before Enter. Browser-window shortcuts such as Ctrl+L/T are refused; use address/new-tab tools. Background operation is the default; explicit activate_window is allowed to activate. Native JavaScript dialogs may affect foreground in visible browsers, matching the reference limitation.
+
+File inputs take existing absolute Windows file paths, one per line or separated by `|`. An intercepted chooser reports an observed input ID instead of opening the OS file dialog. Chromium downloads report their state/name/file metadata under the package's Windows downloads directory; action-triggered popups return new tab IDs. None of these operations uses the user's daily browser profile.
+
+Run `npm run test:browser:actions -- edge` or `-- chrome` after building. The default action fixture is headless; append `--visible` for the visible-browser check. It exercises text/chords, occlusion (including a page override of elementFromPoint), disabled/readonly controls, select/checkbox, dialogs, scroll/waits, transfers, popup/close and operation cancellation recovery through the Pi tool/worker interfaces. Live suites are serialized externally with the shared lab lock when multiple development agents use the same desktop.

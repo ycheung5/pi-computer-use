@@ -1,6 +1,15 @@
 import { nativeDesktop } from "./native.js";
 import type { WorkerResult } from "./protocol.js";
 
+export const listWindowsParameters = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    includeInvisible: { type: "boolean", default: false },
+    maxWindows: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+  },
+};
+
 export async function listWindows(
   args: Record<string, unknown>,
   signal?: AbortSignal,
