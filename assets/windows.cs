@@ -93,8 +93,10 @@ partial class WindowsBridge {
         string action = Convert.ToString(request["action"]);
         object result;
         try {
-          if (action == "list_windows") result = ListWindows((Dictionary<string, object>)request["args"]);
-          else if (action == "screenshot") result = CaptureScreenshot((Dictionary<string, object>)request["args"]);
+          Dictionary<string, object> args = (Dictionary<string, object>)request["args"];
+          if (action == "list_windows") result = ListWindows(args);
+          else if (action == "screenshot") result = CaptureScreenshot(args);
+          else if (action == "snapshot" || action == "accessibility_tree" || action == "find" || action == "element_info") result = ObserveAccessibility(action, args);
           else throw new InvalidOperationException("UNKNOWN_ACTION");
         } catch (Exception error) {
           Dictionary<string, object> failure = Result(false, action);

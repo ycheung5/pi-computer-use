@@ -139,6 +139,70 @@ try {
   );
   assert.equal(normal.windowCaptureFailed, false);
   assert.equal(normal.occludedPossible, false);
+  const snapshotTool = host.tools.get("windows_computer_use_snapshot");
+  const snapshot = await snapshotTool.execute(
+    "snapshot-image",
+    {
+      nativeWindowHandle: handle,
+      processId: fixture.pid,
+      captureWindow: true,
+      maxWidth: 80,
+    },
+    undefined,
+    undefined,
+    {},
+  );
+  assert.equal(snapshot.isError, false);
+  assert.ok(
+    snapshot.content.some((item) => item.type === "image"),
+    "snapshot includes a separate PNG by default",
+  );
+  const snapshotText = JSON.parse(
+    snapshot.content.find((item) => item.type === "text").text,
+  );
+  assert.equal(snapshotText.screenshot.width, 80);
+  assert.equal("screenshotPending" in snapshotText, false);
+  const noImage = await snapshotTool.execute(
+    "snapshot-no-image",
+    {
+      nativeWindowHandle: handle,
+      processId: fixture.pid,
+      includeScreenshot: false,
+    },
+    undefined,
+    undefined,
+    {},
+  );
+  assert.equal(
+    noImage.content.some((item) => item.type === "image"),
+    false,
+  );
+  const failedSnapshot = await snapshotTool.execute(
+    "snapshot-failed-tree",
+    {
+      nativeWindowHandle: handle,
+      processId: fixture.pid + 100000,
+      maxWidth: 80,
+    },
+    undefined,
+    undefined,
+    {},
+  );
+  assert.equal(
+    failedSnapshot.isError,
+    true,
+    "an attached screenshot does not turn failed UIA into success",
+  );
+  assert.ok(failedSnapshot.content.some((item) => item.type === "image"));
+  const failedDetails = JSON.parse(
+    failedSnapshot.content.find((item) => item.type === "text").text,
+  );
+  assert.equal(failedDetails.ok, false);
+  assert.equal(
+    failedDetails.screenshot.method,
+    "screen",
+    "snapshot defaults to desktop capture unless captureWindow is requested",
+  );
   await command("cover");
   const covered = await call();
   assert.deepEqual(

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { observationTools } from "./accessibility.js";
 import { screenshotContent } from "./capture.js";
 import { WorkerClient, type WorkerClientOptions } from "./client.js";
 import { nativeWorkerLaunch } from "./launcher.js";
@@ -9,9 +10,20 @@ export function registerComputerUse(
   pi: Pick<ExtensionAPI, "registerTool" | "on">,
   options: WorkerClientOptions = { launch: nativeWorkerLaunch },
 ): void {
-  const worker = new WorkerClient(options);
+  const worker = new WorkerClient({
+    ...options,
+    timeoutMs: options.timeoutMs ?? 90_000,
+  });
   let operationId = randomUUID();
   let operationActive = false;
+  const executeDesktop = (
+    action: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ) => {
+    operationActive = true;
+    return worker.execute(action, args, signal, operationId);
+  };
   const endOperation = async () => {
     if (!operationActive) return;
     operationActive = false;
@@ -54,13 +66,7 @@ export function registerComputerUse(
     }),
     executionMode: "sequential",
     async execute(_toolCallId, args, signal) {
-      operationActive = true;
-      const result = await worker.execute(
-        "list_windows",
-        args,
-        signal,
-        operationId,
-      );
+      const result = await executeDesktop("list_windows", args, signal);
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
         details: result,
@@ -68,6 +74,20 @@ export function registerComputerUse(
       };
     },
   });
+  for (const { action, parameters } of observationTools) {
+    pi.registerTool({
+      name: `windows_computer_use_${action}`,
+      label: action.replaceAll("_", " "),
+      description:
+        "Observe Windows accessibility without physical input. Element references require fresh observation; partial results are explicitly marked.",
+      parameters: Type.Unsafe<Record<string, unknown>>(parameters),
+      executionMode: "sequential",
+      async execute(_toolCallId, args, signal) {
+        const result = await executeDesktop(action, args, signal);
+        return screenshotContent(result);
+      },
+    });
+  }
   pi.registerTool({
     name: "windows_computer_use_screenshot",
     label: "Screenshot",
@@ -89,9 +109,8 @@ export function registerComputerUse(
     }),
     executionMode: "sequential",
     async execute(_toolCallId, args, signal) {
-      operationActive = true;
       return screenshotContent(
-        await worker.execute("screenshot", args, signal, operationId),
+        await executeDesktop("screenshot", args, signal),
       );
     },
   });

@@ -37,3 +37,15 @@ Live proof on 2026-10-29 used Windows 11 x64 through WSL interop and the private
 ## Remaining targeted behavior
 
 Listing establishes identity metadata but does not resolve an action target. Ambiguous-title rejection, previously observed HWND/PID rejection after replacement, and inaccessible UIA targets must be tested through the first real targeted observation/action in the accessibility slice. No test-only `resolve_window` tool or request was added to claim those behaviors prematurely. Browser tab annotations also belong to browser integration.
+
+## Accessibility observations
+
+`accessibility_tree`, `snapshot`, `find` and `element_info` are registered Pi tools backed by a persistent MTA UIA bridge. The worker validates options before native execution. Tree traversal bounds depth, nodes and elapsed time; a synchronous provider can still block, so the native process has a 40-second watchdog and the extension permits the maximum 30-second traversal budget plus cleanup. Truncated or failed observations remain explicit.
+
+Runtime element references are held for five minutes, scoped to their observed HWND/PID and checked against the current RuntimeId. Unseen, removed and wrong-owner references require fresh observation. Full detail can include a supported value, except password-field values are never read. Native window IDs also validate HWND/PID before UIA access. Title/PID selection refuses ambiguous windows; explicit handles are preferred.
+
+Chromium observations probe renderer accessibility and report `webContent` readiness. A first read can return `starting`; callers should observe again rather than infer that absent page controls do not exist. Unnamed browser layout panes do not consume logical depth. This has been exercised against installed Edge without a forced-accessibility launch flag; other Chromium integrations require their own release checks.
+
+`npm run test:native:accessibility` (Windows Node after build) opens dedicated passive forms and verifies structured trees, values/password protection, find, element inspection, title ambiguity, missing/wrong-owner targets, removed/unseen references and depth/node truncation. `npm run test:native:chromium` opens a disposable visible Chromium profile and local page, reads its page button after lazy initialization, and closes only that browser. Neither test sends physical input; they are live desktop tests, not portable substitutes.
+
+Live evidence: Windows 11 x64, .NET Framework bridge, native form fixtures and installed Edge passed on 2026-10-29. Elevated/UAC target access and five-minute real-time expiry remain release cases. Snapshot now includes a separate PNG by default, preserves explicit UIA failure when an image is attached, and honors `includeScreenshot: false`. Like the reference, `captureWindow: false` defaults to desktop pixels; `captureWindow: true` captures the selected window. Sparse empty-find OCR composition remains assigned to the OCR slice, with `ocrFallbackPending` explicit until integrated. Browser-channel routing is added by the browser slices, not inferred from desktop UIA support.

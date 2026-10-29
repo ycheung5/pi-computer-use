@@ -9,7 +9,6 @@ using System.Windows.Forms;
 
 partial class WindowsBridge {
   [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
-  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
   [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out Rect bounds, int bytes);
 
   static IntPtr ResolveCaptureWindow(Dictionary<string, object> args) {

@@ -13,9 +13,9 @@
     "dist",
     "README.md",
     "docs/runtime.md",
-    "assets/",
     "docs/windows.md",
-    "docs/ownership.md"
+    "docs/ownership.md",
+    "assets/"
   ],
   "pi": {
     "extensions": [
@@ -36,9 +36,11 @@
     "lint:fix": "biome check --write .",
     "test:native": "node tests/native-health.mjs",
     "test:native:windows": "node tests/native-windows.mjs",
-    "test:native:capture": "node tests/native-capture.mjs",
     "test:wsl": "node tests/wsl-health.mjs",
-    "test:ownership": "node tests/ownership-host.mjs"
+    "test:native:accessibility": "node tests/native-accessibility.mjs",
+    "test:native:chromium": "node tests/native-chromium-accessibility.mjs",
+    "test:ownership": "node tests/ownership-host.mjs",
+    "test:native:capture": "node tests/native-capture.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
