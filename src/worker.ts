@@ -1,5 +1,11 @@
 import { createInterface } from "node:readline";
 import { observeDesktop } from "./accessibility.js";
+import {
+  browse,
+  browserListing,
+  disposeBrowser,
+  isBrowserRequest,
+} from "./browser.js";
 import { disposeDesktop, listWindows } from "./desktop.js";
 import {
   acquireDesktop,
@@ -47,13 +53,21 @@ async function dispatch(
             platform: process.platform,
             nodeVersion: process.version,
           }
-        : request.action === "list_windows"
-          ? await listWindows(request.args, signal)
-          : ["snapshot", "accessibility_tree", "find", "element_info"].includes(
-                request.action,
-              )
-            ? await observeDesktop(request.action, request.args, signal)
-            : { ok: false, action: request.action, error: "UNKNOWN_ACTION" },
+        : isBrowserRequest(request.args)
+          ? await browse(request.action, request.args, signal)
+          : request.action === "list_windows"
+            ? {
+                ...(await listWindows(request.args, signal)),
+                browserLane: await browserListing(),
+              }
+            : [
+                  "snapshot",
+                  "accessibility_tree",
+                  "find",
+                  "element_info",
+                ].includes(request.action)
+              ? await observeDesktop(request.action, request.args, signal)
+              : { ok: false, action: request.action, error: "UNKNOWN_ACTION" },
   };
   process.stdout.write(`${JSON.stringify(response)}\n`);
 }
@@ -109,6 +123,7 @@ input.on("line", (line) => {
 });
 input.on("close", () => {
   void queue.finally(async () => {
+    await disposeBrowser();
     await disposeDesktop();
     await disposeOwnership();
   });

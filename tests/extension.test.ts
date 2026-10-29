@@ -112,3 +112,50 @@ test("Pi observation tools expose argument failures through normal execution", a
     for (const handler of shutdown) await handler();
   }
 });
+
+test("Pi browser navigation is exposed without adding a separate MCP extension", async () => {
+  const tools: ToolDefinition[] = [];
+  const shutdown: Array<() => Promise<void>> = [];
+  const host = {
+    registerTool: (tool: ToolDefinition) => tools.push(tool),
+    on: (event: string, handler: () => Promise<void>) => {
+      if (event === "session_shutdown") shutdown.push(handler);
+      return () => {};
+    },
+  } as Pick<ExtensionAPI, "registerTool" | "on">;
+  registerComputerUse(host, {
+    launch: async () => ({
+      executable: process.execPath,
+      args: [
+        "--import",
+        "tsx",
+        fileURLToPath(new URL("../src/worker.ts", import.meta.url)),
+      ],
+    }),
+  });
+  try {
+    const navigation = tools.find(
+      (tool) => tool.name === "windows_computer_use_set_value",
+    );
+    assert.ok(navigation, "browser navigation uses reference set_value tool");
+    const result = await navigation.execute(
+      "invalid-browser-url",
+      { elementId: "new-tab", value: "javascript:alert(1)" },
+      undefined,
+      undefined,
+      {} as Parameters<typeof navigation.execute>[4],
+    );
+    assert.equal(result.isError, true);
+    assert.match(JSON.stringify(result.details), /INVALID_ARGUMENTS.*URL/);
+    const tree = tools.find(
+      (tool) => tool.name === "windows_computer_use_accessibility_tree",
+    );
+    assert.ok(tree);
+    assert.ok(
+      "browserTab" in
+        (tree.parameters as { properties: Record<string, unknown> }).properties,
+    );
+  } finally {
+    for (const handler of shutdown) await handler();
+  }
+});
