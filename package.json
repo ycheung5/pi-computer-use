@@ -14,7 +14,8 @@
     "README.md",
     "docs/runtime.md",
     "assets/",
-    "docs/windows.md"
+    "docs/windows.md",
+    "docs/ownership.md"
   ],
   "pi": {
     "extensions": [
@@ -36,7 +37,8 @@
     "test:native": "node tests/native-health.mjs",
     "test:native:windows": "node tests/native-windows.mjs",
     "test:native:capture": "node tests/native-capture.mjs",
-    "test:wsl": "node tests/wsl-health.mjs"
+    "test:wsl": "node tests/wsl-health.mjs",
+    "test:ownership": "node tests/ownership-host.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

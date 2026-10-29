@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { screenshotContent } from "./capture.js";
@@ -9,6 +10,21 @@ export function registerComputerUse(
   options: WorkerClientOptions = { launch: nativeWorkerLaunch },
 ): void {
   const worker = new WorkerClient(options);
+  let operationId = randomUUID();
+  let operationActive = false;
+  const endOperation = async () => {
+    if (!operationActive) return;
+    operationActive = false;
+    await worker.execute("operation_end", {}, undefined, operationId);
+  };
+  pi.on("before_agent_start", async (event) => {
+    if (event.messageType !== "user") return;
+    await endOperation();
+    operationId = randomUUID();
+  });
+  pi.on("agent_settled", async () => {
+    await endOperation();
+  });
   pi.registerTool({
     name: "windows_computer_use_health",
     label: "Windows Computer Use Health",
@@ -38,7 +54,13 @@ export function registerComputerUse(
     }),
     executionMode: "sequential",
     async execute(_toolCallId, args, signal) {
-      const result = await worker.execute("list_windows", args, signal);
+      operationActive = true;
+      const result = await worker.execute(
+        "list_windows",
+        args,
+        signal,
+        operationId,
+      );
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
         details: result,
@@ -67,8 +89,9 @@ export function registerComputerUse(
     }),
     executionMode: "sequential",
     async execute(_toolCallId, args, signal) {
+      operationActive = true;
       return screenshotContent(
-        await worker.execute("screenshot", args, signal),
+        await worker.execute("screenshot", args, signal, operationId),
       );
     },
   });
