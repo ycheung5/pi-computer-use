@@ -9,31 +9,47 @@ import { provisionRuntime } from "./runtime.js";
 
 const run = promisify(execFile);
 
-async function wslWorkerLaunch(
-  worker: string,
+let cachedWindowsEnvironment:
+  | { localData: string; architecture: string }
+  | undefined;
+export async function windowsHostEnvironment(
   signal?: AbortSignal,
-): Promise<WorkerLaunch> {
-  const script = `[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); @{ localData=$env:LOCALAPPDATA; architecture=$env:PROCESSOR_ARCHITECTURE } | ConvertTo-Json -Compress`;
+): Promise<{ localData: string; architecture: string }> {
+  if (process.platform === "win32") {
+    if (!process.env.LOCALAPPDATA)
+      throw new Error(
+        "WINDOWS_DATA_DIRECTORY_MISSING: LOCALAPPDATA is required",
+      );
+    return { localData: process.env.LOCALAPPDATA, architecture: process.arch };
+  }
+  if (cachedWindowsEnvironment) return cachedWindowsEnvironment;
   let environment: { localData: string; architecture: string };
   try {
+    // Fixed variable names, not expanded values: paths containing shell characters remain data.
     const result = await run(
-      "powershell.exe",
-      [
-        "-NoLogo",
-        "-NoProfile",
-        "-NonInteractive",
-        "-EncodedCommand",
-        Buffer.from(script, "utf16le").toString("base64"),
-      ],
-      { signal, timeout: 15_000, maxBuffer: 1024 * 1024 },
+      "cmd.exe",
+      ["/u", "/d", "/c", "set LOCALAPPDATA & set PROCESSOR_ARCHITECTURE"],
+      { signal, timeout: 5000, maxBuffer: 65536, encoding: "buffer" },
     );
-    environment = JSON.parse(result.stdout.trim());
+    const values = new Map(
+      result.stdout
+        .toString("utf16le")
+        .split(/\r?\n/u)
+        .map((line) => {
+          const equals = line.indexOf("=");
+          return [line.slice(0, equals), line.slice(equals + 1)] as const;
+        }),
+    );
+    environment = {
+      localData: values.get("LOCALAPPDATA") ?? "",
+      architecture: values.get("PROCESSOR_ARCHITECTURE") ?? "",
+    };
     if (!environment.localData || !environment.architecture)
       throw new Error("Windows environment is incomplete");
   } catch (error) {
     signal?.throwIfAborted();
     throw new Error(
-      "WSL_BOOTSTRAP_FAILED: enable Windows executable interop and ensure powershell.exe is on PATH",
+      "WSL_BOOTSTRAP_FAILED: enable Windows executable interop and ensure cmd.exe and wslpath are available",
       { cause: error },
     );
   }
@@ -48,6 +64,19 @@ async function wslWorkerLaunch(
       : environment.architecture === "ARM64"
         ? "arm64"
         : environment.architecture;
+  cachedWindowsEnvironment = { localData, architecture };
+  return cachedWindowsEnvironment;
+}
+
+async function wslWorkerLaunch(
+  worker: string,
+  signal?: AbortSignal,
+): Promise<WorkerLaunch> {
+  const { localData, architecture } = await windowsHostEnvironment(signal);
+  const translate = async (mode: "-u" | "-w", path: string) =>
+    (
+      await run("wslpath", [mode, path], { signal, timeout: 5000 })
+    ).stdout.trim();
   const executable = await provisionRuntime({
     directory: join(localData, "pi-computer-use", "runtime"),
     architecture,

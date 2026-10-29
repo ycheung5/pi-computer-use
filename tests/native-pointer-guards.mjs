@@ -12,6 +12,7 @@ import { computerUseHost } from "./native-host.mjs";
 assert.equal(process.platform, "win32");
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-controls-"));
 const executable = join(folder, "fixture.exe");
+process.env.PI_CU_SETTINGS_FILE = join(folder, "settings.json");
 const compiler = join(
   process.env.WINDIR,
   "Microsoft.NET",
