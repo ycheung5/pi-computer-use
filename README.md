@@ -1,6 +1,6 @@
 # Pi Windows Computer Use
 
-A native Pi extension being built for Windows desktop and browser automation. The current implementation provides worker health and native window listing from native Windows and WSL2 Pi; remaining capabilities are tracked in the [task graph](docs/tickets.md).
+A native Pi extension being built for Windows desktop and browser automation from native Windows and WSL2 Pi. Follow the [task graph](docs/tickets.md) and [integration draft](https://github.com/ycheung5/pi-computer-use/pull/22) for delivery and validation; the first release is not yet accepted.
 
 Start with the [documentation index](docs/README.md). The [specification](docs/spec.md) records agreed requirements; the [implementation plan](docs/implementation-plan.md#detailed-milestones) describes delivery and validation.
 
