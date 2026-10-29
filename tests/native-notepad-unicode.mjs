@@ -33,13 +33,24 @@ const observe = (target) =>
     detailLevel: "full",
     maxDepth: 8,
   });
-const cases = ["Pi input check 中文 😀", "Abc 123 中文測試 café 😀 ".repeat(5)];
+const normalize = (text) => text.replace(/\r\n?|\n/g, "\n");
+const cases = [
+  { seed: "x", text: "\n" },
+  { seed: "", text: " \t " },
+  {
+    seed: "Reuse test\n中文測試 café 😀",
+    text: "\nSendInput check: 中文測試 café 😀",
+  },
+  { seed: "", text: "Pi input check 中文 😀" },
+  { seed: "", text: "Abc 123 中文測試 café 😀 ".repeat(5) },
+  { seed: "", text: "LF\nCR\rCRLF\r\nTab\tend 😀" },
+];
 const retained = new Set();
 try {
-  for (const text of cases) {
+  for (const { seed, text } of cases) {
     const path = join(folder, `pi-unicode-${randomUUID()}.txt`);
     const stem = basename(path, ".txt");
-    await writeFile(path, "");
+    await writeFile(path, seed);
     const launched = await client.execute("launch_app", {
       target: "notepad.exe",
       arguments: `"${path}"`,
@@ -65,7 +76,11 @@ try {
       (node) => node.controlType === "Document",
     );
     assert.equal(editors.length, 1, "require one unambiguous test editor");
-    assert.ok(!editors[0].value, "new test file must be blank");
+    assert.equal(
+      normalize(editors[0].value ?? ""),
+      normalize(seed),
+      "test file must contain only its known seed",
+    );
     const activated = await client.execute("activate_window", target);
     assert.equal(activated.activated, true, JSON.stringify(activated));
     const focused = await client.execute("focus", {
@@ -73,6 +88,13 @@ try {
       elementId: editors[0].id,
     });
     assert.equal(focused.ok, true, JSON.stringify(focused));
+    if (seed) {
+      const end = await client.execute("keypress", {
+        ...target,
+        keys: ["Ctrl", "End"],
+      });
+      assert.equal(end.ok, true, JSON.stringify(end));
+    }
     const typed = await client.execute("type_text", {
       ...target,
       text,
@@ -82,6 +104,11 @@ try {
     assert.equal(typed.ok, true, JSON.stringify(typed));
     assert.equal(typed.cleanupConfirmed, true);
     assert.equal(typed.method, "sendinput-unicode");
+    assert.equal(
+      typed.inputDelayMs,
+      50,
+      "confirm the running helper has the tested pacing",
+    );
     // Let the application process its queued character messages before reading.
     await delay(1000);
     const after = await client.execute("element_info", {
@@ -90,7 +117,8 @@ try {
       detailLevel: "full",
     });
     assert.equal(after.ok, true, JSON.stringify(after));
-    const actual = after.element.value;
+    const actual = normalize(after.element.value);
+    const expected = normalize(seed + text);
     // Save ONLY this uniquely named test file to independently verify actual bytes.
     const current = await observe(target);
     assert.ok(
@@ -105,10 +133,14 @@ try {
     let disk;
     for (let attempt = 0; attempt < 30; attempt++) {
       disk = await readFile(path, "utf8");
-      if (disk === actual) break;
+      if (normalize(disk) === actual) break;
       await delay(100);
     }
-    assert.equal(disk, actual, "saved bytes must independently agree with UIA");
+    assert.equal(
+      normalize(disk),
+      actual,
+      "saved bytes must independently agree with UIA",
+    );
     const savedView = await observe(target);
     assert.ok(
       savedView.tree?.name.includes(stem),
@@ -150,10 +182,10 @@ try {
     retained.delete(path);
     assert.equal(
       actual,
-      text,
+      expected,
       "Notepad must receive every requested Unicode character exactly once",
     );
-    assert.equal(disk, text);
+    assert.equal(normalize(disk), expected);
     console.log(
       JSON.stringify({
         ok: true,

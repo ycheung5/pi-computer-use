@@ -119,7 +119,7 @@ export function validateText(
   if (action === "type_text") {
     if (
       typeof args.text !== "string" ||
-      !args.text.trim() ||
+      args.text.length === 0 ||
       args.text.length > 1000000 ||
       args.text.includes("\0")
     )

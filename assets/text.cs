@@ -11,6 +11,7 @@ using System.Windows.Automation;
 
 partial class WindowsBridge {
   [StructLayout(LayoutKind.Sequential)] struct KeyboardInput {public ushort Key,Scan;public uint Flags,Time;public UIntPtr Extra;}
+  const int UnicodeInputDelayMs=50;
   sealed class HeldKey {public ushort Key,Scan;public uint Flags;}
   [DllImport("user32.dll")] static extern IntPtr GetKeyboardLayout(uint thread);
   [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern short VkKeyScanEx(char value,IntPtr layout);
@@ -171,10 +172,17 @@ partial class WindowsBridge {
       if(action=="type_text")RememberTextFocus(window,expectedFocus);
       if(action=="keypress") {Chord((IEnumerable)args["keys"],cancel,listener,window,owner,held,interaction);result["method"]="sendinput-keychord";}
       else if(method=="sendinput") {
-        // Unpaced Unicode packets corrupt text in modern Notepad. Space complete
-        // down/up pairs while retaining cancellation and per-character target checks.
-        foreach(char character in text) {TextCheck(cancel,listener,window,owner,expectedFocus,true,interaction);HeldKey unicode=new HeldKey{Scan=character,Flags=4};Down(held,unicode);Up(held,unicode);if(cancel.WaitOne(10))throw new InvalidOperationException("COMPUTER_USE_STOPPED");}
-        result["method"]="sendinput-unicode";
+        // Modern Notepad also corrupts seeded/appended text with a 10 ms gap.
+        // Keep complete pairs paced and cancellable; dispatch is still not verification.
+        for(int index=0;index<text.Length;index++) {
+          char character=text[index];
+          if(character=='\r' && index+1<text.Length && text[index+1]=='\n')index++;
+          TextCheck(cancel,listener,window,owner,expectedFocus,true,interaction);
+          HeldKey key=character=='\r' || character=='\n'?new HeldKey{Key=13}:character=='\t'?new HeldKey{Key=9}:new HeldKey{Scan=character,Flags=4};
+          Down(held,key);Up(held,key);
+          if(cancel.WaitOne(UnicodeInputDelayMs))throw new InvalidOperationException("COMPUTER_USE_STOPPED");
+        }
+        result["method"]="sendinput-unicode";result["inputDelayMs"]=UnicodeInputDelayMs;
       }else {
         // All UIA focus/provider calls finish BEFORE clipboard replacement.
         ProcessStartInfo info=new ProcessStartInfo{FileName=TextOption(args,"_clipboardExecutable",""),UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true,StandardOutputEncoding=Encoding.UTF8,StandardErrorEncoding=Encoding.UTF8};
