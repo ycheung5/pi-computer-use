@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline";
-import { observeDesktop } from "./accessibility.js";
+import { executeAccessibility } from "./accessibility.js";
 import {
   browse,
   browserListing,
@@ -16,6 +16,7 @@ import {
 } from "./ownership.js";
 import type { WorkerRequest, WorkerResponse } from "./protocol.js";
 import { StopListener } from "./stop.js";
+import { waitDesktop } from "./waits.js";
 
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 let queue = Promise.resolve();
@@ -88,18 +89,9 @@ async function dispatch(
     return;
   }
   if (
-    [
-      "click",
-      "double_click",
-      "move",
-      "drag",
-      "scroll",
-      "type_text",
-      "keypress",
-      "focus",
-      "invoke",
-      "set_value",
-    ].includes(request.action) &&
+    ["click", "double_click", "move", "drag", "type_text", "keypress"].includes(
+      request.action,
+    ) &&
     !isBrowserRequest(request.args)
   ) {
     process.stdout.write(
@@ -120,27 +112,37 @@ async function dispatch(
           }
         : isBrowserRequest(request.args)
           ? await browse(request.action, request.args, signal)
-          : request.action === "list_windows"
-            ? {
-                ...(await listWindows(request.args, signal)),
-                browserLane: await browserListing(),
-              }
-            : request.action === "ocr"
-              ? await ocrDesktop(request.args, signal)
-              : request.action === "screenshot"
-                ? await screenshot(request.args, signal)
-                : [
-                      "snapshot",
-                      "accessibility_tree",
-                      "find",
-                      "element_info",
-                    ].includes(request.action)
-                  ? await observeDesktop(request.action, request.args, signal)
-                  : {
-                      ok: false,
-                      action: request.action,
-                      error: "UNKNOWN_ACTION",
-                    },
+          : ["wait", "wait_for"].includes(request.action)
+            ? await waitDesktop(request.action, request.args, signal)
+            : request.action === "list_windows"
+              ? {
+                  ...(await listWindows(request.args, signal)),
+                  browserLane: await browserListing(),
+                }
+              : request.action === "ocr"
+                ? await ocrDesktop(request.args, signal)
+                : request.action === "screenshot"
+                  ? await screenshot(request.args, signal)
+                  : [
+                        "snapshot",
+                        "accessibility_tree",
+                        "find",
+                        "element_info",
+                        "focus",
+                        "invoke",
+                        "set_value",
+                        "scroll",
+                      ].includes(request.action)
+                    ? await executeAccessibility(
+                        request.action,
+                        request.args,
+                        signal,
+                      )
+                    : {
+                        ok: false,
+                        action: request.action,
+                        error: "UNKNOWN_ACTION",
+                      },
   };
   process.stdout.write(`${JSON.stringify(response)}\n`);
 }
@@ -210,12 +212,17 @@ input.on("line", (line) => {
     });
 });
 input.on("close", () => {
-  void queue.finally(async () => {
-    await stopping.catch(() => undefined);
-    await disposeBrowser();
-    await disposeDesktop();
-    await disposeOcr();
-    await stopListener.dispose();
-    await disposeOwnership();
-  });
+  void queue
+    .then(async () => {
+      await stopping;
+      await disposeBrowser();
+      await disposeDesktop();
+      await disposeOcr();
+      await stopListener.dispose();
+      await disposeOwnership();
+    })
+    .catch((error) => {
+      // Keep native handles and ownership alive if safe exit cannot be proved.
+      process.stderr.write(`CLEANUP_UNCONFIRMED: ${String(error)}\n`);
+    });
 });

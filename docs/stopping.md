@@ -6,7 +6,7 @@ Use `/computer-stop` to stop the current computer-use operation without waiting 
 
 A small separate Windows process installs a low-level keyboard hook. It is armed by the internal `prepare_input` request, not by quiet reads or browser work. Esc signals an operation-specific manual-reset Windows event directly, then notifies the worker. The listener never calls UI Automation and can signal while a native provider is blocked. Keyboard events continue to the target application; the hook does not swallow ordinary Esc behavior.
 
-The explicit stop control bypasses the worker request queue. The worker blocks the operation before cleanup, signals its listener/event if armed, cancels active and queued requests and retires the read-only desktop bridge. Retirement waits for confirmed child exit; failure to confirm exit is an error, rather than permission to release ownership. Final settlement waits for this stop cleanup before releasing desktop ownership. Cancellation is not an instruction to replay any action.
+The explicit stop control bypasses the worker request queue. The worker blocks the operation before cleanup, signals its listener/event if armed, cancels active and queued requests and retires the read-only desktop bridge. Retirement waits for confirmed child exit; failure to confirm exit retains the child handle and sticky failure, blocks replacement work and is not permission to release ownership. Worker stdin closure also retains ownership if prior stop cleanup was unconfirmed. Final settlement waits for this stop cleanup before releasing desktop ownership. Cancellation is not an instruction to replay any action.
 
 ## Physical input contract
 

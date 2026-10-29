@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { observationTools } from "./accessibility.js";
+import { controlTools, observationTools } from "./accessibility.js";
 import { browserActionTools } from "./browser-actions.js";
 import { screenshotContent } from "./capture.js";
 import { WorkerClient, type WorkerClientOptions } from "./client.js";
 import { nativeWorkerLaunch } from "./launcher.js";
 import { ocrParameters } from "./ocr.js";
+import { waitTools } from "./waits.js";
 
 export function registerComputerUse(
   pi: Pick<ExtensionAPI, "registerTool" | "on"> &
@@ -174,6 +175,28 @@ export function registerComputerUse(
       },
     });
   }
+  for (const { action, parameters } of controlTools.filter(
+    ({ action }) => !browserActionTools.some((tool) => tool.action === action),
+  )) {
+    pi.registerTool({
+      name: `windows_computer_use_${action}`,
+      label: action.replaceAll("_", " "),
+      description:
+        action === "set_value"
+          ? 'Set a native control value or browser field; "new-tab" opens an isolated browser tab and "<tab>:address" navigates it. Physical fallbacks stay guarded.'
+          : "Operate freshly observed controls in the background. Unsupported physical fallbacks are explicitly gated; dispatch alone does not verify task success.",
+      parameters: Type.Unsafe<Record<string, unknown>>(parameters),
+      executionMode: "sequential",
+      async execute(_toolCallId, args, signal, _onUpdate, ctx) {
+        const result = await executeDesktop(action, args, signal, ctx);
+        return {
+          content: [{ type: "text", text: JSON.stringify(result) }],
+          details: result,
+          isError: !result.ok,
+        };
+      },
+    });
+  }
   pi.registerTool({
     name: "windows_computer_use_screenshot",
     label: "Screenshot",
@@ -212,6 +235,22 @@ export function registerComputerUse(
       return screenshotContent(await executeDesktop("ocr", args, signal, ctx));
     },
   });
+  for (const { action, parameters } of waitTools.filter(
+    ({ action }) => !browserActionTools.some((tool) => tool.action === action),
+  ))
+    pi.registerTool({
+      name: `windows_computer_use_${action}`,
+      label: action.replaceAll("_", " "),
+      description:
+        "Wait explicitly without claiming action success. Conditions return observed, timeout or inconclusive evidence; waits are bounded and cancellable.",
+      parameters: Type.Unsafe<Record<string, unknown>>(parameters),
+      executionMode: "sequential",
+      async execute(_id, args, signal, _onUpdate, ctx) {
+        return screenshotContent(
+          await executeDesktop(action, args, signal, ctx),
+        );
+      },
+    });
   pi.on("session_shutdown", async () => {
     await worker.dispose();
   });

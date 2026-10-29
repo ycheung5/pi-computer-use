@@ -229,10 +229,32 @@ try {
     ["timeout", "inconclusive"].includes(timedOut.verification),
     JSON.stringify(timedOut),
   );
+  const cancelled = new AbortController();
+  const pending = call(
+    "wait_for",
+    {
+      browserTab: tab,
+      condition: "text",
+      query: "never present marker",
+      timeoutMs: 10000,
+    },
+    cancelled.signal,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  cancelled.abort();
+  await assert.rejects(pending, /STOP|CANCEL|abort/i);
+  await assert.rejects(call("accessibility_tree", { browserTab: tab }), /STOP/);
+  await host.emit("before_agent_start", { messageType: "user" });
+  assert.equal(
+    (await call("accessibility_tree", { browserTab: tab })).ok,
+    true,
+  );
   console.log(
     JSON.stringify({
       ok: true,
-      check: "browser fixture click",
+      check: "Chromium actions/dialogs/transfers/waits",
+      browser: process.env.PI_CU_BROWSER_APP,
+      physicalInput: false,
       host: process.platform,
     }),
   );

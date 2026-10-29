@@ -150,3 +150,42 @@ test("a cancelled unresponsive peer is retired before replacement work can proce
     await worker.dispose();
   }
 });
+
+test("unconfirmed child exit stays failed and cannot silently release or replace the process", async () => {
+  const { WorkerClient } = await import("../src/client.js");
+  const external = `process.on('SIGTERM',()=>{});setInterval(()=>{},10000);require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.action==='health')process.stdout.write(JSON.stringify({id:r.id,result:{ok:true,action:r.action,processId:process.pid}})+'\\n');});`;
+  const worker = new WorkerClient({
+    launch: async () => ({
+      executable: process.execPath,
+      args: ["-e", external],
+    }),
+    shutdownMs: 20,
+  });
+  const initial = await worker.execute("health", {});
+  let replacementPid: number | undefined;
+  try {
+    await assert.rejects(worker.retire(), /WORKER_RETIRE_FAILED/);
+    const replacement = worker.execute("health", {});
+    void replacement.then(
+      (result) => {
+        replacementPid = result.processId as number;
+      },
+      () => {},
+    );
+    await assert.rejects(
+      replacement,
+      /WORKER_RETIRE_FAILED/,
+      "failed cleanup must not allow a replacement",
+    );
+    await assert.rejects(
+      worker.retire(),
+      /WORKER_RETIRE_FAILED/,
+      "repeated retirement must keep tracking the live child",
+    );
+  } finally {
+    process.kill(initial.processId as number, "SIGKILL");
+    if (replacementPid) process.kill(replacementPid, "SIGKILL");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await worker.dispose();
+  }
+});
