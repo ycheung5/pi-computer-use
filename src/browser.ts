@@ -49,6 +49,26 @@ const ownedSessions = new Set<Session>();
 let session: Session | undefined;
 let starting: Promise<Session> | undefined;
 let closed = false;
+let browserConfiguration:
+  | { browserApp: string; browserVisible: boolean; browserSignIn: boolean }
+  | undefined;
+export async function configureBrowser(settings: {
+  browserApp: string;
+  browserVisible: boolean;
+  browserSignIn: boolean;
+}): Promise<void> {
+  if (
+    browserConfiguration &&
+    JSON.stringify(browserConfiguration) === JSON.stringify(settings)
+  )
+    return;
+  const previous = browserConfiguration;
+  browserConfiguration = settings;
+  if (previous || session || starting) {
+    await disposeBrowser();
+    closed = false;
+  }
+}
 
 export function isBrowserRequest(args: Record<string, unknown>): boolean {
   return (
@@ -91,7 +111,10 @@ function navigationUrl(value: unknown): string {
 async function discoverBrowser(
   signal?: AbortSignal,
 ): Promise<{ app: string; executable: string }> {
-  let app = process.env.PI_CU_BROWSER_APP ?? "default";
+  let app =
+    browserConfiguration?.browserApp ??
+    process.env.PI_CU_BROWSER_APP ??
+    "default";
   if (!["default", "edge", "chrome"].includes(app))
     return fail(
       "BROWSER_UNAVAILABLE",
@@ -123,7 +146,9 @@ async function discoverBrowser(
     process.env["ProgramFiles(x86)"],
   ].filter((value): value is string => Boolean(value));
   const preferred =
-    process.env.PI_CU_BROWSER_APP && process.env.PI_CU_BROWSER_APP !== "default"
+    (browserConfiguration?.browserApp ?? process.env.PI_CU_BROWSER_APP) &&
+    (browserConfiguration?.browserApp ?? process.env.PI_CU_BROWSER_APP) !==
+      "default"
       ? [app]
       : [app, app === "edge" ? "chrome" : "edge"];
   for (const browser of preferred) {
@@ -173,7 +198,9 @@ async function ensureSession(signal?: AbortSignal): Promise<Session> {
       browser = await puppeteer.launch({
         browser: "chrome",
         executablePath: executable,
-        headless: process.env.PI_CU_BROWSER_VISIBLE === "false",
+        headless: browserConfiguration
+          ? !browserConfiguration.browserVisible
+          : process.env.PI_CU_BROWSER_VISIBLE === "false",
         defaultViewport: null,
         waitForInitialPage: false,
         timeout: 20_000,
@@ -420,7 +447,9 @@ export async function browserListing(): Promise<Record<string, unknown>> {
         id: current.id,
         processId: current.browser.process()?.pid,
         app: current.app,
-        visible: process.env.PI_CU_BROWSER_VISIBLE !== "false",
+        visible: browserConfiguration
+          ? browserConfiguration.browserVisible
+          : process.env.PI_CU_BROWSER_VISIBLE !== "false",
         isolated: true,
         tabs: await Promise.all(
           [...current.tabs.values()].map(async (tab) => ({

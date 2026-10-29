@@ -18,7 +18,8 @@
     "assets/",
     "docs/stopping.md",
     "docs/browser.md",
-    "assets/puppeteer-LICENSE.txt"
+    "assets/puppeteer-LICENSE.txt",
+    "docs/settings.md"
   ],
   "pi": {
     "extensions": [
@@ -48,7 +49,8 @@
     "test:stop": "node tests/stop-host.mjs",
     "test:browser": "node tests/browser-host.mjs",
     "test:native:controls": "node tests/native-controls.mjs",
-    "test:native:waits": "node tests/native-waits.mjs"
+    "test:native:waits": "node tests/native-waits.mjs",
+    "test:settings": "node tests/settings-host.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
