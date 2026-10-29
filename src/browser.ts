@@ -3,12 +3,12 @@ import { randomBytes } from "node:crypto";
 import { access, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import puppeteer, {
-  type Browser,
-  type BrowserContext,
-  type ElementHandle,
-  type Page,
-  type SerializedAXNode,
+import type {
+  Browser,
+  BrowserContext,
+  ElementHandle,
+  Page,
+  SerializedAXNode,
 } from "puppeteer-core";
 import { observationTools } from "./accessibility.js";
 import type { WorkerResult } from "./protocol.js";
@@ -160,6 +160,7 @@ async function ensureSession(signal?: AbortSignal): Promise<Session> {
   starting ??= (async () => {
     if (process.platform !== "win32")
       return fail("UNSUPPORTED_HOST", "browser worker must run on Windows");
+    const { default: puppeteer } = await import("puppeteer-core");
     const { app, executable } = await discoverBrowser(signal);
     const local = process.env.LOCALAPPDATA;
     if (!local)

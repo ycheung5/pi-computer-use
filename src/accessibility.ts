@@ -1,5 +1,6 @@
 import { screenshot } from "./capture.js";
 import { nativeDesktop } from "./native.js";
+import { ocrDesktop } from "./ocr.js";
 import type { WorkerResult } from "./protocol.js";
 
 type Property = {
@@ -191,6 +192,29 @@ export async function observeDesktop(
       result.screenshotError = String(
         captured.error ?? "SCREENSHOT_UNAVAILABLE",
       );
+    }
+  }
+  if (action === "find" && result.ocrFallbackPending) {
+    delete result.ocrFallbackPending;
+    const ocrArgs: Record<string, unknown> = {
+      query: normalized.query,
+      scope: normalized.scope,
+    };
+    for (const key of [
+      "windowTitle",
+      "processId",
+      "nativeWindowHandle",
+      "activate",
+    ]) {
+      const value = result[key] ?? normalized[key];
+      if (value !== undefined) ocrArgs[key] = value;
+    }
+    const recognized = await ocrDesktop(ocrArgs, signal);
+    result.ocr = recognized;
+    if (recognized.ok) result.ocrCandidates = recognized.matched ?? [];
+    else {
+      result.ocrError = recognized.error;
+      result.conclusive = false;
     }
   }
   return result;
