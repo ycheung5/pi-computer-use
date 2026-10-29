@@ -6,6 +6,13 @@ using System.Web.Script.Serialization;
 
 // Focused Win32 bridge; guarded input lives in pointer.cs.
 partial class WindowsBridge {
+  static bool physicalInputAnnounced;
+  static void NotifyPhysicalInput(bool active) {
+    if(physicalInputAnnounced==active)return;
+    physicalInputAnnounced=active;
+    Console.WriteLine(new JavaScriptSerializer().Serialize(new Dictionary<string,object> {{"event","input_state"},{"active",active},{"operationId",pointerOperation}}));
+    Console.Out.Flush();
+  }
   delegate bool EnumWindow(IntPtr handle, IntPtr parameter);
   [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
   [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindow callback, IntPtr parameter);
