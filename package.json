@@ -20,7 +20,8 @@
     "docs/browser.md",
     "assets/puppeteer-LICENSE.txt",
     "docs/pointer.md",
-    "docs/settings.md"
+    "docs/settings.md",
+    "docs/text.md"
   ],
   "pi": {
     "extensions": [
@@ -55,6 +56,8 @@
     "test:native:management": "node tests/native-window-management.mjs",
     "test:native:pointer:guards": "node tests/native-pointer-guards.mjs",
     "test:native:pointer:physical": "node tests/native-pointer-physical.mjs",
+    "test:native:text": "node tests/native-text.mjs",
+    "test:native:text:physical": "node tests/native-text-physical.mjs",
     "test:browser:actions": "node tests/browser-actions-host.mjs"
   },
   "peerDependencies": {

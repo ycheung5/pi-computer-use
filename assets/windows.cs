@@ -92,12 +92,13 @@ partial class WindowsBridge {
         request = json.Deserialize<Dictionary<string, object>>(line);
         if (request.ContainsKey("cancel")) continue;
         string action = Convert.ToString(request["action"]);
-        pointerInputAction=action=="click" || action=="double_click" || action=="move" || action=="drag" || action=="scroll";
+        pointerInputAction=action=="click" || action=="double_click" || action=="move" || action=="drag" || action=="scroll" || action=="type_text" || action=="keypress";
         pointerOperation=request.ContainsKey("operationId")?Convert.ToString(request["operationId"]):"";
         object result;
         try {
           Dictionary<string, object> args = (Dictionary<string, object>)request["args"];
-          if (action == "click" || action == "double_click" || action == "move" || action == "drag" || (action == "scroll" && (!args.ContainsKey("elementId") || args.ContainsKey("_cancelEvent")))) result = ExecutePointer(action,args);
+          if (action == "type_text" || action == "keypress") result = ExecuteText(action,args);
+          else if (action == "click" || action == "double_click" || action == "move" || action == "drag" || (action == "scroll" && (!args.ContainsKey("elementId") || args.ContainsKey("_cancelEvent")))) result = ExecutePointer(action,args);
           else if (action == "list_windows") result = ListWindows(args);
           else if (action == "focus" || action == "invoke" || action == "set_value" || action == "scroll") result = ExecuteControl(action,args);
           else if (action == "launch_app" || action == "activate_window" || action == "move_window" || action == "close_window") result = ManageNativeWindow(action,args);

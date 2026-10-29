@@ -8,7 +8,7 @@ using System.Windows.Automation;
 
 partial class WindowsBridge {
   [StructLayout(LayoutKind.Sequential)] struct MouseInput { public int X,Y;public uint Data,Flags,Time;public UIntPtr Extra; }
-  [StructLayout(LayoutKind.Explicit)] struct InputUnion { [FieldOffset(0)] public MouseInput Mouse; }
+  [StructLayout(LayoutKind.Explicit)] struct InputUnion { [FieldOffset(0)] public MouseInput Mouse; [FieldOffset(0)] public KeyboardInput Keyboard; }
   [StructLayout(LayoutKind.Sequential)] struct PointerInput { public uint Type;public InputUnion Data; }
   [DllImport("user32.dll",SetLastError=true)] static extern uint SendInput(uint count,PointerInput[] input,int size);
   [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(ControlPoint point);
@@ -107,6 +107,7 @@ partial class WindowsBridge {
       } else window=ResolveObservationWindow(quiet);
       owner=WindowOwner(window);popups=ControlPopups(owner,window);
       string button=TextOption(args,"button","left"),dispatch=TextOption(args,"dispatch","auto");
+      if(action=="click" || action=="double_click" || action=="drag")ForgetTextFocus();
       if(element!=null && !element.Current.IsEnabled)throw new InvalidOperationException("ELEMENT_DISABLED");
       bool useBackground=dispatch=="background" || (action=="click" && element!=null && button=="left" && dispatch=="auto" && !Option(args,"activate",false));
       if(useBackground && element!=null) {

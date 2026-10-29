@@ -18,6 +18,7 @@ Read the row matching the task; follow section links before reading whole docume
 | Desktop ownership and operation lifecycle | [Ownership](ownership.md) |
 | Native window discovery and validation | [Windows discovery](windows.md), [accessibility observations](windows.md#accessibility-observations) |
 | Guarded desktop pointer and dedicated input validation | [Pointer actions](pointer.md) |
+| Text, chords, clipboard preservation and validation | [Text entry](text.md) |
 | Personal settings, commands and tool loading | [Settings](settings.md) |
 | Browser read channel and fixtures | [Browser](browser.md) |
 | Domain-document consumer rules | [Domain docs](agents/domain.md) |
