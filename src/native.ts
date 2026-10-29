@@ -123,6 +123,12 @@ export function confirmInputCleanup(): void {
 }
 
 const operationContext = new AsyncLocalStorage<string>();
+let inputObserver: ((active: boolean, operationId: string) => void) | undefined;
+export function observeNativeInput(
+  observer: (active: boolean, operationId: string) => void,
+): void {
+  inputObserver = observer;
+}
 export function runNativeOperation<T>(operationId: string, action: () => T): T {
   return operationContext.run(operationId, action);
 }
@@ -145,6 +151,7 @@ export const nativeDesktop = new NativeDesktopClient({
       "controls.cs",
       "window-management.cs",
       "pointer.cs",
+      "browser-indicators.cs",
       "text.cs",
     ]) {
       try {
@@ -179,4 +186,7 @@ export const nativeDesktop = new NativeDesktopClient({
   },
   timeoutMs: 40_000,
   canTerminate: () => !inputPending,
+  onInputState: (active, operationId) => {
+    if (operationId) inputObserver?.(active, operationId);
+  },
 });

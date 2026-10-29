@@ -24,7 +24,7 @@ The canonical catalog includes all 24 automation names plus management, with sep
 
 Defaults: browser-first routing, visible browser, Windows default browser preference, remembered sign-ins off; screen/pointer/remote indicators on; Pi-branded one-line indicator text, top position, 800 ms idle delay; extra stop shortcut empty (Esc remains reserved). App/visibility/profile changes close an idle owned browser before the next call reconnects, so refresh tab/element references afterward. Browser-first guidance is included with user-started Pi runs while respecting disabled navigation.
 
-Stop/indicator preferences are persisted here; actual shortcut/presentation behavior is implemented by the stopping/indicator slices. Remembered sign-in behavior belongs to the dedicated browser-profile slice. A saved preference alone is not proof that a later capability is implemented. `indicatorIdleMs` is 200–3000, text is a trimmed single line up to 120 characters, and resume/preview tokens are nonnegative safe integers. Extra shortcuts accept Ctrl/Alt/Shift/Win plus one supported letter, digit, function or navigation key; modifiers are canonicalized and Esc cannot be replaced.
+Stop shortcuts and presentation use the independent helper described in [indicators](indicators.md). Remembered sign-in behavior belongs to the dedicated browser-profile slice. A saved preference alone is not proof that a later capability is implemented. `indicatorIdleMs` is 200–3000, text is a trimmed single line up to 120 characters, and resume/preview tokens are nonnegative safe integers. Extra shortcuts accept Ctrl/Alt/Shift/Win plus one supported letter, digit, function or navigation key; modifiers are canonicalized and Esc cannot be replaced.
 
 ## Validation
 

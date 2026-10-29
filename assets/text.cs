@@ -79,6 +79,7 @@ partial class WindowsBridge {
     if(checkFocus && TextFocus(window,false)!=expectedFocus)throw new InvalidOperationException("TARGET_FOCUS_CHANGED: no more text sent");
   }
   static void KeyEvent(HeldKey key,bool release) {
+    if(!release)NotifyPhysicalInput(true);
     PointerInput input=new PointerInput{Type=1,Data=new InputUnion{Keyboard=new KeyboardInput{Key=key.Key,Scan=key.Scan,Flags=key.Flags | (release?2U:0U)}}};
     if(SendInput(1,new PointerInput[]{input},Marshal.SizeOf(typeof(PointerInput)))!=1)throw new InvalidOperationException("KEY_DISPATCH_UNCONFIRMED: partial input must not be replayed");
   }
@@ -205,6 +206,7 @@ partial class WindowsBridge {
       // No potentially blocked UIA verification is permitted before clipboard cleanup.
       ControlPoint now;if(!mainBounds.IsEmpty && GetCursorPos(out now) && (now.X!=pointer.X || now.Y!=pointer.Y) && GetForegroundWindow()==window && mainBounds.Contains(new System.Windows.Point(now.X,now.Y)))SetCursorPos(pointer.X,pointer.Y);
       RestoreControlState(result,before,pointer,window,null,popups,Option(args,"activate",false));
+      if(cleanup)NotifyPhysicalInput(false);
     }
     return result;
   }

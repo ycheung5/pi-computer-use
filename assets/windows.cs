@@ -6,6 +6,13 @@ using System.Web.Script.Serialization;
 
 // Focused Win32 bridge; guarded input lives in pointer.cs.
 partial class WindowsBridge {
+  static bool physicalInputAnnounced;
+  static void NotifyPhysicalInput(bool active) {
+    if(physicalInputAnnounced==active)return;
+    physicalInputAnnounced=active;
+    Console.WriteLine(new JavaScriptSerializer().Serialize(new Dictionary<string,object> {{"event","input_state"},{"active",active},{"operationId",pointerOperation}}));
+    Console.Out.Flush();
+  }
   delegate bool EnumWindow(IntPtr handle, IntPtr parameter);
   [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
   [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindow callback, IntPtr parameter);
@@ -100,6 +107,7 @@ partial class WindowsBridge {
           if (action == "type_text" || action == "keypress") result = ExecuteText(action,args);
           else if (action == "click" || action == "double_click" || action == "move" || action == "drag" || (action == "scroll" && (!args.ContainsKey("elementId") || args.ContainsKey("_cancelEvent")))) result = ExecutePointer(action,args);
           else if (action == "list_windows") result = ListWindows(args);
+          else if (action == "browser_frame") result = MarkBrowserFrame(args);
           else if (action == "focus" || action == "invoke" || action == "set_value" || action == "scroll") result = ExecuteControl(action,args);
           else if (action == "launch_app" || action == "activate_window" || action == "move_window" || action == "close_window") result = ManageNativeWindow(action,args);
           else if (action == "screenshot") result = CaptureScreenshot(args);

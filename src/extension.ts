@@ -383,7 +383,7 @@ export function registerComputerUse(
   });
   pi.registerCommand?.("computer-settings", {
     description:
-      'Manage personal computer-use settings: show, set {"key":value}, or edit (default)',
+      'Manage personal computer-use settings: show, set {"key":value}, edit (default), or preview indicators',
     async handler(args, ctx) {
       try {
         const command = args.trim();
@@ -396,6 +396,13 @@ export function registerComputerUse(
             throw new Error("SETTINGS_INVALID: set requires a JSON object");
           }
           result = await worker.execute("settings_update", { changes });
+        } else if (command === "preview" || command === "preview check") {
+          result = await worker.execute("indicator_preview", {
+            show: command === "preview",
+          });
+          if (!result.ok) throw new Error(String(result.error));
+          ctx.ui.notify(JSON.stringify(result.presentation, null, 2), "info");
+          return;
         } else if (command === "show") {
           result = await worker.execute("settings_get", {});
         } else if (command === "" || command === "edit") {
@@ -415,7 +422,7 @@ export function registerComputerUse(
           result = await worker.execute("settings_update", { changes });
         } else
           throw new Error(
-            'Usage: /computer-settings show | set {"key":value} | edit',
+            'Usage: /computer-settings show | set {"key":value} | edit | preview [check]',
           );
         if (!result.ok) throw new Error(String(result.error));
         await initializeExposure(ctx);

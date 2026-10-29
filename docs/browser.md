@@ -53,6 +53,9 @@ Proof in this workspace used an official unmodified Mozilla Firefox 144.0 Window
 
 For installed Firefox run `npm run test:browser -- firefox --headless` and `npm run test:browser:actions -- firefox`. An optional explicit executable is forwarded by WSL fixtures; each fixture asserts the actual launched executable/version/headless flags. Serialize live suites with the shared lab lock when multiple agents use the desktop.
 
+## Browser presentation
+
+See [browser cues](indicators.md#browser-cues) for owned Chromium frame/tab/click markers, image suppression and manual visual acceptance. Experimental Firefox and external endpoints do not receive these cues.
 
 ## Dedicated profiles and idle retirement
 

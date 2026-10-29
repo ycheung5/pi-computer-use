@@ -13,6 +13,7 @@ export interface WorkerClientOptions {
   shutdownMs?: number;
   canTerminate?: () => boolean;
   onStop?: (operationId: string) => void;
+  onInputState?: (active: boolean, operationId?: string) => void;
 }
 
 interface Pending {
@@ -104,6 +105,10 @@ export class WorkerClient {
                 typeof response.active === "boolean"
               ) {
                 this.inputActive = response.active;
+                this.options.onInputState?.(
+                  response.active,
+                  response.operationId,
+                );
                 continue;
               }
               if (

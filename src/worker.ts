@@ -7,6 +7,7 @@ import {
 import {
   browse,
   browserListing,
+  clearBrowserIndicators,
   configureBrowser,
   disposeBrowser,
   isBrowserRequest,
@@ -19,7 +20,7 @@ import {
   listWindowsParameters,
   retireDesktop,
 } from "./desktop.js";
-import { runNativeOperation } from "./native.js";
+import { observeNativeInput, runNativeOperation } from "./native.js";
 import { disposeOcr, ocrDesktop, ocrParameters } from "./ocr.js";
 import {
   acquireDesktop,
@@ -130,6 +131,40 @@ const stopListener = new StopListener((operationId) => {
   );
 });
 
+observeNativeInput((active, operationId) => {
+  if (active)
+    void stopListener
+      .inputStarted(operationId)
+      .catch(() => stopOperation(operationId))
+      .catch((error) =>
+        process.stderr.write(`PRESENTATION_FAILED: ${String(error)}\n`),
+      );
+});
+let presentationUpdating = false;
+let presentationError: string | undefined;
+const presentationPoll = setInterval(() => {
+  if (!stopListener.hasStarted || presentationUpdating) return;
+  presentationUpdating = true;
+  void settings
+    .synchronize()
+    .then(async ({ settings: current }) => {
+      await stopListener.configure(current);
+      presentationError = undefined;
+    })
+    .catch((error) => {
+      const operation = stopListener.currentOperation;
+      if (operation) void stopOperation(operation).catch(() => undefined);
+      const message = String(error);
+      if (message !== presentationError)
+        process.stderr.write(`PRESENTATION_SETTINGS_FAILED: ${message}\n`);
+      presentationError = message;
+    })
+    .finally(() => {
+      presentationUpdating = false;
+    });
+}, 250);
+presentationPoll.unref();
+
 async function stopOperation(operationId: string): Promise<void> {
   if (blocked.has(operationId)) return stopping;
   blocked.add(operationId);
@@ -144,6 +179,7 @@ async function stopOperation(operationId: string): Promise<void> {
         if (request.operationId === operationId)
           request.controller.abort(new Error("COMPUTER_USE_STOPPED"));
       await awaitPointerCleanup();
+      await clearBrowserIndicators();
       await retireDesktop();
     }
   });
@@ -230,13 +266,38 @@ async function dispatch(
     await stopping;
     await awaitPointerCleanup();
     await stopListener.disarm(operationId);
+    await clearBrowserIndicators();
     const result = await releaseDesktop(operationId);
     if (result.ok) lastTargets.delete(operationId);
     process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
     return;
   }
+  if (request.action === "indicator_preview") {
+    if (
+      Object.keys(request.args).some((key) => key !== "show") ||
+      (request.args.show !== undefined &&
+        typeof request.args.show !== "boolean")
+    ) {
+      process.stdout.write(
+        `${JSON.stringify({ id: request.id, result: { ok: false, action: request.action, error: "INVALID_ARGUMENTS: preview accepts boolean show only" } })}\n`,
+      );
+      return;
+    }
+    const current = await settings.synchronize();
+    const result = await stopListener.preview(
+      current.settings,
+      request.args.show !== false,
+    );
+    process.stdout.write(
+      `${JSON.stringify({ id: request.id, result: { ...result, action: request.action } })}\n`,
+    );
+    return;
+  }
   if (["settings_get", "settings_update", "tools"].includes(request.action)) {
+    await stopListener.configure((await settings.synchronize()).settings);
     const result = await settings.handle(request.action, request.args);
+    if (result.ok && settings.currentSettings)
+      await stopListener.configure(settings.currentSettings);
     process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
     return;
   }
@@ -248,6 +309,8 @@ async function dispatch(
     return;
   }
   const configuration = settings.currentSettings;
+  if (configuration) await stopListener.configure(configuration);
+  await stopListener.touch(operationId);
   if (
     configuration &&
     process.platform === "win32" &&
@@ -258,242 +321,255 @@ async function dispatch(
       browserVisible: configuration.browserVisible,
       browserSignIn: configuration.browserSignIn,
     });
-  if (request.action !== "health" && blocked.has(operationId)) {
-    process.stdout.write(
-      `${JSON.stringify({ id: request.id, result: { ok: false, action: request.action, error: "COMPUTER_USE_STOPPED: wait for a new user operation" } })}\n`,
-    );
-    return;
-  }
-  if (request.action !== "health" && process.platform === "win32") {
-    const ownership = await acquireDesktop(operationId, signal);
-    if (!ownership.ok) {
-      process.stdout.write(
-        `${JSON.stringify({ id: request.id, result: { ...ownership, action: request.action } })}\n`,
-      );
-      return;
-    }
-  }
-  const previous = lastTargets.get(operationId);
-  if (
-    previous &&
+  const suspendCapture =
     !isBrowserRequest(request.args) &&
-    request.args.scope !== "desktop" &&
-    ![
-      "list_windows",
-      "health",
-      "operation_end",
-      "wait",
-      "launch_app",
-      "activate_window",
-      "move_window",
-      "close_window",
-    ].includes(request.action) &&
-    !["windowTitle", "processId", "nativeWindowHandle", "elementId"].some(
-      (key) => request.args[key] !== undefined,
-    )
-  )
-    request.args = { ...request.args, ...previous };
-  if (request.action === "prepare_input") {
-    const result = await stopListener.arm(operationId, signal);
-    process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
-    return;
-  }
-  if (
-    ["type_text", "keypress"].includes(request.action) &&
-    !isBrowserRequest(request.args)
-  ) {
-    const invalid = validateText(request.action, request.args);
-    if (invalid) {
-      process.stdout.write(
-        `${JSON.stringify({ id: request.id, result: invalid })}\n`,
-      );
-      return;
-    }
-    let result: WorkerResponse["result"];
-    if (
-      (request.action === "type_text" &&
-        ["auto", "background"].includes(
-          String(request.args.method ?? "auto"),
-        )) ||
-      request.args.dispatch === "background"
-    ) {
-      result = await executeText(
-        request.action,
-        request.args,
-        "",
-        operationId,
-        undefined,
-        signal,
-      );
-      if (result.inputRequired !== true) {
-        rememberTarget(operationId, result);
-        process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
-        return;
-      }
-    }
-    result = await guardedText(
+    ["screenshot", "snapshot", "ocr", "find", "wait_for"].includes(
       request.action,
-      request.args,
-      operationId,
-      signal,
     );
-    rememberTarget(operationId, result);
-    process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
-    return;
-  }
-  if (
-    !isBrowserRequest(request.args) &&
-    (["click", "double_click", "move", "drag"].includes(request.action) ||
-      (request.action === "scroll" && !request.args.elementId))
-  ) {
-    const invalid = validatePointer(request.action, request.args);
-    if (invalid) {
+  if (suspendCapture) await stopListener.suspendCapture(true);
+  try {
+    if (request.action !== "health" && blocked.has(operationId)) {
       process.stdout.write(
-        `${JSON.stringify({ id: request.id, result: invalid })}\n`,
+        `${JSON.stringify({ id: request.id, result: { ok: false, action: request.action, error: "COMPUTER_USE_STOPPED: wait for a new user operation" } })}\n`,
       );
       return;
     }
-    // Only the explicit needs-input result permits escalation/retry. No timeout,
-    // stale/disabled/covered-point error can trigger replay.
-    if (
-      (request.args.dispatch === "background" ||
-        (request.action === "click" &&
-          request.args.elementId &&
-          (request.args.button ?? "left") === "left" &&
-          !request.args.activate &&
-          request.args.dispatch !== "foreground")) &&
-      ["click", "double_click"].includes(request.action)
-    ) {
-      const quiet = await executePointer(
-        request.action,
-        request.args,
-        "",
-        operationId,
-        undefined,
-        signal,
-      );
-      if (!quiet.inputRequired || request.args.dispatch === "background") {
-        rememberTarget(operationId, quiet);
+    if (request.action !== "health" && process.platform === "win32") {
+      const ownership = await acquireDesktop(operationId, signal);
+      if (!ownership.ok) {
         process.stdout.write(
-          `${JSON.stringify({ id: request.id, result: quiet })}\n`,
+          `${JSON.stringify({ id: request.id, result: { ...ownership, action: request.action } })}\n`,
         );
         return;
       }
     }
-    const result = await guardedPointer(
-      request.action,
-      request.args,
-      operationId,
-      signal,
-    );
-    rememberTarget(operationId, result);
-    process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
-    return;
-  }
-  const response: WorkerResponse = {
-    id: request.id,
-    result:
-      request.action === "health"
-        ? {
-            ok: true,
-            action: "health",
-            processId: process.pid,
-            platform: process.platform,
-            nodeVersion: process.version,
-            settings: {
-              preset: settings.currentSettings?.toolPreset,
-              notices: settings.currentNotices,
-              source: settings.currentSource,
-            },
-          }
-        : isBrowserRequest(request.args)
-          ? await browse(request.action, request.args, signal)
-          : windowTools.some((tool) => tool.action === request.action)
-            ? await manageWindow(request.action, request.args, signal)
-            : ["wait", "wait_for"].includes(request.action)
-              ? await waitDesktop(request.action, request.args, signal)
-              : request.action === "list_windows"
-                ? {
-                    ...(await listWindows(request.args, signal)),
-                    browserLane: await browserListing(),
-                  }
-                : request.action === "ocr"
-                  ? await ocrDesktop(request.args, signal)
-                  : request.action === "screenshot"
-                    ? await screenshot(request.args, signal)
-                    : [
-                          "snapshot",
-                          "accessibility_tree",
-                          "find",
-                          "element_info",
-                          "focus",
-                          "invoke",
-                          "set_value",
-                          "scroll",
-                        ].includes(request.action)
-                      ? await executeAccessibility(
-                          request.action,
-                          request.args,
-                          signal,
-                        )
-                      : {
-                          ok: false,
-                          action: request.action,
-                          error: "UNKNOWN_ACTION",
-                        },
-  };
-  if (
-    !isBrowserRequest(request.args) &&
-    response.result.inputRequired === true &&
-    ["invoke", "scroll"].includes(request.action)
-  ) {
-    const pointerAction = request.action === "invoke" ? "click" : "scroll";
-    const result = await guardedPointer(
-      pointerAction,
-      { ...request.args, dispatch: "foreground" },
-      operationId,
-      signal,
-    );
-    response.result = {
-      ...result,
-      action: request.action,
-      method: result.ok ? `fallback:${String(result.method)}` : result.method,
+    const previous = lastTargets.get(operationId);
+    if (
+      previous &&
+      !isBrowserRequest(request.args) &&
+      request.args.scope !== "desktop" &&
+      ![
+        "list_windows",
+        "health",
+        "operation_end",
+        "wait",
+        "launch_app",
+        "activate_window",
+        "move_window",
+        "close_window",
+      ].includes(request.action) &&
+      !["windowTitle", "processId", "nativeWindowHandle", "elementId"].some(
+        (key) => request.args[key] !== undefined,
+      )
+    )
+      request.args = { ...request.args, ...previous };
+    if (request.action === "prepare_input") {
+      const result = await stopListener.arm(operationId, signal);
+      process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
+      return;
+    }
+    if (
+      ["type_text", "keypress"].includes(request.action) &&
+      !isBrowserRequest(request.args)
+    ) {
+      const invalid = validateText(request.action, request.args);
+      if (invalid) {
+        process.stdout.write(
+          `${JSON.stringify({ id: request.id, result: invalid })}\n`,
+        );
+        return;
+      }
+      let result: WorkerResponse["result"];
+      if (
+        (request.action === "type_text" &&
+          ["auto", "background"].includes(
+            String(request.args.method ?? "auto"),
+          )) ||
+        request.args.dispatch === "background"
+      ) {
+        result = await executeText(
+          request.action,
+          request.args,
+          "",
+          operationId,
+          undefined,
+          signal,
+        );
+        if (result.inputRequired !== true) {
+          rememberTarget(operationId, result);
+          process.stdout.write(
+            `${JSON.stringify({ id: request.id, result })}\n`,
+          );
+          return;
+        }
+      }
+      result = await guardedText(
+        request.action,
+        request.args,
+        operationId,
+        signal,
+      );
+      rememberTarget(operationId, result);
+      process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
+      return;
+    }
+    if (
+      !isBrowserRequest(request.args) &&
+      (["click", "double_click", "move", "drag"].includes(request.action) ||
+        (request.action === "scroll" && !request.args.elementId))
+    ) {
+      const invalid = validatePointer(request.action, request.args);
+      if (invalid) {
+        process.stdout.write(
+          `${JSON.stringify({ id: request.id, result: invalid })}\n`,
+        );
+        return;
+      }
+      // Only the explicit needs-input result permits escalation/retry. No timeout,
+      // stale/disabled/covered-point error can trigger replay.
+      if (
+        (request.args.dispatch === "background" ||
+          (request.action === "click" &&
+            request.args.elementId &&
+            (request.args.button ?? "left") === "left" &&
+            !request.args.activate &&
+            request.args.dispatch !== "foreground")) &&
+        ["click", "double_click"].includes(request.action)
+      ) {
+        const quiet = await executePointer(
+          request.action,
+          request.args,
+          "",
+          operationId,
+          undefined,
+          signal,
+        );
+        if (!quiet.inputRequired || request.args.dispatch === "background") {
+          rememberTarget(operationId, quiet);
+          process.stdout.write(
+            `${JSON.stringify({ id: request.id, result: quiet })}\n`,
+          );
+          return;
+        }
+      }
+      const result = await guardedPointer(
+        request.action,
+        request.args,
+        operationId,
+        signal,
+      );
+      rememberTarget(operationId, result);
+      process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
+      return;
+    }
+    const response: WorkerResponse = {
+      id: request.id,
+      result:
+        request.action === "health"
+          ? {
+              ok: true,
+              action: "health",
+              processId: process.pid,
+              platform: process.platform,
+              nodeVersion: process.version,
+              control: await stopListener.status(),
+              settings: {
+                preset: settings.currentSettings?.toolPreset,
+                notices: settings.currentNotices,
+                source: settings.currentSource,
+              },
+            }
+          : isBrowserRequest(request.args)
+            ? await browse(request.action, request.args, signal)
+            : windowTools.some((tool) => tool.action === request.action)
+              ? await manageWindow(request.action, request.args, signal)
+              : ["wait", "wait_for"].includes(request.action)
+                ? await waitDesktop(request.action, request.args, signal)
+                : request.action === "list_windows"
+                  ? {
+                      ...(await listWindows(request.args, signal)),
+                      browserLane: await browserListing(),
+                    }
+                  : request.action === "ocr"
+                    ? await ocrDesktop(request.args, signal)
+                    : request.action === "screenshot"
+                      ? await screenshot(request.args, signal)
+                      : [
+                            "snapshot",
+                            "accessibility_tree",
+                            "find",
+                            "element_info",
+                            "focus",
+                            "invoke",
+                            "set_value",
+                            "scroll",
+                          ].includes(request.action)
+                        ? await executeAccessibility(
+                            request.action,
+                            request.args,
+                            signal,
+                          )
+                        : {
+                            ok: false,
+                            action: request.action,
+                            error: "UNKNOWN_ACTION",
+                          },
     };
+    if (
+      !isBrowserRequest(request.args) &&
+      response.result.inputRequired === true &&
+      ["invoke", "scroll"].includes(request.action)
+    ) {
+      const pointerAction = request.action === "invoke" ? "click" : "scroll";
+      const result = await guardedPointer(
+        pointerAction,
+        { ...request.args, dispatch: "foreground" },
+        operationId,
+        signal,
+      );
+      response.result = {
+        ...result,
+        action: request.action,
+        method: result.ok ? `fallback:${String(result.method)}` : result.method,
+      };
+    }
+    if (
+      !isBrowserRequest(request.args) &&
+      request.action === "set_value" &&
+      response.result.inputRequired === true
+    ) {
+      const textArgs: Record<string, unknown> = {
+        text: request.args.value,
+        method: "clipboard",
+        focusMode: "preserve",
+        restoreClipboard: request.args.restoreClipboard ?? true,
+        _elementId: request.args.elementId,
+        _replaceAll: true,
+      };
+      for (const key of [
+        "windowTitle",
+        "processId",
+        "nativeWindowHandle",
+        "activate",
+      ])
+        if (request.args[key] !== undefined) textArgs[key] = request.args[key];
+      const result = await guardedText(
+        "type_text",
+        textArgs,
+        operationId,
+        signal,
+      );
+      response.result = {
+        ...result,
+        action: "set_value",
+        method: result.ok ? `fallback:${String(result.method)}` : result.method,
+      };
+    }
+    rememberTarget(operationId, response.result);
+    process.stdout.write(`${JSON.stringify(response)}\n`);
+  } finally {
+    if (suspendCapture) await stopListener.suspendCapture(false);
   }
-  if (
-    !isBrowserRequest(request.args) &&
-    request.action === "set_value" &&
-    response.result.inputRequired === true
-  ) {
-    const textArgs: Record<string, unknown> = {
-      text: request.args.value,
-      method: "clipboard",
-      focusMode: "preserve",
-      restoreClipboard: request.args.restoreClipboard ?? true,
-      _elementId: request.args.elementId,
-      _replaceAll: true,
-    };
-    for (const key of [
-      "windowTitle",
-      "processId",
-      "nativeWindowHandle",
-      "activate",
-    ])
-      if (request.args[key] !== undefined) textArgs[key] = request.args[key];
-    const result = await guardedText(
-      "type_text",
-      textArgs,
-      operationId,
-      signal,
-    );
-    response.result = {
-      ...result,
-      action: "set_value",
-      method: result.ok ? `fallback:${String(result.method)}` : result.method,
-    };
-  }
-  rememberTarget(operationId, response.result);
-  process.stdout.write(`${JSON.stringify(response)}\n`);
 }
 
 input.on("line", (line) => {
@@ -565,6 +641,7 @@ input.on("line", (line) => {
     });
 });
 input.on("close", () => {
+  clearInterval(presentationPoll);
   void queue
     .then(async () => {
       await stopping;

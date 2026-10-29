@@ -47,6 +47,20 @@ partial class WindowsBridge {
     return point;
   }
   static Process pointerListener;
+  static IntPtr PointerWindowAt(ControlPoint point,int helperProcess) {
+    IntPtr hit=WindowFromPoint(point);
+    if(helperProcess<=0 || hit==IntPtr.Zero || WindowOwner(hit)!=(uint)helperProcess)return hit;
+    // Do not trust transparent styles alone: explicitly skip only our verified
+    // listener process if Windows reports its disabled overlay at the point.
+    IntPtr underneath=IntPtr.Zero;
+    EnumWindows(delegate(IntPtr candidate,IntPtr unused) {
+      if(WindowOwner(candidate)==(uint)helperProcess || !IsWindowVisible(candidate) || !IsWindowEnabled(candidate) || IsIconic(candidate))return true;
+      Rect bounds;if(!GetWindowRect(candidate,out bounds))return true;
+      if(point.X>=bounds.Left && point.X<bounds.Right && point.Y>=bounds.Top && point.Y<bounds.Bottom){underneath=candidate;return false;}
+      return true;
+    },IntPtr.Zero);
+    return underneath;
+  }
   static void PointerCheck(EventWaitHandle cancel,IntPtr window,uint owner,ControlPoint point,bool foreground,bool requireForeground=true) {
     if(pointerListener==null || pointerListener.HasExited)throw new InvalidOperationException("STOP_LISTENER_UNAVAILABLE: listener exited; stop input");
     if(cancel.WaitOne(0))throw new InvalidOperationException("COMPUTER_USE_STOPPED");
@@ -54,7 +68,7 @@ partial class WindowsBridge {
     if(foreground && requireForeground && GetForegroundWindow()!=window)throw new InvalidOperationException("TARGET_FOREGROUND_CHANGED: user or another application changed foreground");
     Rect bounds;if(!GetWindowRect(window,out bounds) || point.X<bounds.Left || point.X>=bounds.Right || point.Y<bounds.Top || point.Y>=bounds.Bottom)throw new InvalidOperationException("POINT_OUTSIDE_TARGET");
     if(!foreground)return;
-    IntPtr hit=WindowFromPoint(point);
+    IntPtr hit=PointerWindowAt(point,pointerListener.Id);
     // Same-process overlapping windows are still occlusion: check root identity.
     if(hit==IntPtr.Zero || GetAncestor(hit,2)!=window || WindowOwner(hit)!=owner)throw new InvalidOperationException("POINT_OCCLUDED: point is covered by another window");
   }
@@ -102,7 +116,7 @@ partial class WindowsBridge {
         ControlPoint first;
         if(action=="drag") {Dictionary<string,object> p=(Dictionary<string,object>)((IList)args["path"])[0];first=new ControlPoint {X=Convert.ToInt32(p["x"]),Y=Convert.ToInt32(p["y"])};}
         else first=new ControlPoint {X=NumberOption(args,"x",0),Y=NumberOption(args,"y",0)};
-        window=GetAncestor(WindowFromPoint(first),2);
+        window=GetAncestor(PointerWindowAt(first,NumberOption(args,"_stopProcessId",0)),2);
         if(window==IntPtr.Zero)throw new InvalidOperationException("TARGET_NOT_FOUND: no window at point");
       } else window=ResolveObservationWindow(quiet);
       owner=WindowOwner(window);popups=ControlPopups(owner,window);
@@ -154,6 +168,7 @@ partial class WindowsBridge {
             if(cancel.WaitOne(0) || pointerListener.HasExited)throw new InvalidOperationException("COMPUTER_USE_STOPPED");
             if(!IsWindow(window) || WindowOwner(window)!=owner || GetForegroundWindow()!=window)throw new InvalidOperationException("TARGET_IDENTITY_CHANGED: source or foreground changed during drag");
           } else PointerCheck(cancel,window,owner,p,true,action!="move" || Option(args,"activate",false));
+          NotifyPhysicalInput(true);
           if(!SetCursorPos(p.X,p.Y))throw new InvalidOperationException("POINTER_MOVE_FAILED");
           moved=true;last=p;
           if(action=="drag" && i>0) {
@@ -187,6 +202,7 @@ partial class WindowsBridge {
       else result["pointer"]=action=="move" && moved?"kept: requested hover":moved?"left: user moved pointer or action opened a popup":"unchanged";
       if(activated && !Option(args,"activate",false) && GetForegroundWindow()==window && same && !popup && IsWindow(before))result["foreground"]=SetForegroundWindow(before)?"returned":"restoration refused";
       else result["foreground"]=activated?"kept: requested, user changed focus, or popup opened":"unchanged";
+      if(!releaseFailed)NotifyPhysicalInput(false);
     }
     return result;
   }

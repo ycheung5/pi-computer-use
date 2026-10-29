@@ -21,7 +21,8 @@
     "assets/puppeteer-LICENSE.txt",
     "docs/pointer.md",
     "docs/settings.md",
-    "docs/text.md"
+    "docs/text.md",
+    "docs/indicators.md"
   ],
   "pi": {
     "extensions": [
@@ -60,6 +61,7 @@
     "test:native:text:physical": "node tests/native-text-physical.mjs",
     "test:browser:actions": "node tests/browser-actions-host.mjs",
     "test:browser:firefox:endpoint": "node tests/browser-firefox-endpoint.mjs",
+    "test:indicators": "node tests/indicators-host.mjs",
     "test:browser:profiles": "node tests/browser-profiles-host.mjs"
   },
   "peerDependencies": {
