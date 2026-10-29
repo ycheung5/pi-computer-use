@@ -37,6 +37,7 @@
     "test:native:windows": "node tests/native-windows.mjs",
     "test:wsl": "node tests/wsl-health.mjs",
     "test:native:accessibility": "node tests/native-accessibility.mjs",
+    "test:native:nullable-uia": "node tests/native-nullable-uia.mjs",
     "test:native:chromium": "node tests/native-chromium-accessibility.mjs",
     "test:ownership": "node tests/ownership-host.mjs",
     "test:native:capture": "node tests/native-capture.mjs",

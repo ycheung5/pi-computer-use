@@ -73,15 +73,18 @@ partial class WindowsBridge {
       }
     }
     if(window!=IntPtr.Zero && IsWindow(window)) observed[id]=new ObservedElement { Element=element,Window=window,Owner=WindowOwner(window),Seen=DateTime.UtcNow };
-    Dictionary<string,object> info=new Dictionary<string,object> { {"id",id},{"name",current.Name},{"controlType",current.ControlType.ProgrammaticName.Replace("ControlType.","")},{"depth",depth},{"isEnabled",current.IsEnabled},{"isOffscreen",current.IsOffscreen},{"hasKeyboardFocus",current.HasKeyboardFocus},{"isPassword",current.IsPassword} };
+    ControlType controlType=current.ControlType;
+    bool unknownType=controlType==null || String.IsNullOrEmpty(controlType.ProgrammaticName);
+    Dictionary<string,object> info=new Dictionary<string,object> { {"id",id},{"name",current.Name ?? ""},{"controlType",unknownType ? "Unknown" : controlType.ProgrammaticName.Replace("ControlType.","")},{"depth",depth},{"isEnabled",current.IsEnabled},{"isOffscreen",current.IsOffscreen},{"hasKeyboardFocus",current.HasKeyboardFocus},{"isPassword",current.IsPassword} };
     if(!current.BoundingRectangle.IsEmpty) info["boundingBox"]=UiaBox(current.BoundingRectangle);
-    if(current.AutomationId.Length>0) info["automationId"]=current.AutomationId;
-    if(current.ClassName.Length>0) info["className"]=current.ClassName;
+    if(unknownType) info["controlTypeUnavailable"]=true;
+    if(!String.IsNullOrEmpty(current.AutomationId)) info["automationId"]=current.AutomationId;
+    if(!String.IsNullOrEmpty(current.ClassName)) info["className"]=current.ClassName;
     if(full) {
       info["processId"]=current.ProcessId; info["nativeWindowHandle"]=current.NativeWindowHandle; info["runtimeId"]=element.GetRuntimeId(); info["localizedControlType"]=current.LocalizedControlType;
       List<string> patterns=new List<string>(); foreach(AutomationPattern pattern in element.GetSupportedPatterns()) patterns.Add(pattern.ProgrammaticName.Replace("PatternIdentifiers.Pattern","")); info["patterns"]=patterns;
       object value;
-      if(!current.IsPassword && element.TryGetCurrentPattern(ValuePattern.Pattern,out value)) { string text=((ValuePattern)value).Current.Value; if(text.Length>0) info["value"]=text.Length>2000 ? text.Substring(0,2000) : text; }
+      if(!current.IsPassword && element.TryGetCurrentPattern(ValuePattern.Pattern,out value)) { string text=((ValuePattern)value).Current.Value; if(!String.IsNullOrEmpty(text)) info["value"]=text.Length>2000 ? text.Substring(0,2000) : text; }
     }
     return info;
   }
@@ -98,14 +101,14 @@ partial class WindowsBridge {
     window=entry.Window;
     if(!IsWindow(window) || WindowOwner(window)!=entry.Owner) { observed.Remove(id); throw new InvalidOperationException("STALE_ELEMENT: owning window identity changed"); }
     ValidateElementTarget(window,args);
-    try { if(RuntimeId(entry.Element)!=id) throw new InvalidOperationException("STALE_ELEMENT: runtime identity changed"); AutomationElement.AutomationElementInformation current=entry.Element.Current; if(current.ControlType==null) throw new InvalidOperationException("STALE_ELEMENT"); return entry.Element; }
+    try { if(RuntimeId(entry.Element)!=id) throw new InvalidOperationException("STALE_ELEMENT: runtime identity changed"); entry.Element.GetCurrentPropertyValue(AutomationElement.ProcessIdProperty); return entry.Element; }
     catch(ElementNotAvailableException) { observed.Remove(id); throw new InvalidOperationException("STALE_ELEMENT: control no longer exists; observe again"); }
   }
   static void ValidateElementTarget(IntPtr window, Dictionary<string,object> args) {
     if(args.ContainsKey("nativeWindowHandle") || args.ContainsKey("processId") || args.ContainsKey("windowTitle")) if(ResolveObservationWindow(args)!=window) throw new InvalidOperationException("ELEMENT_WRONG_OWNER: element belongs to a different target window");
   }
   sealed class Traversal {
-    public Stopwatch Watch=Stopwatch.StartNew(); public int Budget,Maximum,Depth,Count; public string Reason; public string Error; public bool Offscreen,Full,BrowserLayout; public TreeWalker Walker;
+    public Stopwatch Watch=Stopwatch.StartNew(); public int Budget,Maximum,Depth,Count,UnknownControlTypes; public string Reason; public string Error; public bool Offscreen,Full,BrowserLayout; public TreeWalker Walker;
     public bool CanRead() { if(Watch.ElapsedMilliseconds>=Budget) { if(Reason==null) Reason="treeTimeoutMs"; return false; } if(Count>=Maximum) { if(Reason==null) Reason="maxNodes"; return false; } return true; }
   }
   static Dictionary<string,object> ReadTree(AutomationElement element,IntPtr window,int depth,int physicalDepth,Traversal state) {
@@ -115,12 +118,13 @@ partial class WindowsBridge {
     try { node=DescribeElement(element,window,state.Full,depth); }
     catch(ElementNotAvailableException) { state.Reason="providerError"; state.Error="An element disappeared during observation"; return null; }
     state.Count++;
+    if(node.ContainsKey("controlTypeUnavailable")) state.UnknownControlTypes++;
     List<object> children=new List<object>();
     AutomationElement child=state.Walker.GetFirstChild(element);
     while(child!=null && state.CanRead()) {
       bool include=state.Offscreen || !child.Current.IsOffscreen;
       if(include) {
-        bool transparent=state.BrowserLayout && child.Current.ControlType==ControlType.Pane && child.Current.Name.Length==0;
+        bool transparent=state.BrowserLayout && child.Current.ControlType==ControlType.Pane && String.IsNullOrEmpty(child.Current.Name);
         int childDepth=depth+(transparent?0:1);
         if(childDepth>state.Depth) { if(state.Reason==null) state.Reason="maxDepth"; }
         else { Dictionary<string,object> item=ReadTree(child,window,childDepth,physicalDepth+1,state); if(item!=null) children.Add(item); }
@@ -160,7 +164,7 @@ partial class WindowsBridge {
       IntPtr owner; AutomationElement element;
       if(args.ContainsKey("elementId")) element=ResolveObservedElement(Convert.ToString(args["elementId"]),args,out owner);
       else { element=AutomationElement.FromPoint(new System.Windows.Point(Convert.ToInt32(args["x"]),Convert.ToInt32(args["y"]))); owner=IntPtr.Zero; if(args.ContainsKey("nativeWindowHandle") || args.ContainsKey("processId") || args.ContainsKey("windowTitle")) { IntPtr target=ResolveObservationWindow(args); Dictionary<string,object> info=DescribeElement(element,IntPtr.Zero,full,0); ObservedElement entry; if(!observed.TryGetValue(Convert.ToString(info["id"]),out entry) || entry.Window!=target) throw new InvalidOperationException("ELEMENT_WRONG_OWNER: point is outside target"); owner=target; } }
-      Dictionary<string,object> result=Result(true,action); result["element"]=DescribeElement(element,owner,full,0); return result;
+      Dictionary<string,object> result=Result(true,action); result["element"]=DescribeElement(element,owner,full,0); if(((Dictionary<string,object>)result["element"]).ContainsKey("controlTypeUnavailable")) result["conclusive"]=false; return result;
     }
     bool desktop=TextOption(args,"scope","active_window")=="desktop";
     IntPtr window=desktop ? IntPtr.Zero : ResolveObservationWindow(args);
@@ -171,12 +175,13 @@ partial class WindowsBridge {
     Dictionary<string,object> root=null;
     try { AutomationElement element=desktop ? AutomationElement.RootElement : AutomationElement.FromHandle(window); root=ReadTree(element,window,0,0,state); }
     catch(Exception error) { state.Reason="providerError"; state.Error=error.Message; }
-    Dictionary<string,object> output=Result(root!=null,action); output["scope"]=desktop?"desktop":"active_window"; output["tree"]=root; output["nodeCount"]=state.Count; output["truncated"]=state.Reason!=null; output["durationMs"]=state.Watch.ElapsedMilliseconds; output["treeTimeoutMs"]=state.Budget; output["viewMode"]=TextOption(args,"viewMode","control"); output["includeOffscreen"]=state.Offscreen; output["detailLevel"]=TextOption(args,"detailLevel","compact");
+    Dictionary<string,object> output=Result(root!=null,action); output["scope"]=desktop?"desktop":"active_window"; output["tree"]=root; output["nodeCount"]=state.Count; output["truncated"]=state.Reason!=null || state.UnknownControlTypes>0; output["durationMs"]=state.Watch.ElapsedMilliseconds; output["treeTimeoutMs"]=state.Budget; output["viewMode"]=TextOption(args,"viewMode","control"); output["includeOffscreen"]=state.Offscreen; output["detailLevel"]=TextOption(args,"detailLevel","compact");
     if(window!=IntPtr.Zero) { output["nativeWindowHandle"]=window.ToInt64(); output["processId"]=WindowOwner(window); }
     if(web!=null) output["webContent"]=web;
+    if(state.UnknownControlTypes>0) { output["unknownControlTypes"]=state.UnknownControlTypes; output["conclusive"]=false; output["truncationReason"]="controlTypeUnavailable"; }
     if(state.Reason!=null) { output["truncationReason"]=state.Reason; output["conclusive"]=false; }
     if(state.Error!=null) { output["providerError"]=state.Error; if(root==null) output["error"]="UIA_PROVIDER_ERROR: "+state.Error; }
-    if(action=="find") { List<object> matches=new List<object>(); FindMatches(root,TextOption(args,"query",""),TextOption(args,"controlType",""),matches,NumberOption(args,"maxResults",25)); output.Remove("tree"); output["matches"]=matches; output["query"]=TextOption(args,"query",""); if(matches.Count==0 && Option(args,"ocrFallback",true) && TextOption(args,"controlType","").Length==0 && (state.Count<=20 || state.Reason!=null)) output["ocrFallbackPending"]=true; }
+    if(action=="find") { List<object> matches=new List<object>(); FindMatches(root,TextOption(args,"query",""),TextOption(args,"controlType",""),matches,NumberOption(args,"maxResults",25)); output.Remove("tree"); output["matches"]=matches; output["query"]=TextOption(args,"query",""); if(matches.Count==0 && Option(args,"ocrFallback",true) && TextOption(args,"controlType","").Length==0 && (state.Count<=20 || state.Reason!=null || state.UnknownControlTypes>0)) output["ocrFallbackPending"]=true; }
     return output;
   }
 }

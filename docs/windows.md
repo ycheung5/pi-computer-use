@@ -99,3 +99,9 @@ Only exe/com/lnk file targets are accepted. Existing fully qualified working dir
 The desktop broker follows Windows' documented [ShellExecute automation interface](https://learn.microsoft.com/en-us/windows/win32/shell/shell-shellexecute). Window operations use [SetWindowPos](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowpos) and [PostMessage](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postmessagew); dispatch acceptance does not establish application completion.
 
 The control fixture also stages a package with a missing native source and checks its explicit failure. Its programmatic sibling-window case reports whether Windows allowed the transition; a refusal is recorded as unexercised, not evidence that physical user-interference acceptance passed. Actual hardware intervention remains a dedicated-desktop check.
+
+## Unknown UIA control types
+
+Some Windows controls expose newer control types that the .NET Framework UIA client cannot name. These nodes retain their available properties and children with `controlType: "Unknown"` and `controlTypeUnavailable: true`. Observations report `unknownControlTypes`, remain inconclusive, and cannot establish absence. An unknown type does not make an observed element stale.
+
+Run `npm run test:native:nullable-uia` with Windows Node after building. Its passive custom-provider fixture checks snapshot retention, inspection, traversal beyond an unknown type, and inconclusive disappearance waits. It performs no activation, screenshots or physical input.
