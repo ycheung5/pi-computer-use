@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { observationTools } from "./accessibility.js";
+import { screenshotContent } from "./capture.js";
 import { WorkerClient, type WorkerClientOptions } from "./client.js";
 import { nativeWorkerLaunch } from "./launcher.js";
 
@@ -16,6 +18,7 @@ export function registerComputerUse(
   let abortRun: (() => void) | undefined;
   const worker = new WorkerClient({
     ...options,
+    timeoutMs: options.timeoutMs ?? 90_000,
     onStop(id) {
       options.onStop?.(id);
       if (id === operationId) stopOperation(false);
@@ -117,6 +120,46 @@ export function registerComputerUse(
         details: result,
         isError: !result.ok,
       };
+    },
+  });
+  for (const { action, parameters } of observationTools) {
+    pi.registerTool({
+      name: `windows_computer_use_${action}`,
+      label: action.replaceAll("_", " "),
+      description:
+        "Observe Windows accessibility without physical input. Element references require fresh observation; partial results are explicitly marked.",
+      parameters: Type.Unsafe<Record<string, unknown>>(parameters),
+      executionMode: "sequential",
+      async execute(_toolCallId, args, signal, _onUpdate, ctx) {
+        const result = await executeDesktop(action, args, signal, ctx);
+        return screenshotContent(result);
+      },
+    });
+  }
+  pi.registerTool({
+    name: "windows_computer_use_screenshot",
+    label: "Screenshot",
+    description:
+      "Capture a Windows window or desktop without UI Automation. Returns a PNG and screen-coordinate bounds; flagged fallbacks may show occluding content.",
+    parameters: Type.Object({
+      scope: Type.Optional(
+        Type.Union([Type.Literal("active_window"), Type.Literal("desktop")], {
+          default: "active_window",
+        }),
+      ),
+      windowTitle: Type.Optional(Type.String({ minLength: 1 })),
+      processId: Type.Optional(Type.Integer({ minimum: 1 })),
+      nativeWindowHandle: Type.Optional(Type.Integer({ minimum: 1 })),
+      activate: Type.Optional(Type.Boolean({ default: false })),
+      maxWidth: Type.Optional(
+        Type.Integer({ minimum: 0, maximum: 7680, default: 1600 }),
+      ),
+    }),
+    executionMode: "sequential",
+    async execute(_toolCallId, args, signal, _onUpdate, ctx) {
+      return screenshotContent(
+        await executeDesktop("screenshot", args, signal, ctx),
+      );
     },
   });
   pi.on("session_shutdown", async () => {

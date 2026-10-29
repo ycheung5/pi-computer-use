@@ -13,12 +13,9 @@
     "dist",
     "README.md",
     "docs/runtime.md",
-    "assets/node-LICENSE.txt",
-    "assets/windows.cs",
-    "assets/ownership.cs",
-    "assets/stop.cs",
     "docs/windows.md",
     "docs/ownership.md",
+    "assets/",
     "docs/stopping.md"
   ],
   "pi": {
@@ -41,7 +38,10 @@
     "test:native": "node tests/native-health.mjs",
     "test:native:windows": "node tests/native-windows.mjs",
     "test:wsl": "node tests/wsl-health.mjs",
+    "test:native:accessibility": "node tests/native-accessibility.mjs",
+    "test:native:chromium": "node tests/native-chromium-accessibility.mjs",
     "test:ownership": "node tests/ownership-host.mjs",
+    "test:native:capture": "node tests/native-capture.mjs",
     "test:stop": "node tests/stop-host.mjs"
   },
   "peerDependencies": {

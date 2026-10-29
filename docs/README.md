@@ -16,7 +16,7 @@ Read the row matching the task; follow section links before reading whole docume
 | Worker setup, protocol and test evidence | [Runtime and validation](runtime.md) |
 | Stop command, listener and physical-input gate | [Stopping](stopping.md) |
 | Desktop ownership and operation lifecycle | [Ownership](ownership.md) |
-| Native window discovery and validation | [Windows discovery](windows.md) |
+| Native window discovery and validation | [Windows discovery](windows.md), [accessibility observations](windows.md#accessibility-observations) |
 | Domain-document consumer rules | [Domain docs](agents/domain.md) |
 
 ## Repository layout

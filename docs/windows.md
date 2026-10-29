@@ -1,5 +1,17 @@
 # Windows discovery
 
+## Screenshots
+
+`windows_computer_use_screenshot` accepts native window identity/title/process targeting, `scope: active_window | desktop`, `maxWidth` (0 means original size), and optional explicit activation. Capture does not resolve UIA elements. PNG data is returned as a Pi image block; text and rendering details contain metadata without duplicated base64.
+
+The capture chain prefers verified unobstructed foreground pixels, then `PrintWindow`. A failed or apparently blank render tries an isolated Windows.Graphics.Capture helper using HWND interop and a free-threaded frame pool. The helper has bounded frame/copy polling plus an external worker deadline, so unavailable WinRT metadata and stalled capture do not disable ordinary window enumeration. A final screen-region fallback is marked `occludedPossible: true`. Hidden/minimized/unavailable target surfaces return a desktop fallback marked `windowCaptureFailed: true`; callers must not treat it as the target's content. Capture errors and fallback warnings remain explicit.
+
+`bounds` and `origin` are physical screen coordinates, including negative virtual-desktop positions. `width`/`height` describe the actual PNG. Map image X using `origin.x + imageX / imageScale` and Y using `origin.y + imageY / imageScaleY`; a separate Y scale accounts for height rounding during resizing. Target identity and geometry are checked around capture. No tool automatically activates a window unless `activate: true` is requested.
+
+Run `npm run test:native:capture` with Windows Node after building. Its dedicated passive fixtures verify actual green pixels behind a magenta cover, PNG dimensions, coordinate mapping, wrong-owner refusal, a black-frame-triggered WGC fallback and explicit minimized-target metadata. Screenshots remain in test process memory; the suite sends no physical input. Multi-monitor layouts and changes across mixed DPI displays still require recorded manual validation rather than being inferred from this fixture.
+
+WGC uses the documented [CreateForWindow interop](https://learn.microsoft.com/en-us/windows/win32/api/windows.graphics.capture.interop/nf-windows-graphics-capture-interop-igraphicscaptureiteminterop-createforwindow), [free-threaded frame pool](https://learn.microsoft.com/en-us/uwp/api/windows.graphics.capture.direct3d11captureframepool.createfreethreaded), and [memory-buffer byte access](https://devblogs.microsoft.com/oldnewthing/20240122-00/?p=109304). A composited frame can legitimately be black; only the unreliable PrintWindow path uses black-frame detection to choose a fallback.
+
 ## Implemented scope
 
 `windows_computer_use_list_windows` reads native top-level windows without resolving UI Automation elements or sending physical input. Options match the reference: `includeInvisible` defaults to false and `maxWindows` defaults to 50, with an integer range of 1–200. The default excludes hidden and minimized windows.
@@ -25,3 +37,15 @@ Live proof on 2026-10-29 used Windows 11 x64 through WSL interop and the private
 ## Remaining targeted behavior
 
 Listing establishes identity metadata but does not resolve an action target. Ambiguous-title rejection, previously observed HWND/PID rejection after replacement, and inaccessible UIA targets must be tested through the first real targeted observation/action in the accessibility slice. No test-only `resolve_window` tool or request was added to claim those behaviors prematurely. Browser tab annotations also belong to browser integration.
+
+## Accessibility observations
+
+`accessibility_tree`, `snapshot`, `find` and `element_info` are registered Pi tools backed by a persistent MTA UIA bridge. The worker validates options before native execution. Tree traversal bounds depth, nodes and elapsed time; a synchronous provider can still block, so the native process has a 40-second watchdog and the extension permits the maximum 30-second traversal budget plus cleanup. Truncated or failed observations remain explicit.
+
+Runtime element references are held for five minutes, scoped to their observed HWND/PID and checked against the current RuntimeId. Unseen, removed and wrong-owner references require fresh observation. Full detail can include a supported value, except password-field values are never read. Native window IDs also validate HWND/PID before UIA access. Title/PID selection refuses ambiguous windows; explicit handles are preferred.
+
+Chromium observations probe renderer accessibility and report `webContent` readiness. A first read can return `starting`; callers should observe again rather than infer that absent page controls do not exist. Unnamed browser layout panes do not consume logical depth. This has been exercised against installed Edge without a forced-accessibility launch flag; other Chromium integrations require their own release checks.
+
+`npm run test:native:accessibility` (Windows Node after build) opens dedicated passive forms and verifies structured trees, values/password protection, find, element inspection, title ambiguity, missing/wrong-owner targets, removed/unseen references and depth/node truncation. `npm run test:native:chromium` opens a disposable visible Chromium profile and local page, reads its page button after lazy initialization, and closes only that browser. Neither test sends physical input; they are live desktop tests, not portable substitutes.
+
+Live evidence: Windows 11 x64, .NET Framework bridge, native form fixtures and installed Edge passed on 2026-10-29. Elevated/UAC target access and five-minute real-time expiry remain release cases. Snapshot now includes a separate PNG by default, preserves explicit UIA failure when an image is attached, and honors `includeScreenshot: false`. Like the reference, `captureWindow: false` defaults to desktop pixels; `captureWindow: true` captures the selected window. Sparse empty-find OCR composition remains assigned to the OCR slice, with `ocrFallbackPending` explicit until integrated. Browser-channel routing is added by the browser slices, not inferred from desktop UIA support.

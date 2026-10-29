@@ -5,7 +5,7 @@ using System.Text;
 using System.Web.Script.Serialization;
 
 // Focused Win32 bridge; owns no UI and never sends physical input.
-class WindowsBridge {
+partial class WindowsBridge {
   delegate bool EnumWindow(IntPtr handle, IntPtr parameter);
   [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
   [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindow callback, IntPtr parameter);
@@ -93,8 +93,11 @@ class WindowsBridge {
         string action = Convert.ToString(request["action"]);
         object result;
         try {
-          if (action != "list_windows") throw new InvalidOperationException("UNKNOWN_ACTION");
-          result = ListWindows((Dictionary<string, object>)request["args"]);
+          Dictionary<string, object> args = (Dictionary<string, object>)request["args"];
+          if (action == "list_windows") result = ListWindows(args);
+          else if (action == "screenshot") result = CaptureScreenshot(args);
+          else if (action == "snapshot" || action == "accessibility_tree" || action == "find" || action == "element_info") result = ObserveAccessibility(action, args);
+          else throw new InvalidOperationException("UNKNOWN_ACTION");
         } catch (Exception error) {
           Dictionary<string, object> failure = Result(false, action);
           failure["error"] = "WINDOWS_ERROR: " + error.Message;
