@@ -42,6 +42,7 @@
     "test:native:chromium": "node tests/native-chromium-accessibility.mjs",
     "test:ownership": "node tests/ownership-host.mjs",
     "test:native:capture": "node tests/native-capture.mjs",
+    "test:native:ocr": "node tests/native-ocr.mjs",
     "test:stop": "node tests/stop-host.mjs"
   },
   "peerDependencies": {

@@ -2,6 +2,7 @@ import { createInterface } from "node:readline";
 import { observeDesktop } from "./accessibility.js";
 import { screenshot } from "./capture.js";
 import { disposeDesktop, listWindows, retireDesktop } from "./desktop.js";
+import { disposeOcr, ocrDesktop } from "./ocr.js";
 import {
   acquireDesktop,
   disposeOwnership,
@@ -112,16 +113,22 @@ async function dispatch(
           }
         : request.action === "list_windows"
           ? await listWindows(request.args, signal)
-          : request.action === "screenshot"
-            ? await screenshot(request.args, signal)
-            : [
-                  "snapshot",
-                  "accessibility_tree",
-                  "find",
-                  "element_info",
-                ].includes(request.action)
-              ? await observeDesktop(request.action, request.args, signal)
-              : { ok: false, action: request.action, error: "UNKNOWN_ACTION" },
+          : request.action === "ocr"
+            ? await ocrDesktop(request.args, signal)
+            : request.action === "screenshot"
+              ? await screenshot(request.args, signal)
+              : [
+                    "snapshot",
+                    "accessibility_tree",
+                    "find",
+                    "element_info",
+                  ].includes(request.action)
+                ? await observeDesktop(request.action, request.args, signal)
+                : {
+                    ok: false,
+                    action: request.action,
+                    error: "UNKNOWN_ACTION",
+                  },
   };
   process.stdout.write(`${JSON.stringify(response)}\n`);
 }
@@ -194,6 +201,7 @@ input.on("close", () => {
   void queue.finally(async () => {
     await stopping.catch(() => undefined);
     await disposeDesktop();
+    await disposeOcr();
     await stopListener.dispose();
     await disposeOwnership();
   });
