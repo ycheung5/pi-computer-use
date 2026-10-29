@@ -14,6 +14,7 @@ Read the row matching the task; follow section links before reading whole docume
 | Publish or read issues | [Issue tracker](agents/issue-tracker.md), [triage labels](agents/triage-labels.md) |
 | Implementation task graph | [Tickets](tickets.md) |
 | Worker setup, protocol and test evidence | [Runtime and validation](runtime.md) |
+| Native window discovery and validation | [Windows discovery](windows.md) |
 | Domain-document consumer rules | [Domain docs](agents/domain.md) |
 
 ## Repository layout

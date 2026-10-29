@@ -2,7 +2,7 @@
 
 ## Current scope
 
-The native Windows health tool is implemented. It checks the worker connection and reports platform, worker PID and Node version; it does not yet establish UIA/OCR/input capability. WSL2 launcher integration is the next host ticket. No physical input is sent by this slice.
+The native Windows health tool and [window listing](windows.md) are implemented. Health checks the worker connection and reports platform, worker PID and Node version; it does not yet establish UIA/OCR/input capability. WSL2 launcher integration is a separate host ticket. These read-only capabilities send no physical input.
 
 ## Runtime provisioning
 

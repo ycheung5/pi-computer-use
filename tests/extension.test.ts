@@ -33,6 +33,19 @@ test("Pi health tool reaches worker and session shutdown rejects subsequent call
     (tool) => tool.name === "windows_computer_use_health",
   );
   assert.ok(health);
+  const windows = tools.find(
+    (tool) => tool.name === "windows_computer_use_list_windows",
+  );
+  assert.ok(windows, "Pi exposes the reference window-listing tool");
+  const invalid = await windows.execute(
+    "invalid-windows",
+    { maxWindows: 0 },
+    undefined,
+    undefined,
+    {} as Parameters<typeof windows.execute>[4],
+  );
+  assert.equal(invalid.isError, true);
+  assert.match(JSON.stringify(invalid.details), /INVALID_ARGUMENTS/);
   const context = {} as Parameters<typeof health.execute>[4];
   const result = await health.execute(
     "call-1",

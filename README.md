@@ -1,6 +1,6 @@
 # Pi Windows Computer Use
 
-A native Pi extension being built for Windows desktop and browser automation. The current implementation provides the Windows worker health tool; the remaining capabilities and WSL2 launcher are tracked in the [task graph](docs/tickets.md).
+A native Pi extension being built for Windows desktop and browser automation. The current implementation provides worker health and native window listing; the remaining capabilities and WSL2 launcher are tracked in the [task graph](docs/tickets.md).
 
 Start with the [documentation index](docs/README.md). The [specification](docs/spec.md) records agreed requirements; the [implementation plan](docs/implementation-plan.md#detailed-milestones) describes delivery and validation.
 
@@ -19,3 +19,5 @@ npm run check
 Build distributable contents with `npm pack` (which builds first). On Windows, try the built package in default Pi with `pi -e .`, or install the checkout with `pi install .`. The manifest loads the built extension; no other Pi extension or DSH installation is required.
 
 The first `windows_computer_use_health` call downloads a private, pinned Windows Node runtime from nodejs.org, verifies its SHA-256 and starts a worker. Subsequent calls reuse it. The runtime is cached below `%LOCALAPPDATA%\pi-computer-use\runtime`; no global Windows Node installation or settings change is made. Initial provisioning requires HTTPS access to nodejs.org. See [runtime and testing](docs/runtime.md) for the protocol, diagnostics and live-check scope.
+
+`windows_computer_use_list_windows` returns native identities, bounds and responsiveness without physical input. Its helper compiles once with Windows' existing .NET Framework compiler. See [Windows discovery](docs/windows.md) for options, failure behavior and `npm run test:native:windows` fixture prerequisites.
