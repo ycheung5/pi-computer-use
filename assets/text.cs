@@ -118,15 +118,16 @@ partial class WindowsBridge {
     if(line==null)throw new InvalidOperationException("CLIPBOARD_HELPER_EXITED");
     return new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(line);
   }
-  static void ClipboardPhase(Process child,string expected,int milliseconds) {
+  static Dictionary<string,object> ClipboardPhase(Process child,string expected,int milliseconds) {
     Dictionary<string,object> reply=ClipboardReply(child,milliseconds);
     if(!Convert.ToBoolean(reply["ok"]) || Convert.ToString(reply["phase"])!=expected)throw new InvalidOperationException(Convert.ToString(reply["error"])??"CLIPBOARD_PHASE_FAILED");
+    return reply;
   }
-  static void ConfirmClipboardRestore(Process child) {
+  static Dictionary<string,object> ConfirmClipboardRestore(Process child) {
     Stopwatch watch=Stopwatch.StartNew();
     for(int i=0;i<4 && watch.ElapsedMilliseconds<2500;i++) {
       var reply=ClipboardReply(child,Math.Max(1,2500-(int)watch.ElapsedMilliseconds));
-      if(Convert.ToString(reply["phase"])=="restored" && Convert.ToBoolean(reply["ok"]))return;
+      if(Convert.ToString(reply["phase"])=="restored" && Convert.ToBoolean(reply["ok"]))return reply;
     }
     throw new InvalidOperationException("CLIPBOARD_RESTORE_UNCONFIRMED");
   }
@@ -188,7 +189,8 @@ partial class WindowsBridge {
         ProcessStartInfo info=new ProcessStartInfo{FileName=TextOption(args,"_clipboardExecutable",""),UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true,StandardOutputEncoding=Encoding.UTF8,StandardErrorEncoding=Encoding.UTF8};
         clipboardRead=null;clipboard=Process.Start(info);clipboard.ErrorDataReceived+=delegate(object sender,DataReceivedEventArgs e){};clipboard.BeginErrorReadLine();
         clipboard.StandardInput.WriteLine(new JavaScriptSerializer().Serialize(new Dictionary<string,object>{{"text",text},{"cancelEvent",args["_cancelEvent"]},{"parentProcessId",Process.GetCurrentProcess().Id}}));clipboard.StandardInput.Flush();
-        ClipboardPhase(clipboard,"snapshot",5000);
+        var snapshotReply=ClipboardPhase(clipboard,"snapshot",5000);
+        result["clipboardSnapshot"]=new Dictionary<string,object>{{"preservedFormats",snapshotReply["formats"]},{"oleMetadataExcluded",snapshotReply["oleMetadataExcluded"]},{"oleFormatsValidated",snapshotReply["oleFormatsValidated"]}};
         TextCheck(cancel,listener,window,owner,expectedFocus,true,interaction);
         clipboardMayChange=true;clipboard.StandardInput.WriteLine("replace");clipboard.StandardInput.Flush();ClipboardPhase(clipboard,"replaced",2000);clipboardReplaced=true;
         TextCheck(cancel,listener,window,owner,expectedFocus,true,interaction);
@@ -207,9 +209,9 @@ partial class WindowsBridge {
         try {
           if(clipboardMayChange) {
             if(!clipboard.HasExited){clipboard.StandardInput.WriteLine(result.ContainsKey("error") || !clipboardReplaced || Option(args,"restoreClipboard",true)?"restore":"keep");clipboard.StandardInput.Flush();}
-            ConfirmClipboardRestore(clipboard);
+            var restoration=ConfirmClipboardRestore(clipboard);result["clipboardRestoreOutcome"]=restoration["restoreOutcome"];
             if(!clipboard.WaitForExit(2000))throw new InvalidOperationException("CLIPBOARD_EXIT_UNCONFIRMED");
-          }else {clipboard.StandardInput.Close();if(!clipboard.WaitForExit(500)){clipboard.Kill();if(!clipboard.WaitForExit(1000))throw new InvalidOperationException("CLIPBOARD_EXIT_UNCONFIRMED");}}
+          }else {clipboard.StandardInput.Close();if(!clipboard.WaitForExit(500)){clipboard.Kill();if(!clipboard.WaitForExit(1000))throw new InvalidOperationException("CLIPBOARD_EXIT_UNCONFIRMED");}result["clipboardRestoreOutcome"]="unchanged";}
           result["clipboardCleanupConfirmed"]=true;
         }catch(Exception error){if(!clipboardMayChange){try{if(!clipboard.HasExited){clipboard.Kill();clipboard.WaitForExit(1000);}}catch{} }else {cleanup=false;result["ok"]=false;result["error"]="CLIPBOARD_CLEANUP_UNCONFIRMED: "+error.Message;}}
         if(!clipboardMayChange || cleanup)clipboard.Dispose();

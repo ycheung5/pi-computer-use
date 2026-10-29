@@ -53,6 +53,7 @@
     "test:native:text": "node tests/native-text.mjs",
     "test:native:text:physical": "node tests/native-text-physical.mjs",
     "test:native:notepad:unicode": "node tests/native-notepad-unicode.mjs",
+    "test:native:clipboard:ole": "node tests/native-ole-clipboard.mjs",
     "test:browser:actions": "node tests/browser-actions-host.mjs",
     "test:browser:firefox:endpoint": "node tests/browser-firefox-endpoint.mjs",
     "test:indicators": "node tests/indicators-host.mjs",
