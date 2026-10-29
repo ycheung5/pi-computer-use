@@ -44,6 +44,7 @@ partial class WindowsBridge {
       handle=candidates[0];
     } else handle=GetForegroundWindow();
     if(handle==IntPtr.Zero || !IsWindow(handle)) throw new InvalidOperationException("TARGET_NOT_FOUND: no usable foreground window");
+    CheckPointerTitle(args,handle);
     UIntPtr ignoredResult;
     bool responsive=SendMessageTimeout(handle,0,UIntPtr.Zero,IntPtr.Zero,3,100,out ignoredResult)!=IntPtr.Zero;
     if(!responsive) throw new InvalidOperationException(Marshal.GetLastWin32Error()==5 ? "TARGET_ACCESS_DENIED: Windows refused access" : "TARGET_UNRESPONSIVE: avoid repeated UIA reads; use native discovery/capture");
@@ -163,6 +164,7 @@ partial class WindowsBridge {
     }
     bool desktop=TextOption(args,"scope","active_window")=="desktop";
     IntPtr window=desktop ? IntPtr.Zero : ResolveObservationWindow(args);
+    if(window!=IntPtr.Zero){RememberPointerOrigin(window);RememberPointerTitle(args,window);}
     Traversal state=new Traversal { Budget=NumberOption(args,"treeTimeoutMs",5000),Maximum=NumberOption(args,"maxNodes",500),Depth=NumberOption(args,"maxDepth",6),Offscreen=Option(args,"includeOffscreen",false),Full=full,Walker=ObservationWalker(TextOption(args,"viewMode","control")) };
     if(window!=IntPtr.Zero) { StringBuilder name=new StringBuilder(256); GetClassName(window,name,name.Capacity); state.BrowserLayout=name.ToString().StartsWith("Chrome_",StringComparison.Ordinal) || name.ToString().StartsWith("Mozilla",StringComparison.Ordinal); }
     Dictionary<string,object> web=window==IntPtr.Zero ? null : WarmBrowser(window,state);

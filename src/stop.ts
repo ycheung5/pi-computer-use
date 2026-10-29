@@ -5,6 +5,7 @@ import type { WorkerResult } from "./protocol.js";
 
 export class StopListener {
   private operationId: string | undefined;
+  private listenerProcessId: number | undefined;
   private cancelEvent: string | undefined;
   private readonly control: WorkerClient;
 
@@ -24,6 +25,7 @@ export class StopListener {
         signal,
       );
       if (!result.ok) return result;
+      this.listenerProcessId = Number(result.listenerProcessId);
       this.operationId = operationId;
     }
     return {
@@ -31,8 +33,10 @@ export class StopListener {
       action: "prepare_input",
       hookInstalled: true,
       cancelEvent: this.cancelEvent,
-      inputReady: false,
-      note: "Physical input remains gated until its action implements cancellation polling and key/button cleanup.",
+      listenerProcessId: this.listenerProcessId,
+      inputReady: true,
+      readyActions: ["click", "double_click", "move", "drag", "scroll"],
+      note: "Pointer actions implement cancellation polling and button cleanup. Keyboard input remains gated.",
     };
   }
 

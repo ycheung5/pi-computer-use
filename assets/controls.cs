@@ -114,6 +114,7 @@ partial class WindowsBridge {
         else if(element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern,out raw)){((ExpandCollapsePattern)raw).Expand();result["method"]="uia_expand";}
         else throw new InvalidOperationException(Option(args,"fallbackClick",true)?"WCU_NEEDS_INPUT: no supported background action; guarded click required":"UNSUPPORTED_PATTERN: no supported background action");
       }
+      result["inputTargetHandle"]=window.ToInt64();result["inputTargetProcessId"]=WindowOwner(window);
       result["verification"]="sent";result["verificationNote"]="Action dispatched; use a fresh observation or explicit wait to verify its effect.";
     } catch(Exception error) {
       result["ok"]=false;

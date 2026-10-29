@@ -21,3 +21,5 @@ Build distributable contents with `npm pack` (which builds first). On Windows or
 The first `windows_computer_use_health` call downloads a private, pinned Windows Node runtime from nodejs.org, verifies its SHA-256 and starts a worker. Subsequent calls reuse it. The runtime is cached below `%LOCALAPPDATA%\pi-computer-use\runtime`; no global Windows Node installation or settings change is made. Initial provisioning requires HTTPS access to nodejs.org. See [runtime and testing](docs/runtime.md) for the protocol, diagnostics and live-check scope.
 
 `windows_computer_use_list_windows` returns native identities, bounds and responsiveness without physical input. Its helper compiles once with Windows' existing .NET Framework compiler. See [Windows discovery](docs/windows.md) for options, failure behavior and `npm run test:native:windows` fixture prerequisites.
+
+Guarded pointer checks: `npm run test:native:pointer:guards` sends no physical input. The opt-in `npm run test:native:pointer:physical` requires a dedicated interactive desktop and `PI_CU_DEDICATED_INPUT_DESKTOP=1`; see [pointer validation](docs/pointer.md). Physical acceptance remains pending.
