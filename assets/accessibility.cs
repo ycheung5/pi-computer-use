@@ -48,7 +48,7 @@ partial class WindowsBridge {
     UIntPtr ignoredResult;
     bool responsive=SendMessageTimeout(handle,0,UIntPtr.Zero,IntPtr.Zero,3,100,out ignoredResult)!=IntPtr.Zero;
     if(!responsive) throw new InvalidOperationException(Marshal.GetLastWin32Error()==5 ? "TARGET_ACCESS_DENIED: Windows refused access" : "TARGET_UNRESPONSIVE: avoid repeated UIA reads; use native discovery/capture");
-    if(Option(args,"activate",false) && GetForegroundWindow()!=handle && !SetForegroundWindow(handle)) throw new InvalidOperationException("TARGET_ACTIVATION_REFUSED: Windows did not grant foreground access");
+    if(Option(args,"activate",false) && GetForegroundWindow()!=handle && !ManagementActivate(handle,WindowOwner(handle))) throw new InvalidOperationException("TARGET_ACTIVATION_REFUSED: Windows did not grant foreground access");
     return handle;
   }
   static Dictionary<string,object> UiaBox(System.Windows.Rect bounds) {

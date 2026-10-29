@@ -161,7 +161,8 @@ partial class WindowsBridge {
       cancel=EventWaitHandle.OpenExisting(Convert.ToString(args["_cancelEvent"]));listener=Process.GetProcessById(NumberOption(args,"_stopProcessId",0));IntPtr listenerHandle=listener.Handle;
       if(cancel.WaitOne(0) || listener.HasExited)throw new InvalidOperationException("COMPUTER_USE_STOPPED");
       foreach(int key in new int[]{1,2,4,16,17,18,91,92})if(GetAsyncKeyState(key)<0)throw new InvalidOperationException("USER_INPUT_ACTIVE: button or modifier already held");
-      if(GetForegroundWindow()!=window && (!SetForegroundWindow(window) || GetForegroundWindow()!=window))throw new InvalidOperationException("TARGET_ACTIVATION_REFUSED");
+      interaction.Check();
+      if(GetForegroundWindow()!=window && (!ManagementActivate(window,owner) || GetForegroundWindow()!=window))throw new InvalidOperationException("TARGET_ACTIVATION_REFUSED");
       if(args.ContainsKey("_elementId")){main.SetFocus();}
       else if(action=="type_text" && TextOption(args,"focusMode","preserve")=="main") {main=MainTextControl(window);main.SetFocus();result["focusedControl"]=main.Current.ControlType.ProgrammaticName;}
       if(action=="type_text" && TextFocus(window,false)==IntPtr.Zero) {IntPtr remembered=TextFocus(window);if(remembered!=IntPtr.Zero)AutomationElement.FromHandle(remembered).SetFocus();}
