@@ -50,7 +50,8 @@
     "test:browser": "node tests/browser-host.mjs",
     "test:native:controls": "node tests/native-controls.mjs",
     "test:native:waits": "node tests/native-waits.mjs",
-    "test:settings": "node tests/settings-host.mjs"
+    "test:settings": "node tests/settings-host.mjs",
+    "test:native:management": "node tests/native-window-management.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

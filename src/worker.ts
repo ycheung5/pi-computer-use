@@ -28,6 +28,7 @@ import type { WorkerRequest, WorkerResponse } from "./protocol.js";
 import { PersonalSettingsManager } from "./settings.js";
 import { StopListener } from "./stop.js";
 import { waitDesktop, waitTools } from "./waits.js";
+import { manageWindow, windowTools } from "./window-management.js";
 
 const settings = new PersonalSettingsManager(
   new Map<string, { description: string; parameters?: unknown }>([
@@ -63,7 +64,7 @@ const settings = new PersonalSettingsManager(
         parameters: ocrParameters,
       },
     ],
-    ...[...observationTools, ...controlTools, ...waitTools].map(
+    ...[...observationTools, ...controlTools, ...waitTools, ...windowTools].map(
       (tool) =>
         [
           tool.action,
@@ -197,37 +198,39 @@ async function dispatch(
           }
         : isBrowserRequest(request.args)
           ? await browse(request.action, request.args, signal)
-          : ["wait", "wait_for"].includes(request.action)
-            ? await waitDesktop(request.action, request.args, signal)
-            : request.action === "list_windows"
-              ? {
-                  ...(await listWindows(request.args, signal)),
-                  browserLane: await browserListing(),
-                }
-              : request.action === "ocr"
-                ? await ocrDesktop(request.args, signal)
-                : request.action === "screenshot"
-                  ? await screenshot(request.args, signal)
-                  : [
-                        "snapshot",
-                        "accessibility_tree",
-                        "find",
-                        "element_info",
-                        "focus",
-                        "invoke",
-                        "set_value",
-                        "scroll",
-                      ].includes(request.action)
-                    ? await executeAccessibility(
-                        request.action,
-                        request.args,
-                        signal,
-                      )
-                    : {
-                        ok: false,
-                        action: request.action,
-                        error: "UNKNOWN_ACTION",
-                      },
+          : windowTools.some((tool) => tool.action === request.action)
+            ? await manageWindow(request.action, request.args, signal)
+            : ["wait", "wait_for"].includes(request.action)
+              ? await waitDesktop(request.action, request.args, signal)
+              : request.action === "list_windows"
+                ? {
+                    ...(await listWindows(request.args, signal)),
+                    browserLane: await browserListing(),
+                  }
+                : request.action === "ocr"
+                  ? await ocrDesktop(request.args, signal)
+                  : request.action === "screenshot"
+                    ? await screenshot(request.args, signal)
+                    : [
+                          "snapshot",
+                          "accessibility_tree",
+                          "find",
+                          "element_info",
+                          "focus",
+                          "invoke",
+                          "set_value",
+                          "scroll",
+                        ].includes(request.action)
+                      ? await executeAccessibility(
+                          request.action,
+                          request.args,
+                          signal,
+                        )
+                      : {
+                          ok: false,
+                          action: request.action,
+                          error: "UNKNOWN_ACTION",
+                        },
   };
   process.stdout.write(`${JSON.stringify(response)}\n`);
 }

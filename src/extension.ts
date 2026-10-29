@@ -15,6 +15,7 @@ import {
   TOOL_PREFIX,
 } from "./settings.js";
 import { waitTools } from "./waits.js";
+import { windowTools } from "./window-management.js";
 
 export function registerComputerUse(
   pi: Pick<ExtensionAPI, "registerTool" | "on"> &
@@ -288,6 +289,20 @@ export function registerComputerUse(
       return screenshotContent(await executeDesktop("ocr", args, signal, ctx));
     },
   });
+  for (const { action, parameters } of windowTools)
+    registerTool({
+      name: `windows_computer_use_${action}`,
+      label: action.replaceAll("_", " "),
+      description:
+        "Launch applications through the desktop shell or manage an explicitly identified window. Dispatch/foreground refusal remain explicit; verify the resulting window state.",
+      parameters: Type.Unsafe<Record<string, unknown>>(parameters),
+      executionMode: "sequential",
+      async execute(_id, args, signal, _onUpdate, ctx) {
+        return screenshotContent(
+          await executeDesktop(action, args, signal, ctx),
+        );
+      },
+    });
   for (const { action, parameters } of waitTools)
     registerTool({
       name: `windows_computer_use_${action}`,
