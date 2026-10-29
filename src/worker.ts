@@ -19,7 +19,9 @@ const requests = new Map<
 const blocked = new Set<string>();
 let stopping: Promise<void> = Promise.resolve();
 const stopListener = new StopListener((operationId) => {
-  void stopOperation(operationId);
+  void stopOperation(operationId).catch((error) =>
+    process.stderr.write(`${String(error)}\n`),
+  );
 });
 
 async function stopOperation(operationId: string): Promise<void> {

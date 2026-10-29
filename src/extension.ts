@@ -72,7 +72,19 @@ export function registerComputerUse(
   const endOperation = async () => {
     if (!operationActive) return;
     operationActive = false;
-    await worker.execute("operation_end", {}, undefined, operationId);
+    const result = await worker.execute(
+      "operation_end",
+      {},
+      undefined,
+      operationId,
+    );
+    if (!result.ok)
+      throw new Error(
+        String(
+          result.error ??
+            "STOP_CLEANUP_FAILED: desktop ownership was not released",
+        ),
+      );
   };
   pi.on("before_agent_start", async (event) => {
     if (event.messageType !== "user") return;
