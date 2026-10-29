@@ -1,6 +1,6 @@
 # Pi computer-use implementation plan
 
-Status: scope confirmed by the user; specification synthesized. No application implementation exists yet.
+Status: implementation in progress on `integration/computer-use`. See [draft PR #22](https://github.com/ycheung5/pi-computer-use/pull/22) for integration evidence; release acceptance is not complete.
 
 Requirements and behavioral contracts are authoritative in the [specification](spec.md). Use the [documentation index](README.md) to load only relevant context.
 

@@ -143,6 +143,7 @@ export const nativeDesktop = new NativeDesktopClient({
       "accessibility.cs",
       "capture.cs",
       "controls.cs",
+      "window-management.cs",
       "pointer.cs",
       "text.cs",
     ]) {
@@ -165,6 +166,7 @@ export const nativeDesktop = new NativeDesktopClient({
       names,
       [
         "System.Drawing.dll",
+        "Microsoft.CSharp.dll",
         "System.Windows.Forms.dll",
         ...[
           "WindowsBase.dll",

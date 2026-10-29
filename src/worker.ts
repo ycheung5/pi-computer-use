@@ -11,6 +11,7 @@ import {
   disposeBrowser,
   isBrowserRequest,
 } from "./browser.js";
+import { browserActionTools } from "./browser-actions.js";
 import { screenshot, screenshotParameters } from "./capture.js";
 import {
   disposeDesktop,
@@ -41,6 +42,7 @@ import {
   validateText,
 } from "./text.js";
 import { waitDesktop, waitTools } from "./waits.js";
+import { manageWindow, windowTools } from "./window-management.js";
 
 const settings = new PersonalSettingsManager(
   new Map<string, { description: string; parameters?: unknown }>([
@@ -82,6 +84,8 @@ const settings = new PersonalSettingsManager(
       ...pointerTools,
       ...textTools,
       ...waitTools,
+      ...windowTools,
+      ...browserActionTools,
     ].map(
       (tool) =>
         [
@@ -274,9 +278,16 @@ async function dispatch(
     previous &&
     !isBrowserRequest(request.args) &&
     request.args.scope !== "desktop" &&
-    !["list_windows", "health", "operation_end", "wait"].includes(
-      request.action,
-    ) &&
+    ![
+      "list_windows",
+      "health",
+      "operation_end",
+      "wait",
+      "launch_app",
+      "activate_window",
+      "move_window",
+      "close_window",
+    ].includes(request.action) &&
     !["windowTitle", "processId", "nativeWindowHandle", "elementId"].some(
       (key) => request.args[key] !== undefined,
     )
@@ -397,37 +408,39 @@ async function dispatch(
           }
         : isBrowserRequest(request.args)
           ? await browse(request.action, request.args, signal)
-          : ["wait", "wait_for"].includes(request.action)
-            ? await waitDesktop(request.action, request.args, signal)
-            : request.action === "list_windows"
-              ? {
-                  ...(await listWindows(request.args, signal)),
-                  browserLane: await browserListing(),
-                }
-              : request.action === "ocr"
-                ? await ocrDesktop(request.args, signal)
-                : request.action === "screenshot"
-                  ? await screenshot(request.args, signal)
-                  : [
-                        "snapshot",
-                        "accessibility_tree",
-                        "find",
-                        "element_info",
-                        "focus",
-                        "invoke",
-                        "set_value",
-                        "scroll",
-                      ].includes(request.action)
-                    ? await executeAccessibility(
-                        request.action,
-                        request.args,
-                        signal,
-                      )
-                    : {
-                        ok: false,
-                        action: request.action,
-                        error: "UNKNOWN_ACTION",
-                      },
+          : windowTools.some((tool) => tool.action === request.action)
+            ? await manageWindow(request.action, request.args, signal)
+            : ["wait", "wait_for"].includes(request.action)
+              ? await waitDesktop(request.action, request.args, signal)
+              : request.action === "list_windows"
+                ? {
+                    ...(await listWindows(request.args, signal)),
+                    browserLane: await browserListing(),
+                  }
+                : request.action === "ocr"
+                  ? await ocrDesktop(request.args, signal)
+                  : request.action === "screenshot"
+                    ? await screenshot(request.args, signal)
+                    : [
+                          "snapshot",
+                          "accessibility_tree",
+                          "find",
+                          "element_info",
+                          "focus",
+                          "invoke",
+                          "set_value",
+                          "scroll",
+                        ].includes(request.action)
+                      ? await executeAccessibility(
+                          request.action,
+                          request.args,
+                          signal,
+                        )
+                      : {
+                          ok: false,
+                          action: request.action,
+                          error: "UNKNOWN_ACTION",
+                        },
   };
   if (
     !isBrowserRequest(request.args) &&
