@@ -27,7 +27,7 @@ Deliver one installable Pi package with native computer-use tools, reference-equ
 13. As an agent, I want click, double-click, move, drag and scroll actions, so that I can operate visual interfaces.
 14. As an agent, I want text entry and key chords, so that I can interact with applications accurately.
 15. As an agent, I want focus, invoke and value-setting actions, so that supported controls can be operated with less physical input.
-16. As an agent, I want application launch and window activation, movement and closure, so that I can manage a complete desktop workflow.
+16. As an agent, I want application launch and window activation, movement and closure, so that I can manage a complete desktop workflow. Prefer reusing the intended existing app window and creating a needed tab/document through its observed UI, preserving existing work. Launch when no suitable window exists or the user explicitly requests a new instance; retain dedicated browser-profile isolation.
 17. As an agent, I want explicit waits and observable conditions, so that I can verify outcomes without guessing.
 18. As a user, I want background actions preferred, so that automation interferes less with my work.
 19. As a user, I want input refused when another window covers the target, so that actions do not reach the wrong application.

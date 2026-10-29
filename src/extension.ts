@@ -184,6 +184,7 @@ export function registerComputerUse(
     if (routingSettings) {
       const allowed = allowedToolNames(routingSettings);
       const guidance = [
+        "For desktop app work, first list windows and reuse the intended existing app window. If a separate workspace is needed, prefer a new tab or document through that app's observed UI. Preserve existing documents and unsaved work; launch the app only when no suitable window exists or the user explicitly requests a new instance. Do not guess tab shortcuts or bypass ambiguous targets or activation refusals. For browser-channel work, reuse suitable automation tabs and retain the dedicated-profile boundary.",
         routingSettings.browserFirst
           ? "For web-page work prefer the isolated browser channel when it supports the requested step."
           : "Choose browser or desktop control according to the user's request.",
@@ -331,7 +332,9 @@ export function registerComputerUse(
       name: `windows_computer_use_${action}`,
       label: action.replaceAll("_", " "),
       description:
-        "Launch applications through the desktop shell or manage an explicitly identified window. Dispatch/foreground refusal remain explicit; verify the resulting window state.",
+        action === "launch_app"
+          ? "Launch an application through the desktop shell. First inspect list_windows and prefer an existing intended window; create a needed tab/document through its observed UI. Launch when no suitable window exists or the user explicitly requests a new instance. The app decides whether launch opens a window or tab; verify the result and preserve existing work."
+          : "Manage an explicitly identified window. Dispatch/foreground refusal remain explicit; verify the resulting window state.",
       parameters: Type.Unsafe<Record<string, unknown>>(parameters),
       executionMode: "sequential",
       async execute(_id, args, signal, _onUpdate, ctx) {
