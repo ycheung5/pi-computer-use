@@ -76,18 +76,34 @@ export class ReferenceClient {
     }
     this.pending.clear();
   }
-  request(method, params) {
+  request(method, params, signal) {
     if (this.failure) return Promise.reject(this.failure);
     const id = ++this.next;
     return new Promise((resolveRequest, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        signal?.removeEventListener("abort", aborted);
         reject(new Error(`Reference timeout: ${method}; ${this.diagnostic}`));
       }, this.timeoutMs);
-      this.pending.set(id, { resolve: resolveRequest, reject, timer });
+      const aborted = () => {
+        this.child.stdin.write(
+          `${JSON.stringify({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: id, reason: "Owned fixture cancellation" } })}\n`,
+        );
+      };
+      const finish = (fn) => (value) => {
+        signal?.removeEventListener("abort", aborted);
+        fn(value);
+      };
+      this.pending.set(id, {
+        resolve: finish(resolveRequest),
+        reject: finish(reject),
+        timer,
+      });
       this.child.stdin.write(
         `${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`,
       );
+      if (signal?.aborted) aborted();
+      else signal?.addEventListener("abort", aborted, { once: true });
     });
   }
   async init() {
@@ -101,11 +117,15 @@ export class ReferenceClient {
     );
     return result;
   }
-  call(action, args) {
-    return this.request("tools/call", {
-      name: `windows_computer_use_${action}`,
-      arguments: args,
-    });
+  call(action, args, signal) {
+    return this.request(
+      "tools/call",
+      {
+        name: `windows_computer_use_${action}`,
+        arguments: args,
+      },
+      signal,
+    );
   }
   async close() {
     if (this.child.exitCode !== null || this.child.signalCode !== null) return;
