@@ -77,6 +77,10 @@ export class ReferenceClient {
     this.pending.clear();
   }
   request(method, params, signal) {
+    if (signal?.aborted)
+      return Promise.reject(
+        signal.reason ?? new Error("Reference request aborted"),
+      );
     if (this.failure) return Promise.reject(this.failure);
     const id = ++this.next;
     return new Promise((resolveRequest, reject) => {

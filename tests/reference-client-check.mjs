@@ -8,6 +8,16 @@ try {
   assert.ok(initialized.serverInfo);
   const listed = await client.request("tools/list", {});
   assert.equal(listed.tools.length, 25);
+  const preaborted = new AbortController();
+  preaborted.abort(new Error("PREABORTED_FIXTURE"));
+  await assert.rejects(
+    client.request(
+      "pi_preaborted_fixture_missing_method",
+      {},
+      preaborted.signal,
+    ),
+    /PREABORTED_FIXTURE/,
+  );
   const invalid = await client.call("not_a_tool", {});
   assert.equal(invalid.isError, true);
   assert.ok(invalid.content.some((item) => item.type === "text" && item.text));
@@ -38,6 +48,7 @@ try {
       check: "reference MCP transport",
       tools: 25,
       rawErrorRetained: true,
+      preabortedRejected: true,
       cancellation,
     }),
   );
