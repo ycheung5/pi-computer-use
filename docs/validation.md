@@ -421,6 +421,8 @@ The live runs use a private Windows-readable copy of the worktree's tests, built
 
 ## Pointer comparison preparation
 
+Historical preparation boundary; see the later [dedicated-session evidence](#dedicated-physical-comparison-evidence).
+
 Ticket #30 preparation adds a safe WSL `npm run test:native:pointer:physical -- --list` plan and an optional pinned-reference backend to the existing runner. Portable subprocess tests copy the runner alone into a fresh directory: Pi/reference listing succeeds without build/resources, both execution modes refuse without desktop opt-in before backend import or fixture creation, invalid options fail, and no extra files appear. The original test failed on the static missing-backend import, then passed after moving startup behind the gate.
 
 The safe CLI boundary and Windows C# compile-only checks passed. Both modified controls and clipboard fixtures compiled successfully; neither binary was executed. No opt-in was set, no fixture launched, clipboard accessed or native input dispatched. The fixture's new counter/hover/button-release oracle and both physical branches remain **unvalidated**. Five prepared pointer cases do not cover successful drop, independent foreground restoration, interference/menu/dialog cases or the paired window-management requirements; those remain explicitly pending in the plan and #30 stays open. See [pointer validation](pointer.md#validation) and [window management](windows.md#launching-and-managing-windows).
@@ -500,6 +502,8 @@ The corrected candidate retained the **same original foreground HWND/PID and las
 
 ## Unicode comparison preparation
 
+Historical preparation boundary; the later [dedicated session](#dedicated-physical-comparison-evidence) supersedes the unrun status for executed cases.
+
 Ticket #26 preparation on 2026-10-30 extends the existing uniquely named Notepad-file runner to select Pi worker or pinned-reference MCP. `npm run test:native:notepad:unicode -- --list` prints the six cases on WSL without Windows interop, desktop opt-in, resources, backend startup or applications. Portable CLI tests cover listing and refusal without opt-in, including a nonexistent reference checkout. No physical opt-in was set and no Notepad/input/clipboard operation was run. The physical Pi/reference branches remain **unvalidated**, and #26 remains open.
 
 The runner records each case's seed, requested/observed/saved text, engine, method diagnostics, elapsed time, raw dispatch and owned cleanup. Acceptance compares exact normalized text and saved bytes, without requiring a 50 ms delay or Pi-specific method label. It never retries uncertain input and saves/closes only its uniquely named files after checking current tab identity. This preparation supplies neither root-cause evidence for pacing nor app/IME/focus environment capture or event-construction experiments; those remain dedicated-session work. Historical regression runs below do not establish reference parity or necessity of the workaround.
@@ -523,3 +527,27 @@ On 2026-10-29 the live activation probe observed LockApp in the foreground, `Att
 ## Unlocked foreground correction
 
 On 2026-10-30, an unlocked VS Code → Notepad transition succeeded but the warm-helper return failed. Instrumentation showed input-thread attachment succeeded and SetForegroundWindow still returned false. The reference's BringWindowToTop step was missing from the attached fallback. Adding it (with a fresh ownership check before the second foreground request) corrected that live transition without injecting keys or changing lock/input guards. The [unlocked round-trip regression](windows.md#unlocked-activation-round-trips) failed on the prior source, then passed six disposable native/Chrome transitions, independently observed native hover, and return to prior foreground. The user's full acceptance-bench pointer workflow and automatic foreground-restoration cases remain pending.
+
+## Dedicated physical comparison evidence
+
+On 2026-10-30 the user explicitly authorized an idle, unlocked Windows desktop. Tests ran serially from WSL2 under the live-test lock using Windows Node 22.23.4, Pi 1.4.0, Windows build 26200 and Notepad 11.2607.14.0. Foreground initially belonged to VS Code, not the resident LockApp process. Production source/assets stayed unchanged from the earlier baseline. Private Windows-readable copies of reviewed runners and pinned DSH 0.5.3 / `6fb6421` were hash-verified; local raw evidence is `/tmp/pi-cu-physical-evidence`. This is scripted public-tool/native behavior, not model-driven task acceptance.
+
+The initial opt-in did not cross WSL automatically; the runner refused before creating resources or dispatching input. Explicit `WSLENV` forwarding corrected that environment issue. Initial and corrected runs are retained separately.
+
+| Coverage | Pi | Pinned DSH | Interpretation |
+| --- | --- | --- | --- |
+| Six Notepad Unicode cases | All six passed exact UIA and saved UTF-8 content, normalizing line endings only | Two whitespace-only cases refused; four mixed-text cases failed exact content/saved-byte checks | Concrete difference; pacing necessity and event-construction cause remain unisolated |
+| Scaled-point click, exact double-click, hover, inner scroll | Corrected fresh-fixture sequence passed | Corrected fresh-fixture sequence passed through scrolling | Initial DSH Y-coordinate failure was runner scale handling; initial Pi hover lacked an explicit foreground precondition |
+| Cancellation after actual drag button-down | Passed, including fixture release and OS button-up | Native backend timed out after 30 seconds; independent OS probe found left button still held | Reference failure retained; no drag replay. Cleanup-only LEFTUP released the button, independently confirmed afterward |
+| Clipboard Unicode/HTML/binary preservation | Exact pasted text and fixture formats passed | Exact pasted text and fixture formats passed | Scoped supported OLE case only |
+| Indexed clipboard preservation/refusal | Initially refused, then fixture check mismatched | Initially accepted, contradicting the runner's refusal expectation | Corrected pre-action seed check fails `QueryGetData` with `80040064` before dispatch. Seed validity is not established; neither initial result proves indexed preservation/corruption |
+| Newer-copy clipboard case | Not reached | Not reached | Blocked by indexed fixture prerequisite; not a pass |
+| Window management | Existing owned-fixture suite passed launch, move, activation, close veto, stale owner, worker survival and honest unresponsive result | Not paired in this session | Scoped Pi regression only |
+
+DSH rejects whitespace-only text at `scripts/windows-uia.ps1`'s `IsNullOrWhiteSpace` guard. Test-only commit `d27fece` adds validated `--case=N` selection with original IDs, allowing previously untested cases to start from fresh files without replaying an uncertain action. DSH cases 4–6 independently saved corrupted text matching the UIA observation. Case 3's saved file remained at its original seed while its UIA content was corrupted; this is retained as a failure, not an independently confirmed saved append. Pi reports 50 ms delay, but acceptance no longer asserts that constant. No experiment in this session isolated pacing from batching, control-character mapping or event construction, and no production fix was adopted.
+
+The same reviewed correction derives reference vertical coordinates from its documented uniform screenshot scale, verifies actual fixture foreground before hover and polls read-only hover observations without repeating movement. It also checks indexed clipboard payload validity before the tool touches it and reports the failing query stage. The original incorrect fixture result is not relabeled as a product defect. Typecheck, lint and 46 portable tests passed; scoped Standards/Spec review found no blocking issues.
+
+Both clipboard fixtures reported original restoration; the corrected Pi run also restored before closing. After the DSH drag timeout, the independent cleanup probe recorded `beforeHeld:true`, dispatched release only, then `afterHeld:false`. Final OS inspection found no held mouse buttons/modifiers and no remaining owned runner/fixture processes. Uncertain DSH Notepad cases retained only their uniquely named disposable files/tabs for inspection; existing user documents were not edited. No physical input was sent after the final cleanup check.
+
+**Still open:** indexed-fixture repair and newer-copy coverage; active IME/keyboard-state capture and one-variable pacing/event experiments; successful drag/drop, broader paired window management, foreground restoration and interference; real Esc/custom shortcut; mixed DPI/layouts and other manual release gates. #26/#27/#30/#31 remain open. These results do not complete #35/#36 real-agent recovery or #37 mechanism diagnosis.
