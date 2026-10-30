@@ -29,6 +29,8 @@ Current run status (2026-10-30): the user authorized a dedicated idle desktop se
 | [#36](https://github.com/ycheung5/pi-computer-use/issues/36) | Measure real-agent browser and mixed workflows | #30, #33, #34 | Blocked — prerequisites |
 | [#37](https://github.com/ycheung5/pi-computer-use/issues/37) | Diagnose baseline failures and define targeted repairs | #35, #36 | Blocked — prerequisites |
 
+Indicator appearance refinement (2026-10-31): [#20](https://github.com/ycheung5/pi-computer-use/issues/20) includes the requested reference-style blue gradient edge at approximately 1.5 times DSH thickness. Implementation and visual validation remain pending; existing lifecycle and safety criteria are unchanged.
+
 ## Original issue disposition
 
 Checklist audit after the dedicated physical session: completed subcriteria are checked on open GitHub issues where evidence supports them; compound criteria stay unchecked until all clauses are covered. No additional whole issue was closed from a partial pass. Requirements in #1/#23 and release gates in #21 remain unchanged.
