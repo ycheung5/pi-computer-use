@@ -126,3 +126,19 @@ test("provider fault report distinguishes explicit partial failure from OS norma
     rmSync(folder, { recursive: true, force: true });
   }
 });
+
+test("platform provider probe plan needs no backend, Windows, or desktop", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      fileURLToPath(new URL("./provider-platform-probe.mjs", import.meta.url)),
+      "--plan",
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const plan = JSON.parse(result.stdout);
+  assert.equal(plan.executed, false);
+  assert.equal(plan.physicalInput, false);
+  assert.deepEqual(plan.cases, ["provider.platform-normalization"]);
+});

@@ -46,7 +46,8 @@ class NullProviderFixture {
     Console.OutputEncoding = new System.Text.UTF8Encoding(false);
     var form = new PassiveNullForm { Text = "Pi nullable UIA fixture", Width = 360, Height = 180 };
     form.Controls.Add(new Label { Text = "Before custom provider", AccessibleName = "Before custom provider", Top = 10, Width = 250 });
-    form.Controls.Add(new UnknownTypeControl { Top = 45, Width = 250, Height = 25 });
+    var custom = new UnknownTypeControl { Top = 45, Width = 250, Height = 25 };
+    form.Controls.Add(custom);
     form.Controls.Add(new Button { Text = "After custom provider", AccessibleName = "After custom provider", Top = 85, Width = 250 });
     form.Shown += delegate { Console.WriteLine(form.Handle.ToInt64()); Console.Out.Flush(); };
     ThreadPool.QueueUserWorkItem(delegate {
@@ -56,6 +57,8 @@ class NullProviderFixture {
           UnknownTypeControl.Release.Reset();
           Interlocked.Exchange(ref UnknownTypeControl.Mode, line == "arm:fault" ? 1 : line == "arm:unavailable" ? 3 : 2);
           Console.WriteLine("armed"); Console.Out.Flush();
+        } else if (line == "child-handle") {
+          form.BeginInvoke((Action)delegate { Console.WriteLine("child-handle:" + custom.Handle.ToInt64()); Console.Out.Flush(); });
         } else if (line == "release") {
           UnknownTypeControl.Release.Set();
           Console.WriteLine("release:ack"); Console.Out.Flush();
