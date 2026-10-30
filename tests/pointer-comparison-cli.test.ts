@@ -129,6 +129,7 @@ test("Drop fixture geometry requires finite visible points within the observed o
     nativeWindowHandle: 40,
     processId: 77,
     visible: true,
+    osVisible: true,
     source: { x: -50, y: 30, width: 20, height: 20 },
     destination: { x: 200, y: 200, width: 20, height: 20 },
   };
@@ -177,6 +178,16 @@ test("Drop fixture geometry requires finite visible points within the observed o
   );
   assert.throws(() =>
     validateGeometry(target, root, { ...geometry, visible: false }),
+  );
+  assert.throws(() =>
+    validateGeometry(target, root, { ...geometry, osVisible: false }),
+  );
+  assert.throws(() =>
+    validateGeometry(
+      target,
+      { ...root, tree: { ...root.tree, isOffscreen: true } },
+      geometry,
+    ),
   );
   assert.throws(() =>
     validateGeometry(target, root, { ...geometry, processId: 78 }),
