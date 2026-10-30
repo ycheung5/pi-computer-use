@@ -70,6 +70,7 @@ let processClosed = false;
 let ended;
 let result;
 let failure;
+let observerCleanupConfirmed = !values["--discover"];
 try {
   // Deliberately do not inherit provider secrets, HOME, user DSH_HOME or cwd .env.
   const env = {
@@ -232,9 +233,28 @@ try {
       !events.some((event) => event.request === "tools/call"),
       "No tool call is permitted",
     );
+    const starts = events
+      .filter((event) => event.observerStart)
+      .map((event) => event.observerStart);
+    observerCleanupConfirmed =
+      starts.length > 0 &&
+      starts.every((pid) =>
+        events.some(
+          (event) =>
+            event.observer === pid && Object.hasOwn(event, "referenceExit"),
+        ),
+      );
     assert.ok(
-      events.some((event) => event.referenceExit === 0),
-      "Serving reference process must exit cleanly",
+      observerCleanupConfirmed,
+      "All reference process exits must be observed",
+    );
+    assert.ok(
+      starts.every((pid) =>
+        events.some(
+          (event) => event.observer === pid && event.referenceExit === 0,
+        ),
+      ),
+      "All reference processes must exit cleanly",
     );
     discovery = {
       bridge: "generic-mcp",
@@ -281,9 +301,9 @@ try {
         await waitForExit();
       }
     }
-    if (child?.pid && !processClosed) {
+    if ((child?.pid && !processClosed) || !observerCleanupConfirmed) {
       console.error(`DSH exit unconfirmed; isolated home retained: ${dir}`);
-      failure ??= Error("DSH exit unconfirmed");
+      failure ??= Error("DSH or reference process exit unconfirmed");
     } else {
       await rm(dir, {
         recursive: true,

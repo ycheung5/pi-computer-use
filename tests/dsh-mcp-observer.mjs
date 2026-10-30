@@ -17,12 +17,34 @@ const allowed = new Set([
   "tools/list",
   "ping",
 ]);
+let closing = false;
+let escalation;
+let deadline;
+function stopChild(failed = false) {
+  if (failed) process.exitCode = 1;
+  if (closing) return;
+  closing = true;
+  child.stdin.end();
+  escalation = setTimeout(() => {
+    process.exitCode = 1;
+    child.kill("SIGTERM");
+    deadline = setTimeout(() => child.kill("SIGKILL"), 500);
+  }, 500);
+}
+process.on("SIGTERM", () => stopChild(true));
+process.on("SIGINT", () => stopChild(true));
+child.on("error", (error) => {
+  appendFileSync(
+    trace,
+    `${JSON.stringify({ referenceError: error.code ?? "spawn-failed", observer: process.pid })}\n`,
+  );
+  process.exitCode = 1;
+});
 createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   appendFileSync(trace, `${JSON.stringify({ request: message.method })}\n`);
   if (!allowed.has(message.method)) {
-    child.kill();
-    process.exitCode = 1;
+    stopChild(true);
     process.stdin.destroy();
     return;
   }
@@ -39,11 +61,13 @@ createInterface({ input: child.stdout }).on("line", (line) => {
   }
   process.stdout.write(`${line}\n`);
 });
-process.stdin.on("end", () => child.stdin.end());
-child.on("close", (code) => {
+process.stdin.on("end", () => stopChild());
+child.on("close", (code, signal) => {
+  clearTimeout(escalation);
+  clearTimeout(deadline);
   appendFileSync(
     trace,
-    `${JSON.stringify({ referenceExit: code, observer: process.pid })}\n`,
+    `${JSON.stringify({ referenceExit: code, signal, observer: process.pid })}\n`,
   );
   process.exitCode ||= code ?? 1;
 });
