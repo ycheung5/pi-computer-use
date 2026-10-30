@@ -87,6 +87,7 @@
     "test:accessibility:provider-platform": "node tests/provider-platform-probe.mjs",
     "test:accessibility:diagnostics": "node tests/accessibility-comparison-check.mjs --diagnostics",
     "test:native:clipboard:plan": "node tests/native-ole-clipboard-check.mjs",
+    "test:native:ime:owner": "node tests/ime-owner.mjs",
     "test:native:process-containment": "node tests/process-containment-check.mjs",
     "test:native:owner-supervisor": "node tests/owner-supervisor-check.mjs",
     "test:native:owner-backend-health": "node tests/owner-backend-health-check.mjs",
