@@ -6,6 +6,7 @@ import {
   access,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   writeFile,
@@ -17,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { WorkerClient } from "../dist/client.js";
 import { nativeWorkerLaunch } from "../dist/launcher.js";
+import { advancedWorkflow } from "./browser-advanced-comparison.mjs";
 import { ReferenceClient, referenceResult } from "./reference-client.mjs";
 
 const run = promisify(execFile);
@@ -51,17 +53,36 @@ if (process.platform === "linux") {
 assert.equal(process.platform, "win32");
 const reference = resolve(process.argv[2]);
 const app = process.argv[3] ?? "edge";
-assert.ok(["edge", "chrome"].includes(app), "Use edge or chrome");
+assert.ok(
+  ["edge", "chrome", "firefox"].includes(app),
+  "Use edge, chrome or firefox",
+);
 const repetitions = Number(process.argv[4] ?? 1);
 assert.ok(
   Number.isSafeInteger(repetitions) && repetitions >= 1 && repetitions <= 3,
 );
+if (process.argv.includes("--profiles")) {
+  assert.equal(
+    repetitions,
+    1,
+    "Use one complete paired profile lifecycle per run; repeat the command for a fresh fixture root",
+  );
+}
 const root = fileURLToPath(new URL("../", import.meta.url));
 const folder = await mkdtemp(join(tmpdir(), "pi-browser-comparison-"));
 const report = {
   diagnosticInjection: process.argv.includes("--verify-unfilled"),
+  mode: process.argv.includes("--profiles")
+    ? "profiles"
+    : process.argv.includes("--advanced")
+      ? "advanced"
+      : "form",
   ok: false,
-  check: "paired browser form",
+  check: process.argv.includes("--profiles")
+    ? "paired browser profiles"
+    : process.argv.includes("--advanced")
+      ? "paired advanced browser"
+      : "paired browser form",
   app,
   repetitions,
   nodeVersion: process.version,
@@ -94,6 +115,20 @@ const powershell = async (script) =>
       { windowsHide: true, cwd: folder },
     )
   ).stdout.trim();
+const processAlive = async (pid) =>
+  JSON.parse(
+    await powershell(
+      `[bool](Get-Process -Id ${pid} -ErrorAction SilentlyContinue)|ConvertTo-Json -Compress`,
+    ),
+  );
+const waitForOwnedExit = async (pid) => {
+  const deadline = Date.now() + 5000;
+  do {
+    if (!(await processAlive(pid))) return true;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  } while (Date.now() < deadline);
+  return false;
+};
 const desktop = async () =>
   JSON.parse(
     await powershell(
@@ -143,39 +178,44 @@ const resultOf = (raw) => {
 };
 try {
   const candidates =
-    app === "edge"
+    app === "firefox"
       ? [
-          join(
-            process.env["ProgramFiles(x86)"],
-            "Microsoft",
-            "Edge",
-            "Application",
-            "msedge.exe",
-          ),
-          join(
-            process.env.ProgramFiles,
-            "Microsoft",
-            "Edge",
-            "Application",
-            "msedge.exe",
-          ),
-        ]
-      : [
-          join(
-            process.env.ProgramFiles,
-            "Google",
-            "Chrome",
-            "Application",
-            "chrome.exe",
-          ),
-          join(
-            process.env["ProgramFiles(x86)"],
-            "Google",
-            "Chrome",
-            "Application",
-            "chrome.exe",
-          ),
-        ];
+          process.env.PI_CU_BROWSER_EXECUTABLE,
+          join(process.env.ProgramFiles, "Mozilla Firefox", "firefox.exe"),
+        ].filter(Boolean)
+      : app === "edge"
+        ? [
+            join(
+              process.env["ProgramFiles(x86)"],
+              "Microsoft",
+              "Edge",
+              "Application",
+              "msedge.exe",
+            ),
+            join(
+              process.env.ProgramFiles,
+              "Microsoft",
+              "Edge",
+              "Application",
+              "msedge.exe",
+            ),
+          ]
+        : [
+            join(
+              process.env.ProgramFiles,
+              "Google",
+              "Chrome",
+              "Application",
+              "chrome.exe",
+            ),
+            join(
+              process.env["ProgramFiles(x86)"],
+              "Google",
+              "Chrome",
+              "Application",
+              "chrome.exe",
+            ),
+          ];
   let executable;
   for (const candidate of candidates) {
     try {
@@ -228,7 +268,7 @@ try {
   const settings = {
     browserApp: app,
     browserVisible: false,
-    browserSignIn: false,
+    browserSignIn: report.mode === "profiles",
     indicatorEnabled: false,
     cursorIndicatorEnabled: false,
   };
@@ -257,35 +297,44 @@ try {
       const started = performance.now();
       let phase = "startup";
       try {
-        if (engine === "reference") {
-          active = new ReferenceClient(reference, {
-            cwd: folder,
-            env: {
-              WCU_BROWSER_APP: app,
-              WCU_BROWSER_EXE: executable,
-              WCU_BROWSER_HEADLESS: "1",
-              WCU_BROWSER_SIGNIN: "0",
-              WCU_BROWSER_PROFILE: join(folder, "reference-profiles"),
-              WCU_SETTINGS_JSON: JSON.stringify(settings),
-            },
-          });
-          await active.init();
-        } else {
-          const worker = new WorkerClient({
-            launch: async () => ({
-              executable: process.execPath,
-              args: [join(root, "dist", "worker.js")],
+        settings.browserSignIn = report.mode === "profiles";
+        await writeFile(settingsPath, JSON.stringify(settings));
+        const createClient = async () => {
+          if (engine === "reference") {
+            const referenceClient = new ReferenceClient(reference, {
               cwd: folder,
-            }),
-            timeoutMs: 60000,
-          });
-          const operation = randomUUID();
-          active = {
-            call: (action, args) =>
-              worker.execute(action, args, undefined, operation),
-            close: () => worker.dispose(),
-          };
-        }
+              env: {
+                WCU_BROWSER_APP: app,
+                WCU_BROWSER_EXE: executable,
+                WCU_BROWSER_HEADLESS: "1",
+                WCU_BROWSER_SIGNIN: settings.browserSignIn ? "1" : "0",
+                WCU_BROWSER_DOWNLOADS: join(folder, "reference-downloads"),
+                WCU_BROWSER_PROFILE: join(folder, "reference-profiles"),
+                WCU_SETTINGS_JSON: JSON.stringify(settings),
+              },
+            });
+            await referenceClient.init();
+            return referenceClient;
+          } else {
+            const worker = new WorkerClient({
+              launch: async () => ({
+                executable: process.execPath,
+                args: [join(root, "dist", "worker.js")],
+                cwd: folder,
+              }),
+              timeoutMs: 60000,
+            });
+            const operation = randomUUID();
+            return {
+              call: (action, args, signal) =>
+                worker.execute(action, args, signal, operation),
+              close: () => worker.dispose(),
+              end: () =>
+                worker.execute("operation_end", {}, undefined, operation),
+            };
+          }
+        };
+        active = await createClient();
         const call = async (action, args) => {
           const raw = await active.call(action, args);
           const result = engine === "reference" ? resultOf(raw) : raw;
@@ -300,7 +349,7 @@ try {
         phase = "open";
         const { result: opened } = await call("set_value", {
           elementId: "new-tab",
-          value: `${source.url}form`,
+          value: `${source.url}${report.mode === "profiles" ? "profile/set" : report.mode === "advanced" ? "advanced" : "form"}`,
         });
         const tab = (opened.tab ?? opened.opened).id;
         assert.ok(tab);
@@ -317,7 +366,7 @@ try {
         assert.ok(Number.isSafeInteger(ownedBrowser.processId));
         const actualBrowser = JSON.parse(
           await powershell(
-            `$ownedBrowser=Get-CimInstance Win32_Process -Filter 'ProcessId = ${ownedBrowser.processId}'; if(-not $ownedBrowser){throw 'Owned browser disappeared'}; @{headless=($ownedBrowser.CommandLine -match '--headless');executable=$ownedBrowser.ExecutablePath;version=(Get-Item -LiteralPath $ownedBrowser.ExecutablePath).VersionInfo.ProductVersion}|ConvertTo-Json -Compress`,
+            `$ownedBrowser=Get-CimInstance Win32_Process -Filter 'ProcessId = ${ownedBrowser.processId}'; if(-not $ownedBrowser){throw 'Owned browser disappeared'}; @{headless=($ownedBrowser.CommandLine -match '(?:^|\\s)--?headless(?:=|\\s|$)');executable=$ownedBrowser.ExecutablePath;version=(Get-Item -LiteralPath $ownedBrowser.ExecutablePath).VersionInfo.ProductVersion}|ConvertTo-Json -Compress`,
           ),
         );
         assert.equal(actualBrowser.headless, true);
@@ -327,6 +376,269 @@ try {
         );
         assert.equal(actualBrowser.version, report.browserVersion);
         row.browser = actualBrowser;
+        row.ownedProcessIds = [ownedBrowser.processId];
+        if (report.mode === "profiles") {
+          phase = "profile lifecycle";
+          row.profile = { initialBrowser: ownedBrowser };
+          assert.match(
+            (await call("accessibility_tree", { browserTab: tab })).result.text,
+            /Cookie: missing/,
+          );
+          await call("set_value", {
+            elementId: `${tab}:address`,
+            value: `${source.url}profile/read`,
+          });
+          assert.match(
+            (await call("accessibility_tree", { browserTab: tab })).result.text,
+            /Cookie: remembered/,
+          );
+          await active.end?.();
+          const competitor = await createClient();
+          try {
+            const raw = await competitor.call("set_value", {
+              elementId: "new-tab",
+              value: `${source.url}profile/read`,
+            });
+            const result = engine === "reference" ? resultOf(raw) : raw;
+            row.profile.competitor = result;
+            if (result.ok) {
+              assert.match(result.text, /Cookie: remembered/);
+              const rawListing = await competitor.call("list_windows", {
+                maxWindows: 1,
+              });
+              const listing =
+                engine === "reference" ? resultOf(rawListing) : rawListing;
+              const competitorTab = (result.tab ?? result.opened).id;
+              const shared = listing.browserLane.browsers.find((x) =>
+                x.tabs.some((t) => t.id === competitorTab),
+              );
+              assert.equal(
+                shared.processId,
+                ownedBrowser.processId,
+                "Reference kept-profile sharing must use the same owned process",
+              );
+              row.profile.ownership = "shared live dedicated profile";
+            } else {
+              assert.match(result.error, /BROWSER_PROFILE_BUSY/);
+              row.profile.ownership = "live contender refused";
+            }
+          } finally {
+            await competitor.close();
+          }
+          const { result: afterDetachTree } = await call("accessibility_tree", {
+            browserTab: tab,
+          });
+          assert.match(afterDetachTree.text, /Cookie: remembered/);
+          const { result: afterDetachListing } = await call("list_windows", {
+            maxWindows: 1,
+          });
+          const afterDetachRoot = afterDetachListing.browserLane.browsers.find(
+            (x) => x.tabs.some((t) => t.id === tab),
+          );
+          assert.equal(
+            afterDetachRoot?.processId,
+            ownedBrowser.processId,
+            "Detaching the contender must preserve the original tab in the same browser root",
+          );
+          assert.equal(await processAlive(ownedBrowser.processId), true);
+          row.profile.ownershipAfterDetach = {
+            originalTabReadable: true,
+            rootAlive: true,
+            processId: afterDetachRoot.processId,
+          };
+          await active.close();
+          row.profile.restart = {
+            oldProcessId: ownedBrowser.processId,
+            oldRootExitedBeforeReconnect: await waitForOwnedExit(
+              ownedBrowser.processId,
+            ),
+          };
+          try {
+            active = await createClient();
+            const { result: resumed } = await call("set_value", {
+              elementId: "new-tab",
+              value: `${source.url}profile/read`,
+            });
+            const { result: restartedListing } = await call("list_windows", {
+              maxWindows: 1,
+            });
+            const restartedTab = (resumed.tab ?? resumed.opened).id;
+            const restartedBrowser = restartedListing.browserLane.browsers.find(
+              (x) => x.tabs.some((t) => t.id === restartedTab),
+            );
+            row.ownedProcessIds.push(restartedBrowser.processId);
+            row.profile.restart.newProcessId = restartedBrowser.processId;
+            row.profile.restart.differentRoot =
+              restartedBrowser.processId !== ownedBrowser.processId;
+            assert.match(resumed.text, /Cookie: remembered/);
+            row.profile.cookieObservedAfterControllerRestart = true;
+            row.profile.restart.verified =
+              row.profile.restart.oldRootExitedBeforeReconnect === true &&
+              row.profile.restart.differentRoot === true &&
+              row.profile.restart.newProcessId !==
+                row.profile.restart.oldProcessId;
+            row.profile.cookiePersisted = row.profile.restart.verified;
+            if (!row.profile.restart.verified) {
+              row.findings ??= [];
+              row.findings.push({
+                phase: "kept profile restart",
+                error:
+                  "Cookie observed after controller reconnect, but old-root exit and a different browser root were not both established",
+              });
+            }
+          } catch (error) {
+            row.profile.cookiePersisted = false;
+            row.profile.restart.verified = false;
+            row.findings ??= [];
+            row.findings.push({
+              phase: "kept profile restart",
+              error: String(error),
+              toolResult: error.toolResult,
+            });
+          } finally {
+            await active.close();
+          }
+          settings.browserSignIn = false;
+          await writeFile(settingsPath, JSON.stringify(settings));
+          active = await createClient();
+          const { result: temporary } = await call("set_value", {
+            elementId: "new-tab",
+            value: `${source.url}profile/read`,
+          });
+          assert.match(temporary.text, /Cookie: missing/);
+          const profileRoot = join(
+            folder,
+            `${engine === "reference" ? "reference" : "pi"}-profiles`,
+          );
+          const temporaryEntries = (
+            await readdir(profileRoot, { withFileTypes: true })
+          ).filter(
+            (x) =>
+              x.isDirectory() &&
+              /^(profile-|temporary-|bidi-)/.test(x.name) &&
+              !x.name.endsWith(".lock"),
+          );
+          assert.equal(
+            temporaryEntries.length,
+            1,
+            JSON.stringify(temporaryEntries),
+          );
+          const temporaryPath = join(profileRoot, temporaryEntries[0].name);
+          const tempId = (temporary.tab ?? temporary.opened).id;
+          const { result: tempListing } = await call("list_windows", {
+            maxWindows: 1,
+          });
+          const temporaryPid = tempListing.browserLane.browsers.find((x) =>
+            x.tabs.some((t) => t.id === tempId),
+          ).processId;
+          row.ownedProcessIds.push(temporaryPid);
+          await call("set_value", {
+            elementId: `${tempId}:address`,
+            value: `${source.url}profile/set`,
+          });
+          await call("set_value", {
+            elementId: `${tempId}:address`,
+            value: `${source.url}profile/read`,
+          });
+          assert.match(
+            (await call("accessibility_tree", { browserTab: tempId })).result
+              .text,
+            /Cookie: remembered/,
+          );
+          await active.close();
+          const controllerExit =
+            engine === "reference"
+              ? {
+                  exitCode: active.child.exitCode,
+                  signalCode: active.child.signalCode,
+                }
+              : { disposed: true };
+          const removalDeadline = Date.now() + 10000;
+          let present = true;
+          do {
+            try {
+              await access(temporaryPath);
+            } catch (error) {
+              if (error.code !== "ENOENT") throw error;
+              present = false;
+            }
+            if (present)
+              await new Promise((resolve) => setTimeout(resolve, 200));
+          } while (present && Date.now() < removalDeadline);
+          row.profile.temporary = {
+            cookieInitiallyMissing: true,
+            removedBeforeRunnerCleanup: !present,
+            processId: temporaryPid,
+            browserAliveAfterControllerExit: await processAlive(temporaryPid),
+            allKnownControllersClosed: true,
+            controllerExit,
+          };
+          if (present) {
+            row.findings ??= [];
+            row.findings.push({
+              phase: "temporary cleanup",
+              error:
+                "Temporary profile remains after controller exit; runner has not removed it",
+            });
+          }
+          active = await createClient();
+          const { result: isolated } = await call("set_value", {
+            elementId: "new-tab",
+            value: `${source.url}profile/read`,
+          });
+          assert.match(isolated.text, /Cookie: missing/);
+          const { result: isolatedListing } = await call("list_windows", {
+            maxWindows: 1,
+          });
+          row.ownedProcessIds.push(
+            isolatedListing.browserLane.browsers.find((x) =>
+              x.tabs.some((t) => t.id === (isolated.tab ?? isolated.opened).id),
+            ).processId,
+          );
+          row.profile.temporary.cookieIsolatedOnRestart = true;
+          try {
+            await access(temporaryPath);
+            row.profile.temporary.removedOnNextLaunch = false;
+          } catch (error) {
+            if (error.code !== "ENOENT") throw error;
+            row.profile.temporary.removedOnNextLaunch = true;
+          }
+
+          row.steps.push({
+            phase: "kept synthetic cookie restart and live ownership",
+            status: row.profile.restart.verified ? "pass" : "fail",
+          });
+          row.desktop = { before, after: await desktop() };
+          row.desktop.preservation =
+            JSON.stringify(row.desktop.after) === JSON.stringify(before)
+              ? "preserved"
+              : "inconclusive";
+          if (row.desktop.preservation === "inconclusive")
+            row.desktop.note =
+              "Desktop changed during passive run; attribution is unproven";
+          row.status = row.findings?.length ? "fail" : "pass";
+          continue;
+        }
+        if (report.mode === "advanced") {
+          phase = "advanced workflow";
+          await advancedWorkflow({
+            call,
+            rawCall: async (action, args, signal) => {
+              const raw = await active.call(action, args, signal);
+              return engine === "reference" ? resultOf(raw) : raw;
+            },
+            row,
+            tab,
+            source,
+            app,
+            engine,
+            run,
+            desktop,
+            before,
+          });
+          row.status = "pass";
+          continue;
+        }
         assert.equal(
           await (await fetch(`${source.url}form/state`)).json(),
           null,
@@ -503,6 +815,24 @@ try {
         if (active) {
           try {
             await active.close();
+            const cleanupDeadline = Date.now() + 12000;
+            let alive;
+            do {
+              alive = JSON.parse(
+                (await powershell(
+                  `@(${[...new Set(row.ownedProcessIds ?? [])].map((pid) => `if(Get-Process -Id ${pid} -ErrorAction SilentlyContinue){${pid}}`).join(";")})|ConvertTo-Json -Compress`,
+                )) || "[]",
+              );
+              if (!Array.isArray(alive)) alive = [alive];
+              if (!alive.length) break;
+              await new Promise((resolve) => setTimeout(resolve, 200));
+            } while (Date.now() < cleanupDeadline);
+            row.cleanupProcessIdsAlive = alive;
+            assert.deepEqual(
+              alive,
+              [],
+              "Owned browser roots must terminate before removing their folders",
+            );
             row.cleanupConfirmed = true;
           } catch (error) {
             row.cleanupError = String(error);
@@ -557,7 +887,14 @@ report.ok =
 if (process.env.PI_CU_RELEASE_OUTPUT) {
   await mkdir(process.env.PI_CU_RELEASE_OUTPUT, { recursive: true });
   await writeFile(
-    join(process.env.PI_CU_RELEASE_OUTPUT, "browser-comparison.json"),
+    join(
+      process.env.PI_CU_RELEASE_OUTPUT,
+      report.mode === "advanced"
+        ? "browser-advanced-comparison.json"
+        : report.mode === "profiles"
+          ? "browser-profiles-comparison.json"
+          : "browser-comparison.json",
+    ),
     JSON.stringify(report, null, 2),
   );
 }
