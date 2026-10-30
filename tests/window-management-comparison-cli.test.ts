@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import {
   mkdtempSync,
   readdirSync,
@@ -373,4 +374,119 @@ test("MTA direct focus control is explicitly scoped and requires the diagnostic 
     { encoding: "utf8" },
   );
   assert.notEqual(invalid.status, 0);
+});
+
+test("owned-dialog comparison is opt-in and preserves no-input plan", () => {
+  const script = fileURLToPath(
+    new URL("./foreground-focus-comparison.mjs", import.meta.url),
+  );
+  const plan = spawnSync(
+    process.execPath,
+    [script, "--plan", "--dialog", "--provenance"],
+    {
+      encoding: "utf8",
+      env: { ...process.env, PI_CU_WINDOW_MANAGEMENT_TEST: "" },
+    },
+  );
+  assert.equal(plan.status, 0, plan.stderr);
+  const result = JSON.parse(plan.stdout);
+  assert.equal(result.executed, false);
+  assert.equal(result.physicalInput, false);
+  assert.equal(result.fixtureExpiry, "explicit-stop-only");
+  assert.deepEqual(result.cases, ["owned-dialog-foreground"]);
+  const incompatible = spawnSync(
+    process.execPath,
+    [script, "--plan", "--dialog", "--direct-uia", "--provenance"],
+    { encoding: "utf8" },
+  );
+  assert.notEqual(incompatible.status, 0);
+});
+
+test("owned-dialog evidence distinguishes observed popup and intervening input", () => {
+  const script = fileURLToPath(
+    new URL("./foreground-focus-comparison.mjs", import.meta.url),
+  );
+  const dir = mkdtempSync(join(tmpdir(), "pi-dialog-evidence-"));
+  try {
+    const path = join(dir, "result.json"),
+      prior = { nativeWindowHandle: 10, processId: 20 },
+      target = { nativeWindowHandle: 30, processId: 40 };
+    const before = {
+        foregroundHandle: 10,
+        foregroundPid: 20,
+        foregroundRoot: 10,
+        lastInputTick: 1,
+      },
+      sample = {
+        foregroundHandle: 50,
+        foregroundPid: 40,
+        foregroundRoot: 50,
+        lastInputTick: 1,
+      };
+    const base = {
+      comparison: "owned-dialog",
+      prior,
+      target,
+      before,
+      pre: before,
+      action: { ok: true },
+      dialog: { handle: 50, owner: 30, processId: 40, visible: true },
+      samples: [sample],
+    };
+    for (const [evidence, status] of [
+      [base, "pass"],
+      [{ ...base, samples: [{ ...sample, lastInputTick: 2 }] }, "inconclusive"],
+      [{ ...base, dialog: { ...base.dialog, owner: 99 } }, "inconclusive"],
+      [{ ...base, dialog: { ...base.dialog, visible: false } }, "fail"],
+      [
+        {
+          ...base,
+          samples: [{ ...sample, foregroundRoot: 10, foregroundPid: 20 }],
+        },
+        "inconclusive",
+      ],
+    ] as const) {
+      writeFileSync(path, JSON.stringify(evidence));
+      const got = spawnSync(process.execPath, [script, `--report=${path}`], {
+        encoding: "utf8",
+      });
+      assert.equal(JSON.parse(got.stdout).status, status, got.stderr);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("uncertain dispatch retains coordinator without relying on stdin", async () => {
+  const script = fileURLToPath(
+    new URL("./foreground-focus-comparison.mjs", import.meta.url),
+  );
+  const child = spawn(process.execPath, [script, "--retention-check"], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  try {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ready = await Promise.race([
+      once(child.stdout, "data"),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("retention test not ready")),
+          3000,
+        );
+      }),
+    ]).finally(() => clearTimeout(timer));
+    assert.match(String(ready[0]), /retained/);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.equal(
+      child.exitCode,
+      null,
+      "coordinator must remain alive with no stdin",
+    );
+  } finally {
+    if (child.exitCode === null) {
+      const closed = once(child, "close");
+      child.kill();
+      await closed;
+    }
+  }
 });

@@ -2,18 +2,126 @@
 import assert from "node:assert/strict";
 
 const args = process.argv.slice(2);
+function retainCoordinator() {
+  return setInterval(() => {}, 10000);
+}
+if (args.length === 1 && args[0] === "--retention-check") {
+  retainCoordinator();
+  console.log(JSON.stringify({ status: "retained" }));
+}
+if (args.length === 1 && args[0] === "--retention-check")
+  await new Promise(() => {});
 for (const arg of args)
   assert.ok(
     arg === "--plan" ||
       arg === "--provenance" ||
       arg === "--direct-uia" ||
+      arg === "--dialog" ||
       arg === "--direct-mta" ||
       /^--(engine|reference|report|direct-report)=.+/.test(arg),
     `Unknown option: ${arg}`,
   );
 const option = (name) =>
   args.find((x) => x.startsWith(`--${name}=`))?.slice(name.length + 3);
+function classifyDialog(e) {
+  const { prior, target, before, pre, action, dialog, samples } = e;
+  const valid = (x) =>
+    x &&
+    Number.isFinite(x.foregroundHandle) &&
+    Number.isFinite(x.foregroundPid) &&
+    Number.isFinite(x.foregroundRoot) &&
+    Number.isFinite(x.lastInputTick);
+  if (
+    !prior ||
+    !target ||
+    !valid(before) ||
+    !valid(pre) ||
+    !Array.isArray(samples) ||
+    !samples.length ||
+    !samples.every(valid) ||
+    !dialog
+  )
+    return {
+      status: "inconclusive",
+      reason: "Incomplete independent observation",
+    };
+  if (
+    before.foregroundHandle !== prior.nativeWindowHandle ||
+    before.foregroundPid !== prior.processId ||
+    pre.foregroundHandle !== prior.nativeWindowHandle ||
+    pre.foregroundPid !== prior.processId
+  )
+    return {
+      status: "inconclusive",
+      reason: "Prior foreground changed before dispatch",
+    };
+  if (
+    pre.lastInputTick !== before.lastInputTick ||
+    samples.some((x) => x.lastInputTick !== pre.lastInputTick)
+  )
+    return { status: "inconclusive", reason: "Input tick changed" };
+  if (e.inputEventsBefore || e.inputEventsAfter) {
+    const names = [
+        "unmarkedMouse",
+        "injectedMouse",
+        "taggedMouse",
+        "unmarkedKey",
+        "injectedKey",
+        "taggedKey",
+      ],
+      a = e.inputEventsBefore,
+      b = e.inputEventsAfter;
+    if (
+      !a ||
+      !b ||
+      names.some(
+        (k) =>
+          !Number.isSafeInteger(a[k]) ||
+          a[k] < 0 ||
+          !Number.isSafeInteger(b[k]) ||
+          b[k] < a[k],
+      )
+    )
+      return { status: "inconclusive", reason: "Invalid input counters" };
+    if (
+      ["unmarkedMouse", "injectedMouse", "unmarkedKey", "injectedKey"].some(
+        (k) => b[k] > a[k],
+      )
+    )
+      return {
+        status: "inconclusive",
+        reason: "Unmarked or other injected event observed",
+      };
+  }
+  if (action?.ok !== true || dialog.visible !== true)
+    return {
+      status: "fail",
+      reason: "Owned dialog not observed after dispatch",
+    };
+  if (
+    dialog.handle <= 0 ||
+    dialog.owner !== target.nativeWindowHandle ||
+    dialog.processId !== target.processId
+  )
+    return {
+      status: "inconclusive",
+      reason: "Dialog ownership not established",
+    };
+  if (
+    !samples.every(
+      (x) =>
+        x.foregroundRoot === dialog.handle &&
+        x.foregroundPid === target.processId,
+    )
+  )
+    return {
+      status: "inconclusive",
+      reason: "Dialog foreground was not independently established",
+    };
+  return { status: "pass", reason: "Owned dialog remained foreground" };
+}
 function classifyEvidence(evidence) {
+  if (evidence?.comparison === "owned-dialog") return classifyDialog(evidence);
   const { prior, before, pre, focus, samples } = evidence;
   const valid = (x) =>
     x &&
@@ -142,6 +250,11 @@ const engine = option("engine") ?? "pi";
 assert.ok(["pi", "reference"].includes(engine));
 const directUia = args.includes("--direct-uia");
 const directMta = args.includes("--direct-mta");
+const dialogMode = args.includes("--dialog");
+assert.ok(
+  !dialogMode || (args.includes("--provenance") && !directUia),
+  "Dialog comparison requires --provenance and excludes --direct-uia",
+);
 assert.ok(!directMta || directUia, "--direct-mta requires --direct-uia");
 assert.ok(
   !directUia || (engine === "pi" && args.includes("--provenance")),
@@ -163,7 +276,12 @@ if (args.includes("--plan")) {
       ...(args.includes("--provenance")
         ? { inputProvenance: "aggregate hook counts only" }
         : {}),
-      cases: ["cross-process-prior-foreground"],
+      ...(dialogMode ? { fixtureExpiry: "explicit-stop-only" } : {}),
+      cases: [
+        dialogMode
+          ? "owned-dialog-foreground"
+          : "cross-process-prior-foreground",
+      ],
     }),
   );
   process.exit(0);
@@ -204,6 +322,8 @@ let client,
   observer,
   directDispatched = false,
   directSettled = false,
+  dialogDispatched = false,
+  dialogSettled = false,
   result = {
     engine,
     physicalInput: false,
@@ -213,11 +333,15 @@ let client,
   },
   cleanupConfirmed = false;
 async function fixture(label) {
-  const child = spawn(join(folder, "controls.exe"), [label], {
-    cwd: folder,
-    windowsHide: false,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+  const child = spawn(
+    join(folder, "controls.exe"),
+    [label, ...(dialogMode ? ["--no-expiry"] : [])],
+    {
+      cwd: folder,
+      windowsHide: false,
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
   fixtures.push(child);
   child.stderr.resume();
   const iter = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
@@ -352,6 +476,7 @@ try {
     };
   }
 
+  if (dialogMode) result.comparison = "owned-dialog";
   const prior = await fixture("Pi CU prior foreground");
   const target = await fixture("Pi CU focus target");
   result.prior = prior.identity;
@@ -373,11 +498,20 @@ try {
   assert.equal(before.foregroundPid, prior.identity.processId);
   assert.equal(await target.command("prepare-focus"), "focus-ready");
   if (observer) result.inputEventsAfterPreparation = await observer.snapshot();
+  if (dialogMode) {
+    const state = (await target.command("dialog-state")).split(":");
+    assert.equal(state[0], "dialog-state");
+    assert.equal(Number(state[1]), 0, "Dialog must not exist before action");
+    result.dialogBefore = {
+      handle: Number(state[1]),
+      visible: state[4] === "True",
+    };
+  }
   result.phase = "find";
   const found = await client.execute("find", {
     ...target.identity,
-    query: "Background editor",
-    controlType: "Edit",
+    query: dialogMode ? "Open owned test dialog" : "Background editor",
+    controlType: dialogMode ? "Button" : "Edit",
     ocrFallback: false,
     activate: false,
   });
@@ -532,6 +666,15 @@ try {
       method: "direct-uia-control",
       verification: "sent",
     };
+  } else if (dialogMode) {
+    dialogDispatched = true;
+    focus = await client.execute("invoke", {
+      ...target.identity,
+      elementId: found.matches[0].id,
+      activate: false,
+      fallbackClick: false,
+    });
+    result.action = focus;
   } else
     focus = await client.execute("focus", {
       ...target.identity,
@@ -539,6 +682,17 @@ try {
       activate: false,
     });
   result.focus = focus;
+  if (dialogMode) {
+    const x = (await target.command("dialog-state")).split(":");
+    assert.equal(x[0], "dialog-state");
+    assert.equal(x.length, 5);
+    result.dialog = {
+      handle: Number(x[1]),
+      owner: Number(x[2]),
+      processId: Number(x[3]),
+      visible: x[4] === "True",
+    };
+  }
   if (observer) result.inputEventsAfter = await observer.snapshot();
   const samples = [];
   result.samples = samples;
@@ -550,10 +704,15 @@ try {
       ...observation,
     });
   }
-  result.diagnostic = directUia
-    ? "direct managed UIA control, not a Pi focus call; aggregate input counts cannot prove event source"
-    : "public focus dispatch and independent after-return observations; no internal guard-phase observation";
+  if (dialogMode && observer)
+    result.inputEventsAfter = await observer.snapshot();
+  result.diagnostic = dialogMode
+    ? "public non-fallback invoke and independent owned-dialog/foreground observations; no internal guard-phase observation"
+    : directUia
+      ? "direct managed UIA control, not a Pi focus call; aggregate input counts cannot prove event source"
+      : "public focus dispatch and independent after-return observations; no internal guard-phase observation";
   Object.assign(result, classifyEvidence(result));
+  if (dialogMode && result.status === "pass") dialogSettled = true;
   if (!["pass", "observed"].includes(result.status)) process.exitCode = 1;
 } catch (error) {
   result.status = error.inconclusive ? "inconclusive" : "fail";
@@ -564,11 +723,17 @@ try {
   }
   process.exitCode = 1;
 } finally {
-  if (directDispatched && !directSettled) {
-    result.status = "inconclusive";
+  if (
+    (directDispatched && !directSettled) ||
+    (dialogDispatched && !dialogSettled)
+  ) {
+    if (result.status !== "fail") result.status = "inconclusive";
     result.cleanupError =
-      "Direct UIA settlement unconfirmed; owned processes retained";
+      directDispatched && !directSettled
+        ? "Direct UIA settlement unconfirmed; owned processes retained"
+        : "Dialog dispatch or clean observation unconfirmed; owned processes retained";
     result.retainedFolder = folder;
+    if (dialogDispatched && !dialogSettled) retainCoordinator();
     process.exitCode = 1;
   } else
     try {
@@ -598,6 +763,7 @@ try {
       result.status = "fail";
       result.cleanupError = String(error);
       result.retainedFolder = folder;
+      if (dialogMode) retainCoordinator();
       process.exitCode = 1;
     }
 }
