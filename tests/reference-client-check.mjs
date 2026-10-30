@@ -1,6 +1,7 @@
 // Public MCP transport regression; initializes/lists only, no desktop actions.
 import assert from "node:assert/strict";
 import { ReferenceClient } from "./reference-client.mjs";
+
 const client = new ReferenceClient(process.argv[2]);
 try {
   const initialized = await client.init();

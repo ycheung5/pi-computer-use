@@ -67,7 +67,9 @@
     "test:benchmark:stop": "node tests/benchmark-report.mjs --stop",
     "test:parity": "node tests/parity-host.mjs",
     "test:browser:foreground": "node tests/browser-foreground-host.mjs",
-    "test:reference:transport": "node tests/reference-client-check.mjs"
+    "test:reference:transport": "node tests/reference-client-check.mjs",
+    "test:browser:comparison": "node tests/browser-comparison.mjs",
+    "test:browser:comparison:oracle": "node tests/browser-comparison-check.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
