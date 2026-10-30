@@ -50,6 +50,32 @@ class OleClipboardFixture {
   else {var data=new DataObject();data.SetData(DataFormats.UnicodeText,false,seedText);data.SetData(DataFormats.Html,false,seedHtml);data.SetData("PiCUOleFixtureBytes",false,new MemoryStream(seedBinary));data.SetData("PiCUOleFixtureOwner",false,new MemoryStream(markerBytes));Clipboard.SetDataObject(data,false);retained=data;}
   seeded=true;seedSequence=GetClipboardSequenceNumber();Reply(indexed?"indexed-seeded":"ole-seeded");
  }
+ static void SeedVirtualFile() {
+  var data=new VirtualFileFixtureData((short)marker,markerBytes);Marshal.ThrowExceptionForHR(OleSetClipboard(data));retained=data;
+  seeded=true;seedSequence=GetClipboardSequenceNumber();Reply("virtual-file-seeded");
+ }
+ static string CheckVirtualFileData(OleDataObject data) {
+  var descriptor=new FORMATETC {cfFormat=(short)RegisterClipboardFormat("FileGroupDescriptorW"),dwAspect=DVASPECT.DVASPECT_CONTENT,lindex=-1,tymed=TYMED.TYMED_HGLOBAL};
+  int q=data.QueryGetData(ref descriptor);if(q!=0)return "virtual-descriptor-query:"+q.ToString("X8");
+  STGMEDIUM medium;try{data.GetData(ref descriptor,out medium);}catch(COMException error){return "virtual-descriptor-get:"+error.ErrorCode.ToString("X8");}
+  try {if(medium.tymed!=TYMED.TYMED_HGLOBAL || GlobalSize(medium.unionmember).ToUInt64()<596)return "virtual-descriptor-size";
+   IntPtr memory=GlobalLock(medium.unionmember);if(memory==IntPtr.Zero)return "virtual-descriptor-lock";
+   try {if(Marshal.ReadInt32(memory)!=1 || (Marshal.ReadInt32(memory,4) & unchecked((int)0x80000040))!=unchecked((int)0x80000040) || Marshal.ReadInt32(memory,68)!=0 || Marshal.ReadInt32(memory,72)!=4 || Marshal.PtrToStringUni(IntPtr.Add(memory,76),260).TrimEnd('\0')!="pi-cu-fixture.txt")return "virtual-descriptor-mismatch";}
+   finally {GlobalUnlock(medium.unionmember);}
+  }finally{ReleaseStgMedium(ref medium);}
+  var content=new FORMATETC {cfFormat=(short)RegisterClipboardFormat("FileContents"),dwAspect=DVASPECT.DVASPECT_CONTENT,lindex=0,tymed=TYMED.TYMED_HGLOBAL};
+  q=data.QueryGetData(ref content);if(q!=0)return "virtual-content-query:"+q.ToString("X8");
+  try{data.GetData(ref content,out medium);}catch(COMException error){return "virtual-content-get:"+error.ErrorCode.ToString("X8");}
+  try {if(medium.tymed!=TYMED.TYMED_HGLOBAL || GlobalSize(medium.unionmember).ToUInt64()<4)return "virtual-content-size";
+   IntPtr memory=GlobalLock(medium.unionmember);if(memory==IntPtr.Zero)return "virtual-content-lock";
+   try{byte[] bytes=new byte[4];Marshal.Copy(memory,bytes,0,4);return bytes[0]==1 && bytes[1]==2 && bytes[2]==3 && bytes[3]==4?"virtual-file-preserved":"virtual-content-mismatch";}
+   finally{GlobalUnlock(medium.unionmember);}
+  }finally{ReleaseStgMedium(ref medium);}
+ }
+ static string ProbeVirtualFile() {
+  var direct=retained as OleDataObject;OleDataObject clipboard;Marshal.ThrowExceptionForHR(OleGetClipboard(out clipboard));
+  return "{\"direct\":\""+CheckVirtualFileData(direct)+"\",\"clipboard\":\""+CheckVirtualFileData(clipboard)+"\",\"descriptorFormat\":"+RegisterClipboardFormat("FileGroupDescriptorW")+",\"contentFormat\":"+RegisterClipboardFormat("FileContents")+",\"directFormats\":"+IndexedFormats(direct)+",\"clipboardFormats\":"+IndexedFormats(clipboard)+"}";
+ }
  static bool CheckSeed() {
   var data=Clipboard.GetDataObject();if(data==null || !OwnsClipboard())return false;
   if(!Equals(data.GetData(DataFormats.UnicodeText,false),seedText) || !Equals(data.GetData(DataFormats.Html,false),seedHtml))return false;
@@ -96,6 +122,8 @@ class OleClipboardFixture {
   ThreadPool.QueueUserWorkItem(delegate{string command;while((command=Console.ReadLine())!=null){string next=command;form.BeginInvoke((Action)delegate{
     if(next=="seed-ole")Seed(false);
     else if(next=="seed-indexed")Seed(true);
+    else if(next=="seed-virtual-file")SeedVirtualFile();
+    else if(next=="probe-virtual-file")Reply(ProbeVirtualFile());
     else if(next=="reset-editor"){editor.Text="";Reply("editor-reset");}
     else if(next=="probe-indexed")Reply(ProbeIndexed());
     else if(next=="editor-base64")Reply(Convert.ToBase64String(Encoding.UTF8.GetBytes(editor.Text)));
@@ -119,6 +147,44 @@ class IndexedFixtureData : OleDataObject {
  public void GetData(ref FORMATETC format,out STGMEDIUM medium){byte[] bytes=format.cfFormat==formats[0].cfFormat?owner:new byte[]{1,2,3,4};if(format.cfFormat!=formats[0].cfFormat && format.lindex!=0)throw new COMException("indexed payload",unchecked((int)0x80040068));IntPtr data=GlobalAlloc(0x42,new UIntPtr((uint)bytes.Length));IntPtr memory=GlobalLock(data);Marshal.Copy(bytes,0,memory,bytes.Length);GlobalUnlock(data);medium=new STGMEDIUM {tymed=TYMED.TYMED_HGLOBAL,unionmember=data,pUnkForRelease=null};}
  public IEnumFORMATETC EnumFormatEtc(DATADIR direction){return new FixtureFormats(formats);}
  public int QueryGetData(ref FORMATETC format){return format.lindex==(format.cfFormat==formats[0].cfFormat?-1:0)?0:unchecked((int)0x80040068);}
+ public void GetDataHere(ref FORMATETC format,ref STGMEDIUM medium){throw new NotImplementedException();}
+ public int GetCanonicalFormatEtc(ref FORMATETC input,out FORMATETC output){output=input;output.ptd=IntPtr.Zero;return 0x40130;}
+ public void SetData(ref FORMATETC format,ref STGMEDIUM medium,bool release){throw new NotImplementedException();}
+ public int DAdvise(ref FORMATETC format,ADVF flags,IAdviseSink sink,out int connection){connection=0;return unchecked((int)0x80040003);}
+ public void DUnadvise(int connection){throw new NotImplementedException();}
+ public int EnumDAdvise(out IEnumSTATDATA iterator){iterator=null;return unchecked((int)0x80040003);}
+}
+[ComVisible(true),ClassInterface(ClassInterfaceType.None)]
+class VirtualFileFixtureData : OleDataObject {
+ [DllImport("kernel32.dll")]static extern IntPtr GlobalAlloc(uint flags,UIntPtr count);
+ [DllImport("kernel32.dll")]static extern IntPtr GlobalLock(IntPtr data);
+ [DllImport("kernel32.dll")]static extern bool GlobalUnlock(IntPtr data);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)]static extern uint RegisterClipboardFormat(string name);
+ readonly FORMATETC[] formats;readonly byte[] owner;
+ public VirtualFileFixtureData(short marker,byte[] value) {owner=value;formats=new FORMATETC[]{
+  new FORMATETC {cfFormat=marker,dwAspect=DVASPECT.DVASPECT_CONTENT,lindex=-1,tymed=TYMED.TYMED_HGLOBAL},
+  new FORMATETC {cfFormat=(short)RegisterClipboardFormat("FileGroupDescriptorW"),dwAspect=DVASPECT.DVASPECT_CONTENT,lindex=-1,tymed=TYMED.TYMED_HGLOBAL},
+  new FORMATETC {cfFormat=(short)RegisterClipboardFormat("FileContents"),dwAspect=DVASPECT.DVASPECT_CONTENT,lindex=-1,tymed=TYMED.TYMED_HGLOBAL}};}
+ public int QueryGetData(ref FORMATETC f) {
+  if(f.dwAspect!=DVASPECT.DVASPECT_CONTENT || (f.tymed & TYMED.TYMED_HGLOBAL)==0)return unchecked((int)0x80040064);
+  if(f.cfFormat==formats[0].cfFormat || f.cfFormat==formats[1].cfFormat)return f.lindex==-1?0:unchecked((int)0x80040068);
+  if(f.cfFormat==formats[2].cfFormat)return f.lindex==0?0:unchecked((int)0x80040068);
+  return unchecked((int)0x80040064);
+ }
+ public void GetData(ref FORMATETC f,out STGMEDIUM medium) {
+  int result=QueryGetData(ref f);if(result!=0)throw new COMException("unsupported fixture format",result);
+  byte[] bytes;
+  if(f.cfFormat==formats[0].cfFormat)bytes=owner;
+  else if(f.cfFormat==formats[1].cfFormat){
+   // FILEGROUPDESCRIPTORW: DWORD count plus one 592-byte FILEDESCRIPTORW.
+   bytes=new byte[596];Buffer.BlockCopy(BitConverter.GetBytes(1),0,bytes,0,4);Buffer.BlockCopy(BitConverter.GetBytes(0x80000040u),0,bytes,4,4);
+   Buffer.BlockCopy(BitConverter.GetBytes(4),0,bytes,72,4);Buffer.BlockCopy(Encoding.Unicode.GetBytes("pi-cu-fixture.txt\0"),0,bytes,76,36);
+  } else bytes=new byte[]{1,2,3,4};
+  IntPtr data=GlobalAlloc(0x42,new UIntPtr((uint)bytes.Length));if(data==IntPtr.Zero)throw new OutOfMemoryException();
+  IntPtr memory=GlobalLock(data);if(memory==IntPtr.Zero)throw new InvalidOperationException("fixture lock failed");
+  Marshal.Copy(bytes,0,memory,bytes.Length);GlobalUnlock(data);medium=new STGMEDIUM {tymed=TYMED.TYMED_HGLOBAL,unionmember=data,pUnkForRelease=null};
+ }
+ public IEnumFORMATETC EnumFormatEtc(DATADIR direction){return new FixtureFormats(formats);}
  public void GetDataHere(ref FORMATETC format,ref STGMEDIUM medium){throw new NotImplementedException();}
  public int GetCanonicalFormatEtc(ref FORMATETC input,out FORMATETC output){output=input;output.ptd=IntPtr.Zero;return 0x40130;}
  public void SetData(ref FORMATETC format,ref STGMEDIUM medium,bool release){throw new NotImplementedException();}

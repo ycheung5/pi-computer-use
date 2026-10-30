@@ -11,7 +11,15 @@ import { fileURLToPath } from "node:url";
 const args = process.argv.slice(2);
 for (let at = 0; at < args.length; at++) {
   const flag = args[at];
-  if (["--plan", "--list-cases", "--probe-indexed"].includes(flag)) continue;
+  if (
+    [
+      "--plan",
+      "--list-cases",
+      "--probe-indexed",
+      "--probe-virtual-file",
+    ].includes(flag)
+  )
+    continue;
   assert.ok(
     ["--engine", "--reference", "--case"].includes(flag),
     `Unknown argument: ${flag}`,
@@ -60,7 +68,10 @@ assert.ok(
 const cases = selected
   ? allCases.filter((item) => item.id === selected)
   : allCases;
-const probe = args.includes("--probe-indexed");
+const indexedProbe = args.includes("--probe-indexed");
+const virtualProbe = args.includes("--probe-virtual-file");
+assert.ok(!(indexedProbe && virtualProbe), "Choose only one fixture probe");
+const probe = indexedProbe || virtualProbe;
 assert.ok(
   !probe || !selected,
   "--probe-indexed cannot be combined with --case",
@@ -72,7 +83,11 @@ if (args.includes("--plan") || args.includes("--list-cases")) {
       execution: "not-run",
       optIn: "PI_CU_CLIPBOARD_INPUT_TEST=1",
       cases: probe ? [] : cases,
-      probe: probe ? "indexed-fixture" : undefined,
+      probe: indexedProbe
+        ? "indexed-fixture"
+        : virtualProbe
+          ? "virtual-file-fixture"
+          : undefined,
       deferred: [
         "plain-only clipboard",
         "locked clipboard",
@@ -241,23 +256,28 @@ try {
   fixtureReady = true;
   const target = { nativeWindowHandle: handle, processId: fixture.pid };
   if (probe) {
-    assert.equal(await command("seed-indexed"), "indexed-seeded");
-    const result = JSON.parse(await command("probe-indexed"));
+    assert.equal(
+      await command(virtualProbe ? "seed-virtual-file" : "seed-indexed"),
+      virtualProbe ? "virtual-file-seeded" : "indexed-seeded",
+    );
+    const result = JSON.parse(
+      await command(virtualProbe ? "probe-virtual-file" : "probe-indexed"),
+    );
     console.log(
       JSON.stringify({
-        probe: "indexed-fixture",
+        probe: virtualProbe ? "virtual-file-fixture" : "indexed-fixture",
         result,
         physicalInput: false,
       }),
     );
     assert.equal(
       result.direct,
-      "indexed-preserved",
+      virtualProbe ? "virtual-file-preserved" : "indexed-preserved",
       "direct indexed fixture payload must be readable",
     );
     assert.equal(
       result.clipboard,
-      "indexed-preserved",
+      virtualProbe ? "virtual-file-preserved" : "indexed-preserved",
       "indexed payload must cross OleGetClipboard before tool dispatch",
     );
   } else {
