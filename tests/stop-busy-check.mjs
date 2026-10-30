@@ -68,3 +68,38 @@ for (const change of [
   assert.equal(assessStop(evidence).ok, false, JSON.stringify(evidence));
 }
 console.log("stop acceptance evidence checks passed");
+
+const { PassThrough } = await import("node:stream");
+const { waitForStart, observeReleased } = await import(
+  "./stop-busy-coordination.mjs"
+);
+const input = new PassThrough();
+const gate = waitForStart(input, 1000);
+input.write("start\n");
+await gate;
+const invalidInput = new PassThrough();
+const invalidGate = waitForStart(invalidInput, 1000);
+invalidInput.write("unexpected\n");
+await assert.rejects(invalidGate, /START_GATE_INVALID/);
+const timed = new PassThrough();
+await assert.rejects(waitForStart(timed, 10), /START_GATE_TIMEOUT/);
+const closed = new PassThrough();
+const closedGate = waitForStart(closed, 1000);
+closed.end();
+await assert.rejects(closedGate, /START_GATE_CLOSED/);
+let reads = 0;
+const released = await observeReleased(
+  async () => ({ count: 3, keysReleased: ++reads >= 3 }),
+  async () => {},
+  5,
+);
+assert.equal(released.keysReleased, true);
+assert.equal(released.observations, 3);
+reads = 0;
+const held = await observeReleased(
+  async () => ({ count: 3, keysReleased: false }),
+  async () => {},
+  3,
+);
+assert.equal(held.keysReleased, false);
+assert.equal(held.observations, 3);

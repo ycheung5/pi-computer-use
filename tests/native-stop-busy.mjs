@@ -2,13 +2,14 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { WorkerClient } from "../dist/client.js";
 import { nativeWorkerLaunch } from "../dist/launcher.js";
+import { observeReleased, waitForStart } from "./stop-busy-coordination.mjs";
 import { assessStop } from "./stop-busy-outcome.mjs";
 
 assert.equal(process.platform, "win32");
@@ -19,6 +20,14 @@ assert.equal(
 );
 const mode = process.argv[2] ?? "esc";
 assert.ok(["esc", "shortcut"].includes(mode), "Use esc or shortcut");
+const statusFile = process.env.PI_CU_STOP_STATUS_FILE;
+if (statusFile)
+  await writeFile(statusFile, JSON.stringify({ phase: "setup", mode }), {
+    flag: "wx",
+  });
+const status = async (phase) => {
+  if (statusFile) await writeFile(statusFile, JSON.stringify({ phase, mode }));
+};
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-stop-busy-"));
 process.env.PI_CU_SETTINGS_FILE = join(folder, "settings.json");
 const executable = join(folder, "fixture.exe");
@@ -121,9 +130,13 @@ try {
   assert.equal(settings.ok, true, JSON.stringify(settings));
   const initial = await observe();
   assert.deepEqual(initial, { count: 0, keysReleased: true });
-  const total = 400;
-  const notification = line(/^started$/, 12000).then(() => {
+  const total = 2000;
+  console.log("Fixture ready. Send start followed by Enter on stdin to begin.");
+  await status("ready");
+  await waitForStart(process.stdin, 120000);
+  const notification = line(/^started$/, 20000).then(async () => {
     started = true;
+    await status("started");
     console.log(
       `Input has started. Press ${mode === "esc" ? "Esc" : "Ctrl+Alt+F9"} physically now.`,
     );
@@ -146,7 +159,7 @@ try {
       (error) => ({ error: String(error) }),
     );
   await notification;
-  const deadline = Date.now() + 12000;
+  const deadline = Date.now() + 40000;
   while (!stopped && Date.now() < deadline)
     await new Promise((resolve) => setTimeout(resolve, 25));
   if (!stopped) {
@@ -172,7 +185,11 @@ try {
   );
   assert.equal(end.ok, true, JSON.stringify(end));
   settled = true;
-  const before = await observe();
+  const before = await observeReleased(
+    observe,
+    (milliseconds) =>
+      new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  );
   await new Promise((resolve) => setTimeout(resolve, 500));
   const after = await observe();
   const evidence = {
@@ -183,6 +200,7 @@ try {
     after: after.count,
     total,
     keysReleased: before.keysReleased && after.keysReleased,
+    releasePollObservations: before.observations,
     dispatch,
   };
   const assessment = assessStop(evidence);
