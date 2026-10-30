@@ -10,6 +10,50 @@ const run = (...args: string[]) =>
     encoding: "utf8",
     env: { ...process.env, PI_CU_NOTEPAD_INPUT_TEST: "" },
   });
+test("Unicode input evidence rejects stale identity or unknown focus and layout before dispatch", () => {
+  const folder = mkdtempSync(join(tmpdir(), "pi-cu-unicode-environment-"));
+  try {
+    const path = join(folder, "state.json");
+    const valid = {
+      target: { nativeWindowHandle: 100, processId: 200 },
+      observation: {
+        targetHwnd: 100,
+        targetProcessId: 200,
+        targetThreadId: 300,
+        foregroundHwnd: 100,
+        foregroundProcessId: 200,
+        focusAvailable: true,
+        focusHwnd: 101,
+        focusProcessId: 200,
+        keyboardLayoutHex: "0x4040404",
+        keyboardLanguageId: 1028,
+      },
+    };
+    for (const [observation, expected] of [
+      [valid.observation, true],
+      [{ ...valid.observation, targetProcessId: 201 }, false],
+      [{ ...valid.observation, targetThreadId: 0 }, false],
+      [{ ...valid.observation, foregroundProcessId: 201 }, false],
+      [{ ...valid.observation, focusAvailable: false }, false],
+      [{ ...valid.observation, focusHwnd: 0 }, false],
+      [
+        {
+          ...valid.observation,
+          keyboardLayoutHex: "0x0",
+          keyboardLanguageId: 0,
+        },
+        false,
+      ],
+    ] as const) {
+      writeFileSync(path, JSON.stringify({ ...valid, observation }));
+      const result = run(`--report-environment=${path}`);
+      assert.equal(result.status === 0, expected, result.stderr);
+      assert.equal(JSON.parse(result.stdout).conclusive, expected);
+    }
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
 test("legacy context reports distinguish observed data from unknown state", () => {
   const folder = mkdtempSync(join(tmpdir(), "pi-cu-ime-report-"));
   try {

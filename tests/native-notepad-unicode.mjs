@@ -53,6 +53,53 @@ function cleanupReport({ caseFailure = null, cleanupFailures, retainedTabs }) {
   };
 }
 const reportPath = option("report-cleanup");
+function environmentReport({ target, observation }) {
+  const checks = {
+    targetIdentity:
+      Number.isSafeInteger(target?.nativeWindowHandle) &&
+      target.nativeWindowHandle > 0 &&
+      Number.isSafeInteger(target?.processId) &&
+      target.processId > 0 &&
+      observation?.targetHwnd === target.nativeWindowHandle &&
+      observation?.targetProcessId === target.processId &&
+      Number.isSafeInteger(observation?.targetThreadId) &&
+      observation.targetThreadId > 0,
+    foreground:
+      observation?.foregroundHwnd === target?.nativeWindowHandle &&
+      observation?.foregroundProcessId === target?.processId,
+    focus:
+      observation?.focusAvailable === true &&
+      Number.isSafeInteger(observation?.focusHwnd) &&
+      observation.focusHwnd > 0 &&
+      observation?.focusProcessId === target?.processId,
+    layout:
+      typeof observation?.keyboardLayoutHex === "string" &&
+      /^0x[0-9a-f]+$/i.test(observation.keyboardLayoutHex) &&
+      BigInt(observation.keyboardLayoutHex) > 0n &&
+      Number.isSafeInteger(observation?.keyboardLanguageId) &&
+      observation.keyboardLanguageId > 0,
+  };
+  return {
+    checks,
+    conclusive: Object.values(checks).every(Boolean),
+    observation,
+  };
+}
+const environmentReportPath = option("report-environment");
+if (environmentReportPath !== undefined) {
+  assert.equal(
+    process.argv.length,
+    3,
+    "report-environment cannot be combined with other options",
+  );
+  assert.ok(environmentReportPath, "report-environment requires a path");
+  const report = environmentReport(
+    JSON.parse(await readFile(environmentReportPath, "utf8")),
+  );
+  console.log(JSON.stringify(report));
+  if (!report.conclusive) process.exitCode = 1;
+  process.exit();
+}
 function legacyContextReport(observation) {
   assert.equal(typeof observation.succeeded, "boolean");
   assert.ok(Array.isArray(observation.contexts));
@@ -334,15 +381,14 @@ try {
         assert.equal(end.ok, true, JSON.stringify(end));
       }
       environment = inputState(target);
+      const inputEnvironment = environmentReport({
+        target,
+        observation: environment,
+      });
       assert.equal(
-        environment.foregroundHwnd,
-        target.nativeWindowHandle,
-        "independent foreground must be the owned Notepad window before typing",
-      );
-      assert.equal(
-        environment.focusProcessId,
-        target.processId,
-        "independent focused child must belong to the owned Notepad process",
+        inputEnvironment.conclusive,
+        true,
+        `Independent target/focus/layout evidence is incomplete: ${JSON.stringify(inputEnvironment.checks)}`,
       );
       const dispatchStarted = performance.now();
       typed = await client.execute("type_text", {
