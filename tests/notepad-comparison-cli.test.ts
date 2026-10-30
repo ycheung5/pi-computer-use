@@ -16,6 +16,7 @@ test("Unicode input evidence rejects stale identity or unknown focus and layout 
     const path = join(folder, "state.json");
     const valid = {
       target: { nativeWindowHandle: 100, processId: 200 },
+      editor: { nativeWindowHandle: 101, processId: 200 },
       observation: {
         targetHwnd: 100,
         targetProcessId: 200,
@@ -26,6 +27,10 @@ test("Unicode input evidence rejects stale identity or unknown focus and layout 
         focusHwnd: 101,
         focusProcessId: 200,
         focusRootHwnd: 100,
+        editorHwnd: 101,
+        editorProcessId: 200,
+        editorRootHwnd: 100,
+        focusWithinEditor: true,
         keyboardLayoutHex: "0x4040404",
         keyboardLanguageId: 1028,
       },
@@ -39,6 +44,10 @@ test("Unicode input evidence rejects stale identity or unknown focus and layout 
       [{ ...valid.observation, focusHwnd: 0 }, false],
       [{ ...valid.observation, focusRootHwnd: 102 }, false],
       [{ ...valid.observation, focusRootHwnd: 0 }, false],
+      [{ ...valid.observation, focusWithinEditor: false }, false],
+      [{ ...valid.observation, editorHwnd: 102 }, false],
+      [{ ...valid.observation, editorProcessId: 201 }, false],
+      [{ ...valid.observation, editorRootHwnd: 102 }, false],
       [
         {
           ...valid.observation,
