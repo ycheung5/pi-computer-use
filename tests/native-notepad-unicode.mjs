@@ -71,7 +71,8 @@ function environmentReport({ target, observation }) {
       observation?.focusAvailable === true &&
       Number.isSafeInteger(observation?.focusHwnd) &&
       observation.focusHwnd > 0 &&
-      observation?.focusProcessId === target?.processId,
+      observation?.focusProcessId === target?.processId &&
+      observation?.focusRootHwnd === target?.nativeWindowHandle,
     layout:
       typeof observation?.keyboardLayoutHex === "string" &&
       /^0x[0-9a-f]+$/i.test(observation.keyboardLayoutHex) &&

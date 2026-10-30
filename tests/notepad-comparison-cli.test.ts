@@ -25,6 +25,7 @@ test("Unicode input evidence rejects stale identity or unknown focus and layout 
         focusAvailable: true,
         focusHwnd: 101,
         focusProcessId: 200,
+        focusRootHwnd: 100,
         keyboardLayoutHex: "0x4040404",
         keyboardLanguageId: 1028,
       },
@@ -36,6 +37,8 @@ test("Unicode input evidence rejects stale identity or unknown focus and layout 
       [{ ...valid.observation, foregroundProcessId: 201 }, false],
       [{ ...valid.observation, focusAvailable: false }, false],
       [{ ...valid.observation, focusHwnd: 0 }, false],
+      [{ ...valid.observation, focusRootHwnd: 102 }, false],
+      [{ ...valid.observation, focusRootHwnd: 0 }, false],
       [
         {
           ...valid.observation,
