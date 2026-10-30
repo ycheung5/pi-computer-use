@@ -1,6 +1,6 @@
 # Control indicators
 
-The independent Windows stop helper also draws Pi-branded screen edges, a status bar and a pointer tag. It uses non-activating, disabled, layered windows; the pointer guard additionally skips the verified helper process if a Windows point-query API still returns an overlay. The tag follows the pointer, accounts for the current cursor bitmap size and stays inside its monitor's working area.
+The independent Windows stop helper also draws Pi-branded screen edges, a status bar and a pointer tag. The screen border uses a per-pixel translucent blue falloff with a bright core, following the reference glow at 1.5 times its width: a 3-pixel core plus 27-pixel falloff at reference width scale 1, scaled by monitor width (clamped from 1 to 2). The separate Pi status bar and pointer tag retain their existing appearance. If frame preparation or presentation fails, that frame stays hidden and its error is reported until configuration or display layout causes a rebuild; the other indicators continue. It uses non-activating, disabled, layered windows; the pointer guard additionally skips the verified helper process if a Windows point-query API still returns an overlay. The tag follows the pointer, accounts for the current cursor bitmap size and stays inside its monitor's working area.
 
 ## Operation lifetime
 
@@ -18,7 +18,7 @@ Own native screenshots/OCR suspend overlay windows and restore presentation in `
 - `npm run test:indicators` uses disposable Windows settings and exercises configuration, offscreen rendering, shortcut parsing, operation lifetime, capture suspension and disabled-indicator stopping without physical input.
 - Set `PI_CU_ENABLE_INDICATOR_PREVIEW=1` for the same runner's brief visible show/hide, native hit-query and capture-suspension checks. Run live checks under `flock -w 120 /tmp/pi-cu-live-tests.lock` from WSL to avoid overlap with other desktop fixtures.
 
-Automated protocol state and native window-query checks establish behavior, not human visual acceptance. Physical keys and mouse input are not emitted by this runner.
+The updated glow border is source-reviewed only; its appearance, rendering, cleanup and compatibility have not been validated by a build, automated test or live desktop run. Automated protocol state and native window-query checks establish behavior, not human visual acceptance. Physical keys and mouse input are not emitted by this runner.
 
 ## Manual acceptance checklist
 
