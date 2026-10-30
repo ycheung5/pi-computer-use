@@ -10,6 +10,33 @@ const run = (...args: string[]) =>
     encoding: "utf8",
     env: { ...process.env, PI_CU_NOTEPAD_INPUT_TEST: "" },
   });
+test("legacy context reports distinguish observed data from unknown state", () => {
+  const folder = mkdtempSync(join(tmpdir(), "pi-cu-ime-report-"));
+  try {
+    const path = join(folder, "result.json");
+    for (const [input, expected] of [
+      [{ succeeded: true, contexts: [{ open: true }] }, "observed"],
+      [{ succeeded: true, contexts: [] }, "unknown"],
+      [
+        { succeeded: true, contexts: [{ open: true }, { open: false }] },
+        "unknown",
+      ],
+      [{ succeeded: false, error: 5, contexts: [{ open: true }] }, "unknown"],
+      [{ succeeded: true, contexts: [{ open: null }] }, "unknown"],
+    ] as const) {
+      writeFileSync(path, JSON.stringify(input));
+      const result = run(`--report-ime=${path}`);
+      assert.equal(result.status, 0, result.stderr);
+      const report = JSON.parse(result.stdout);
+      assert.equal(report.classification, expected);
+      assert.deepEqual(report.observation, input);
+      assert.equal(report.focusedContextIdentified, false);
+      assert.equal(report.tsfState, "unknown");
+    }
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
 test("Unicode comparison lists cases without desktop opt-in or a built worker", () => {
   const result = run("--list", "--engine=reference");
   assert.equal(result.status, 0, result.stderr);
