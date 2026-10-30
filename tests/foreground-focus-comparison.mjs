@@ -690,6 +690,8 @@ try {
       ...observation,
     });
   }
+  if (dialogMode && observer)
+    result.inputEventsAfter = await observer.snapshot();
   result.diagnostic = dialogMode
     ? "public non-fallback invoke and independent owned-dialog/foreground observations; no internal guard-phase observation"
     : directUia
