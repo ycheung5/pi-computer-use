@@ -138,9 +138,12 @@ if (engine === "reference" && !probe)
 const { detachFixture, waitForFixtureClose } = await import(
   "./clipboard-fixture-close.mjs"
 );
-const { compareEditorObservation, isSafeClipboardRefusal } = await import(
-  "./clipboard-editor-observation.mjs"
-);
+const {
+  compareEditorObservation,
+  isSafeClipboardRefusal,
+  inputCleanupConfirmed,
+  retainUnconfirmedOwner,
+} = await import("./clipboard-editor-observation.mjs");
 const { createComparisonClient } = await import("./comparison-client.mjs");
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-ole-clipboard-"));
 const executable = join(folder, "fixture.exe");
@@ -227,11 +230,18 @@ let fixtureCloseUnconfirmed = false;
 let failure;
 
 let client;
+let inputCleanupUnconfirmed = false;
 const observations = [];
 const execute = async (action, args) => {
   try {
+    if (action === "type_text") inputCleanupUnconfirmed = true;
     const result = await client.execute(action, args);
     observations.push({ action, result });
+    if (action === "type_text") {
+      inputCleanupUnconfirmed = !inputCleanupConfirmed(result);
+      if (inputCleanupUnconfirmed)
+        throw Error("Clipboard input cleanup is unconfirmed; owner retained");
+    }
     return result;
   } catch (error) {
     observations.push({
@@ -507,8 +517,18 @@ try {
     }),
   );
 } finally {
-  // Retain raw tool errors/optional engine diagnostics; fixture oracles decide preservation.
+  // Do not close the fixture, restore clipboard, dispose the client or remove files
+  // while a rejected call or missing acknowledgment could leave input active.
   console.log(JSON.stringify({ engine, observations }));
+  if (inputCleanupUnconfirmed) {
+    console.error(
+      JSON.stringify({
+        fixtureCleanup: "retained: input cleanup unconfirmed",
+        folder,
+      }),
+    );
+    await retainUnconfirmedOwner();
+  }
   try {
     if (fixtureReady && !fixtureExit) {
       const restoration = await command("restore-close");
