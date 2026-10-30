@@ -68,3 +68,23 @@ test("standard virtual-file fixture probe remains separately selected and gated"
   const conflict = run("--plan", "--probe-indexed", "--probe-virtual-file");
   assert.notEqual(conflict.status, 0);
 });
+
+test("clipboard lock fixture probe is separately planned and opt-in gated", () => {
+  const plan = run("--plan", "--probe-locked");
+  assert.equal(plan.status, 0, plan.stderr);
+  assert.deepEqual(JSON.parse(plan.stdout).probe, "locked-clipboard-fixture");
+  assert.equal(JSON.parse(plan.stdout).execution, "not-run");
+  const blocked = run("--probe-locked");
+  assert.notEqual(blocked.status, 0);
+  assert.match(blocked.stderr, /PI_CU_CLIPBOARD_INPUT_TEST=1/);
+  assert.doesNotMatch(
+    blocked.stderr,
+    /MODULE_NOT_FOUND|ENOENT|requires Windows Node/,
+  );
+  for (const args of [
+    ["--plan", "--probe-locked", "--probe-indexed"],
+    ["--plan", "--probe-locked", "--case", "newer-copy"],
+  ]) {
+    assert.notEqual(run(...args).status, 0);
+  }
+});

@@ -17,6 +17,7 @@ for (let at = 0; at < args.length; at++) {
       "--list-cases",
       "--probe-indexed",
       "--probe-virtual-file",
+      "--probe-locked",
     ].includes(flag)
   )
     continue;
@@ -75,12 +76,13 @@ const cases = selected
   : allCases;
 const indexedProbe = args.includes("--probe-indexed");
 const virtualProbe = args.includes("--probe-virtual-file");
-assert.ok(!(indexedProbe && virtualProbe), "Choose only one fixture probe");
-const probe = indexedProbe || virtualProbe;
+const lockedProbe = args.includes("--probe-locked");
 assert.ok(
-  !probe || !selected,
-  "--probe-indexed cannot be combined with --case",
+  [indexedProbe, virtualProbe, lockedProbe].filter(Boolean).length <= 1,
+  "Choose only one fixture probe",
 );
+const probe = indexedProbe || virtualProbe || lockedProbe;
+assert.ok(!probe || !selected, "Fixture probes cannot be combined with --case");
 if (args.includes("--plan") || args.includes("--list-cases")) {
   console.log(
     JSON.stringify({
@@ -92,7 +94,9 @@ if (args.includes("--plan") || args.includes("--list-cases")) {
         ? "indexed-fixture"
         : virtualProbe
           ? "virtual-file-fixture"
-          : undefined,
+          : lockedProbe
+            ? "locked-clipboard-fixture"
+            : undefined,
       observations: virtualProbe
         ? [
             "directContentQuery",
@@ -112,7 +116,7 @@ if (args.includes("--plan") || args.includes("--list-cases")) {
         "dedicated interactive Windows desktop",
         "Windows Node",
         "built Pi worker or pinned DSH checkout",
-        "safely preservable original clipboard",
+        ...(lockedProbe ? [] : ["safely preservable original clipboard"]),
       ],
     }),
   );
@@ -157,7 +161,7 @@ const compile = spawnSync(
   { encoding: "utf8", windowsHide: true },
 );
 assert.equal(compile.status, 0, compile.stdout + compile.stderr);
-const fixture = spawn(executable, [], {
+const fixture = spawn(executable, lockedProbe ? ["--lock-probe"] : [], {
   stdio: ["pipe", "pipe", "pipe"],
   windowsHide: true,
   cwd: folder,
@@ -268,7 +272,78 @@ try {
   );
   fixtureReady = true;
   const target = { nativeWindowHandle: handle, processId: fixture.pid };
-  if (probe) {
+  if (lockedProbe) {
+    // Another process independently observes whether the global clipboard lock
+    // blocks acquisition. It never reads or replaces clipboard content.
+    const contender = () => {
+      const result = spawnSync(executable, ["--lock-contender"], {
+        encoding: "utf8",
+        windowsHide: true,
+        cwd: folder,
+        timeout: 2500,
+      });
+      assert.equal(result.status, 0, result.stderr || String(result.error));
+      return result.stdout.trim().replace(/^\uFEFF/, "");
+    };
+    const before = contender();
+    assert.equal(
+      before,
+      "available",
+      "clipboard must be available before lock",
+    );
+    const locked = JSON.parse(await command("probe-lock"));
+    assert.equal(
+      locked.locked,
+      true,
+      "fixture must acquire the clipboard lock",
+    );
+    let unlocked;
+    let whileLocked;
+    try {
+      assert.equal(
+        locked.ownerMatches,
+        true,
+        "OS must identify the fixture as lock holder",
+      );
+      whileLocked = contender();
+      assert.equal(
+        whileLocked,
+        "busy",
+        "a separate process must be unable to acquire the lock",
+      );
+    } finally {
+      unlocked = JSON.parse(await command("probe-unlock"));
+      console.log(
+        JSON.stringify({
+          probe: "locked-clipboard-fixture",
+          before,
+          locked,
+          whileLocked,
+          unlocked,
+          clipboardRead: false,
+          clipboardReplaced: false,
+          physicalInput: false,
+        }),
+      );
+      assert.equal(
+        unlocked.released,
+        true,
+        "fixture must release its clipboard lock",
+      );
+      assert.equal(
+        unlocked.sequenceUnchanged,
+        true,
+        "fixture must not replace clipboard content",
+      );
+    }
+    const after = contender();
+    console.log(JSON.stringify({ probe: "locked-clipboard-fixture", after }));
+    assert.equal(
+      after,
+      "available",
+      "clipboard must be available after release",
+    );
+  } else if (probe) {
     assert.equal(
       await command(virtualProbe ? "seed-virtual-file" : "seed-indexed"),
       virtualProbe ? "virtual-file-seeded" : "indexed-seeded",

@@ -10,6 +10,9 @@ using OleDataObject=System.Runtime.InteropServices.ComTypes.IDataObject;
 class OleFixtureForm : Form {protected override bool ShowWithoutActivation {get{return true;}}}
 class OleClipboardFixture {
  [DllImport("user32.dll")]static extern uint GetClipboardSequenceNumber();
+ [DllImport("user32.dll")]static extern bool OpenClipboard(IntPtr owner);
+ [DllImport("user32.dll")]static extern bool CloseClipboard();
+ [DllImport("user32.dll")]static extern IntPtr GetOpenClipboardWindow();
  [DllImport("user32.dll",CharSet=CharSet.Unicode)]static extern uint RegisterClipboardFormat(string name);
  [DllImport("ole32.dll")]static extern int OleSetClipboard(OleDataObject data);
  [DllImport("ole32.dll")]static extern int OleGetClipboard(out OleDataObject data);
@@ -24,7 +27,22 @@ class OleClipboardFixture {
  const string seedHtml="<b>OLE clipboard fixture</b>";
  static readonly byte[] seedBinary=new byte[]{0,255,4,8,0,128};
  static DataObject original;static object retained;static bool seeded;static uint seedSequence;
+ static bool probeLockHeld;static uint probeLockSequence;static System.Windows.Forms.Timer probeLockTimer;
  static void Reply(string text){Console.WriteLine(text);Console.Out.Flush();}
+ static void ReleaseProbeLock(){if(probeLockHeld){CloseClipboard();probeLockHeld=false;}if(probeLockTimer!=null)probeLockTimer.Stop();}
+ static void ProbeLock(Form form) {
+  if(probeLockHeld || !OpenClipboard(form.Handle)){Reply("{\"locked\":false}");return;}
+  probeLockHeld=true;probeLockSequence=GetClipboardSequenceNumber();
+  // Never leave the clipboard locked indefinitely if the controlling runner exits.
+  probeLockTimer=new System.Windows.Forms.Timer();probeLockTimer.Interval=5000;
+  probeLockTimer.Tick+=delegate{ReleaseProbeLock();};probeLockTimer.Start();
+  Reply("{\"locked\":true,\"ownerMatches\":"+(GetOpenClipboardWindow()==form.Handle?"true":"false")+"}");
+ }
+ static void ProbeUnlock() {
+  bool held=probeLockHeld;bool same=held && GetClipboardSequenceNumber()==probeLockSequence;
+  bool released=held && CloseClipboard();probeLockHeld=false;if(probeLockTimer!=null)probeLockTimer.Stop();
+  Reply("{\"released\":"+(released?"true":"false")+",\"sequenceUnchanged\":"+(same?"true":"false")+"}");
+ }
  static DataObject PreserveOriginal() {
   uint sequence=GetClipboardSequenceNumber();var source=Clipboard.GetDataObject();var copy=new DataObject();
   if(source!=null)foreach(string format in source.GetFormats(false)) {
@@ -134,9 +152,13 @@ class OleClipboardFixture {
   var direct=retained as OleDataObject;OleDataObject clipboard;Marshal.ThrowExceptionForHR(OleGetClipboard(out clipboard));
   return "{\"direct\":\""+CheckIndexedData(direct)+"\",\"clipboard\":\""+CheckIndexedData(clipboard)+"\",\"expectedFormat\":"+RegisterClipboardFormat("PiCUIndexedPayload")+",\"directFormats\":"+IndexedFormats(direct)+",\"clipboardFormats\":"+IndexedFormats(clipboard)+"}";
  }
- [STAThread]static void Main(){
+ [STAThread]static void Main(string[] args){
   Console.OutputEncoding=new UTF8Encoding(false);
-  try{original=PreserveOriginal();}
+  if(args.Length==1 && args[0]=="--lock-contender"){
+   bool opened=OpenClipboard(IntPtr.Zero);if(opened)CloseClipboard();Reply(opened?"available":"busy");return;
+  }
+  bool lockProbe=args.Length==1 && args[0]=="--lock-probe";
+  try{if(!lockProbe)original=PreserveOriginal();}
   catch(Exception error){
    string reason=error.Message=="unsupported original clipboard format; fixture did not replace it"?"unsupported-original-format":error.Message=="fixture requires text/stream clipboard data; original unchanged"?"unsupported-original-value":error.Message=="clipboard changed before fixture setup"?"clipboard-changed-during-setup":"clipboard-unavailable";
    Console.Error.WriteLine("fixture-startup:"+reason+";hresult="+error.HResult.ToString("X8")+";clipboard-unchanged");Console.Error.Flush();Environment.ExitCode=2;return;
@@ -147,7 +169,9 @@ class OleClipboardFixture {
   editor.TextChanged+=delegate{if(copyOnPaste){copyOnPaste=false;var data=new DataObject();data.SetData(DataFormats.UnicodeText,false,"Fixture newer copy 中文");data.SetData("PiCUOleFixtureOwner",false,new MemoryStream(markerBytes));Clipboard.SetDataObject(data,false);retained=data;seedSequence=GetClipboardSequenceNumber();}};
   form.Shown+=delegate{Reply(form.Handle.ToInt64().ToString());};
   ThreadPool.QueueUserWorkItem(delegate{string command;while((command=Console.ReadLine())!=null){string next=command;form.BeginInvoke((Action)delegate{
-    if(next=="seed-ole")Seed(false);
+    if(next=="probe-lock" && lockProbe)ProbeLock(form);
+    else if(next=="probe-unlock" && lockProbe)ProbeUnlock();
+    else if(next=="seed-ole")Seed(false);
     else if(next=="seed-indexed")Seed(true);
     else if(next=="seed-virtual-file")SeedVirtualFile();
     else if(next=="probe-virtual-file")Reply(ProbeVirtualFile());
@@ -161,7 +185,7 @@ class OleClipboardFixture {
     else if(next=="check-indexed")Reply(CheckIndexed());
     else if(next=="restore-close") {if(OwnsClipboard()){Clipboard.SetDataObject(original,true);Reply("original-restored");}else Reply(seeded?"newer-copy-preserved":"original-unchanged");seeded=false;form.Close();}
    });if(next=="restore-close")return;}form.BeginInvoke((Action)delegate{if(OwnsClipboard())Clipboard.SetDataObject(original,true);seeded=false;form.Close();});});
-  try{Application.Run(form);}finally{GC.KeepAlive(retained);if(OwnsClipboard())Clipboard.SetDataObject(original,true);}
+  try{Application.Run(form);}finally{ReleaseProbeLock();GC.KeepAlive(retained);if(OwnsClipboard())Clipboard.SetDataObject(original,true);}
  }
 }
 [ComVisible(true),ClassInterface(ClassInterfaceType.None)]
