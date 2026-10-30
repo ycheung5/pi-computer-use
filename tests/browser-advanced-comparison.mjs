@@ -1,6 +1,7 @@
 // Advanced workflow through the same public tool/backend seam as the paired form.
 import assert from "node:assert/strict";
 import { readFile, rm } from "node:fs/promises";
+import { basename } from "node:path";
 
 export async function advancedWorkflow({
   call,
@@ -203,13 +204,18 @@ export async function advancedWorkflow({
       assert.equal(file?.state, "completed", JSON.stringify(download));
       assert.equal(file.name, source.downloadName);
       assert.ok(file.file);
+      assert.equal(
+        basename(file.file),
+        source.downloadName,
+        "Only the uniquely named owned download may be removed",
+      );
       row.download = {
         name: file.name,
         content: await readFile(file.file, "utf8"),
       };
       // Remove only the exact uniquely named fixture file returned by this action.
-      await rm(file.file);
       assert.equal(row.download.content, "download fixture only");
+      await rm(file.file);
       assert.equal(
         (await (await fetch(`${source.url}advanced/state`)).json()).downloads,
         1,
