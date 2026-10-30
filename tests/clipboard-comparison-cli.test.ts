@@ -9,7 +9,12 @@ const run = (...args: string[]) =>
   });
 
 test("clipboard cases are independently selectable without importing a backend", () => {
-  for (const id of ["ole-preservation", "indexed-refusal", "newer-copy"]) {
+  for (const id of [
+    "ole-preservation",
+    "indexed-refusal",
+    "virtual-file",
+    "newer-copy",
+  ]) {
     const result = run("--plan", "--case", id, "--engine", "reference");
     assert.equal(result.status, 0, result.stderr);
     const plan = JSON.parse(result.stdout);
@@ -47,6 +52,12 @@ test("standard virtual-file fixture probe remains separately selected and gated"
   const plan = run("--plan", "--probe-virtual-file");
   assert.equal(plan.status, 0, plan.stderr);
   assert.equal(JSON.parse(plan.stdout).probe, "virtual-file-fixture");
+  assert.deepEqual(JSON.parse(plan.stdout).observations, [
+    "directContentQuery",
+    "directContentGet",
+    "clipboardContentQuery",
+    "clipboardContentGet",
+  ]);
   const blocked = run("--probe-virtual-file");
   assert.notEqual(blocked.status, 0);
   assert.match(blocked.stderr, /PI_CU_CLIPBOARD_INPUT_TEST=1/);

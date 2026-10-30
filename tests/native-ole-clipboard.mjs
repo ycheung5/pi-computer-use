@@ -56,6 +56,11 @@ const allCases = [
       "Refusal or exact paste, with indexed clipboard independently preserved",
   },
   {
+    id: "virtual-file",
+    oracle:
+      "Exact paste or safe refusal, with virtual file descriptor and indexed data preserved",
+  },
+  {
     id: "newer-copy",
     oracle: "Exact appended text and fixture newer copy preserved",
   },
@@ -88,6 +93,14 @@ if (args.includes("--plan") || args.includes("--list-cases")) {
         : virtualProbe
           ? "virtual-file-fixture"
           : undefined,
+      observations: virtualProbe
+        ? [
+            "directContentQuery",
+            "directContentGet",
+            "clipboardContentQuery",
+            "clipboardContentGet",
+          ]
+        : undefined,
       deferred: [
         "plain-only clipboard",
         "locked clipboard",
@@ -121,7 +134,7 @@ if (engine === "reference" && !probe)
 const { detachFixture, waitForFixtureClose } = await import(
   "./clipboard-fixture-close.mjs"
 );
-const { compareEditorObservation } = await import(
+const { compareEditorObservation, isSafeClipboardRefusal } = await import(
   "./clipboard-editor-observation.mjs"
 );
 const { createComparisonClient } = await import("./comparison-client.mjs");
@@ -320,11 +333,19 @@ try {
         "",
         "case starts from a fresh known blank editor",
       );
-      if (item.id === "indexed-refusal") {
-        assert.equal(await command("seed-indexed"), "indexed-seeded");
+      if (item.id === "indexed-refusal" || item.id === "virtual-file") {
+        const virtualFile = item.id === "virtual-file";
+        const check = virtualFile ? "check-virtual-file" : "check-indexed";
+        const expected = virtualFile
+          ? "virtual-file-preserved"
+          : "indexed-preserved";
         assert.equal(
-          await command("check-indexed"),
-          "indexed-preserved",
+          await command(virtualFile ? "seed-virtual-file" : "seed-indexed"),
+          virtualFile ? "virtual-file-seeded" : "indexed-seeded",
+        );
+        assert.equal(
+          await command(check),
+          expected,
           "indexed fixture payload must be readable before dispatch",
         );
         const result = await execute("type_text", {
@@ -340,9 +361,16 @@ try {
           "Explicitly unconfirmed cleanup blocks later cases",
         );
         assert.notEqual(result.clipboardCleanupConfirmed, false);
+        if (virtualFile && result.ok !== true) {
+          assert.equal(result.ok, false, "refusal must be explicit");
+          assert.ok(
+            isSafeClipboardRefusal(result),
+            "refusal must be a recognized pre-input clipboard snapshot limitation",
+          );
+        }
         assert.equal(
-          await command("check-indexed"),
-          "indexed-preserved",
+          await command(check),
+          expected,
           "indexed clipboard survives either refusal or supported paste",
         );
         assert.equal(
