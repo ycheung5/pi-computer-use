@@ -7,6 +7,17 @@ using System.Windows.Forms;
 partial class StopBridge {
   class IndicatorWindow : Form {
     readonly bool frame;
+    [StructLayout(LayoutKind.Sequential)] struct LayerPoint { public int X,Y; }
+    [StructLayout(LayoutKind.Sequential)] struct LayerSize { public int Width,Height; }
+    [StructLayout(LayoutKind.Sequential,Pack=1)] struct BlendFunction { public byte Operation,Flags,Alpha,Format; }
+    [DllImport("gdi32.dll",SetLastError=true)] static extern IntPtr CreateCompatibleDC(IntPtr dc);
+    [DllImport("gdi32.dll",SetLastError=true)] static extern IntPtr SelectObject(IntPtr dc,IntPtr value);
+    [DllImport("gdi32.dll",SetLastError=true)] static extern bool DeleteObject(IntPtr value);
+    [DllImport("gdi32.dll",SetLastError=true)] static extern bool DeleteDC(IntPtr dc);
+    [DllImport("user32.dll",SetLastError=true)] static extern bool UpdateLayeredWindow(IntPtr window,IntPtr screen,ref LayerPoint destination,ref LayerSize size,IntPtr source,ref LayerPoint origin,uint colorKey,ref BlendFunction blend,uint flags);
+    IntPtr frameDc,frameBitmap,framePrevious;
+    public bool IsFrame {get{return frame;}}
+    public string FrameError="";
     public string Caption="";
     public float DpiScale=1;
     public IndicatorWindow(bool isFrame) {
@@ -20,24 +31,54 @@ partial class StopBridge {
     public void LayoutAt(Rectangle bounds,float scale) {
       if(Bounds==bounds && DpiScale==scale)return;
       DpiScale=scale;Bounds=bounds;
-      if(frame) {
-        Region ring=new Region(ClientRectangle);int edge=Math.Max(3,(int)(7*scale));
-        if(Width>edge*2 && Height>edge*2)ring.Exclude(new Rectangle(edge,edge,Width-edge*2,Height-edge*2));
-        Region previous=Region;Region=ring;if(previous!=null)previous.Dispose();
-      }
+      if(frame)BuildFrame();
       Invalidate();
     }
-    protected override void OnPaint(PaintEventArgs e) {
-      if(frame) {
-        int edge=Math.Max(3,(int)(7*DpiScale));
-        for(int inset=0;inset<edge;inset++)using(Pen pen=new Pen(Color.FromArgb(255,Math.Min(220,45+inset*8),Math.Min(220,132+inset*5),235)))
-          e.Graphics.DrawRectangle(pen,inset,inset,Math.Max(0,Width-inset*2-1),Math.Max(0,Height-inset*2-1));
-      } else {
-        using(Pen pen=new Pen(Color.FromArgb(62,156,255),Math.Max(1,2*DpiScale)))e.Graphics.DrawRectangle(pen,1,1,Width-3,Height-3);
-        using(Font font=new Font("Segoe UI",Math.Max(9,10*DpiScale),FontStyle.Bold,GraphicsUnit.Point))
-          TextRenderer.DrawText(e.Graphics,Caption,font,ClientRectangle,ForeColor,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPrefix);
-      }
+    void ReleaseFrame() {
+      if(frameDc!=IntPtr.Zero) {if(framePrevious!=IntPtr.Zero)SelectObject(frameDc,framePrevious);if(frameBitmap!=IntPtr.Zero)DeleteObject(frameBitmap);DeleteDC(frameDc);}
+      else if(frameBitmap!=IntPtr.Zero)DeleteObject(frameBitmap);
+      frameDc=IntPtr.Zero;frameBitmap=IntPtr.Zero;framePrevious=IntPtr.Zero;
     }
+    void BuildFrame() {
+      ReleaseFrame();FrameError="";
+      if(Width<2 || Height<2){FrameError="Indicator frame has invalid dimensions";return;}
+      try {
+      using(Bitmap image=new Bitmap(Width,Height,System.Drawing.Imaging.PixelFormat.Format32bppPArgb))
+      using(Graphics graphics=Graphics.FromImage(image)) {
+        graphics.Clear(Color.Transparent);
+        graphics.CompositingMode=System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+        float scale=Math.Max(1f,Math.Min(2f,Width/1920f));
+        int core=(int)Math.Round(3*scale),glow=core+(int)Math.Round(27*scale);
+        for(int inset=0;inset<glow && Width-2*inset>1 && Height-2*inset>1;inset++) {
+          Color color=inset<core?Color.FromArgb(235,150,184,255):Color.FromArgb((int)(175*Math.Pow(1-(inset-core)/(double)(glow-core),2.2)),77,124,254);
+          using(Pen pen=new Pen(color,1))graphics.DrawRectangle(pen,inset,inset,Width-2*inset-1,Height-2*inset-1);
+        }
+        frameBitmap=image.GetHbitmap(Color.FromArgb(0));
+      }
+      frameDc=CreateCompatibleDC(IntPtr.Zero);
+      if(frameDc==IntPtr.Zero){FrameError="Indicator frame DC creation failed: "+Marshal.GetLastWin32Error();ReleaseFrame();return;}
+      framePrevious=SelectObject(frameDc,frameBitmap);
+      if(framePrevious==IntPtr.Zero || framePrevious==new IntPtr(-1)){FrameError="Indicator frame bitmap selection failed: "+Marshal.GetLastWin32Error();framePrevious=IntPtr.Zero;ReleaseFrame();}
+      } catch(Exception error) {FrameError="Indicator frame preparation failed: "+error.Message;ReleaseFrame();}
+    }
+    public bool PresentFrame() {
+      if(!frame || frameDc==IntPtr.Zero)return false;
+      LayerPoint destination=new LayerPoint{X=Left,Y=Top},origin=new LayerPoint();
+      LayerSize size=new LayerSize{Width=Width,Height=Height};
+      BlendFunction blend=new BlendFunction{Operation=0,Flags=0,Alpha=255,Format=1};
+      bool presented=UpdateLayeredWindow(Handle,IntPtr.Zero,ref destination,ref size,frameDc,ref origin,0,ref blend,2);
+      if(!presented)FrameError="Indicator frame presentation failed: "+Marshal.GetLastWin32Error();
+      else FrameError="";
+      return presented;
+    }
+    protected override void OnPaint(PaintEventArgs e) {
+      if(frame)return;
+      using(Pen pen=new Pen(Color.FromArgb(62,156,255),Math.Max(1,2*DpiScale)))e.Graphics.DrawRectangle(pen,1,1,Width-3,Height-3);
+      using(Font font=new Font("Segoe UI",Math.Max(9,10*DpiScale),FontStyle.Bold,GraphicsUnit.Point))
+        TextRenderer.DrawText(e.Graphics,Caption,font,ClientRectangle,ForeColor,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPrefix);
+    }
+    protected override void Dispose(bool disposing) {if(disposing)ReleaseFrame();base.Dispose(disposing);}
+
   }
   class Presentation : IDisposable {
     [StructLayout(LayoutKind.Sequential)] struct Point { public int X,Y; }
@@ -139,7 +180,9 @@ partial class StopBridge {
     void Apply(IndicatorWindow form,bool visible) {
       if(!visible) { form.Hide();return; }
       if(!form.Visible) {
-        form.Show();EnableWindow(form.Handle,false);SetLayeredWindowAttributes(form.Handle,0,255,2);
+        form.Show();EnableWindow(form.Handle,false);
+        if(form.IsFrame) {if(!form.PresentFrame()){form.Hide();return;}}
+        else SetLayeredWindowAttributes(form.Handle,0,255,2);
         if(!SetWindowDisplayAffinity(form.Handle,remoteVisible?0U:0x11U))affinityApplied=false;
         else if(!affinityApplied.HasValue)affinityApplied=true;
       }
@@ -191,7 +234,8 @@ partial class StopBridge {
         {"held",held},{"renderChecked",renderChecked},{"previewPath",previewPath},{"preview",preview},{"suspended",suspended},{"visible",visible>0},{"visibleWindows",visible},
         {"screenEnabled",screenEnabled},{"pointerEnabled",pointerEnabled},{"remoteVisible",remoteVisible},{"captureAffinityApplied",affinityApplied},
         {"text",caption},{"position",position},{"endDelayMs",endDelay},{"operationIdleMs",30000},{"previewDurationMs",2000},
-        {"nonActivating",true},{"clickThrough",true},{"layout",Layout()}
+        {"nonActivating",true},{"clickThrough",true},{"layout",Layout()},
+        {"frameErrors",frames.FindAll(frame=>frame.FrameError.Length>0).ConvertAll(frame=>frame.FrameError)}
         ,{"clickThroughHitTestPassed",hitTest},{"captureSuspensions",captureSuspensions}
       };
     }
