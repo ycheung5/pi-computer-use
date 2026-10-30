@@ -6,3 +6,16 @@ export function isSafeClipboardRefusal(result: {
   ok?: unknown;
   error?: unknown;
 }): boolean;
+
+export function inputCleanupConfirmed(
+  result:
+    | {
+        ok?: unknown;
+        error?: unknown;
+        cleanupConfirmed?: unknown;
+        clipboardCleanupConfirmed?: unknown;
+      }
+    | undefined,
+): boolean;
+
+export function retainUnconfirmedOwner(): Promise<never>;
