@@ -81,3 +81,26 @@ test("extended window cases are listed without loading a backend or using Window
     assert.ok(report.cases.includes("foreground-restoration"));
   }
 });
+
+test("cross-process focus diagnostic is opt-in and plans without touching Windows", () => {
+  const script = fileURLToPath(
+    new URL("./foreground-focus-comparison.mjs", import.meta.url),
+  );
+  const env = { ...process.env, PI_CU_WINDOW_MANAGEMENT_TEST: "" };
+  const plan = spawnSync(
+    process.execPath,
+    [script, "--plan", "--engine=reference"],
+    { env, encoding: "utf8" },
+  );
+  assert.equal(plan.status, 0, plan.stderr);
+  const report = JSON.parse(plan.stdout);
+  assert.equal(report.physicalInput, false);
+  assert.equal(report.foregroundChangesPossible, true);
+  assert.deepEqual(report.cases, ["cross-process-prior-foreground"]);
+  const refusal = spawnSync(process.execPath, [script, "--engine=reference"], {
+    env,
+    encoding: "utf8",
+  });
+  assert.notEqual(refusal.status, 0);
+  assert.match(refusal.stderr, /PI_CU_WINDOW_MANAGEMENT_TEST/);
+});
