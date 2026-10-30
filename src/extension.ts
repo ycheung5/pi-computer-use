@@ -208,7 +208,7 @@ export function registerComputerUse(
     label: "Windows Computer Use Health",
     description:
       "Check the Windows automation worker connection and runtime. Does not send desktop input.",
-    parameters: Type.Object({}),
+    parameters: Type.Object({}, { additionalProperties: false }),
     executionMode: "sequential",
     async execute(_toolCallId, _args, signal) {
       const result = await worker.execute("health", {}, signal);

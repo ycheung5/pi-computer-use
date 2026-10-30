@@ -8,6 +8,8 @@ type Rule = {
   type: "string" | "integer" | "boolean";
   minimum?: number;
   maximum?: number;
+  minLength?: number;
+  maxLength?: number;
   default?: unknown;
 };
 const target: Record<string, Rule> = {
@@ -22,9 +24,9 @@ const definitions: Record<
 > = {
   launch_app: {
     properties: {
-      target: { type: "string" },
-      arguments: { type: "string", default: "" },
-      workingDirectory: { type: "string", default: "" },
+      target: { type: "string", minLength: 1, maxLength: 32767 },
+      arguments: { type: "string", maxLength: 32767, default: "" },
+      workingDirectory: { type: "string", maxLength: 32767, default: "" },
       activate: { type: "boolean", default: false },
       waitMs: { type: "integer", minimum: 0, maximum: 10000, default: 1500 },
     },
@@ -114,6 +116,14 @@ export async function manageWindow(
         (rule.maximum !== undefined && value > rule.maximum))
     )
       return invalid(`${key} outside bounds`);
+    if (typeof value === "string") {
+      const length = [...value].length;
+      if (
+        (rule.minLength !== undefined && length < rule.minLength) ||
+        (rule.maxLength !== undefined && length > rule.maxLength)
+      )
+        return invalid(`${key} outside bounds`);
+    }
     if (
       typeof value === "string" &&
       ["target", "windowTitle"].includes(key) &&

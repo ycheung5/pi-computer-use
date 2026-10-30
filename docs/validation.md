@@ -146,7 +146,7 @@ A separate read-only capture of public MCP `initialize`/`tools/list` and Pi regi
 | `launch_app.workingDirectory` | `maxLength: 32767` | Not advertised |
 | `health` object | `additionalProperties: false` | Unspecified |
 
-All **25 names** are present; the five restriction mismatches above are retained for repair triage. The previously documented four extra signed-32-bit bounds on move_window coordinates remain explicitly reported. The audit does not establish that runtime validation is identical or defective in the same way as the declarations. Historical schema passes below remain evidence only for the fields their comparator checked; they are not current full-restriction passes.
+All **25 names** were present. A subsequent implementation now declares the four launch string restrictions and closes the health object to additional properties, and also validates launch string lengths at the management seam. This change has not been tested or re-compared yet; the table records the prior audit, not current verified results. The previously documented four extra signed-32-bit bounds on move_window coordinates remain explicitly reported. The audit does not establish that runtime validation is identical or defective in the same way as the declarations. Historical schema passes below remain evidence only for the fields their comparator checked; they are not current full-restriction passes.
 
 ### Model-visible guidance inventory
 
