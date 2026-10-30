@@ -10,6 +10,38 @@ const run = (...args: string[]) =>
     encoding: "utf8",
     env: { ...process.env, PI_CU_NOTEPAD_INPUT_TEST: "" },
   });
+test("dispatch evidence requires an action-matched cleanup acknowledgment", () => {
+  const folder = mkdtempSync(join(tmpdir(), "pi-cu-unicode-dispatch-"));
+  try {
+    const path = join(folder, "result.json");
+    for (const [outcome, settled] of [
+      [
+        { response: { ok: true, action: "keypress", cleanupConfirmed: true } },
+        true,
+      ],
+      [
+        { response: { ok: false, action: "keypress", cleanupConfirmed: true } },
+        true,
+      ],
+      [
+        { response: { ok: true, action: "click", cleanupConfirmed: true } },
+        false,
+      ],
+      [{ response: { action: "keypress", cleanupConfirmed: true } }, false],
+      [{ response: { ok: true } }, false],
+      [{ response: { ok: true, cleanupConfirmed: false } }, false],
+      [{ error: "timeout" }, false],
+      [{}, false],
+    ] as const) {
+      writeFileSync(path, JSON.stringify({ action: "keypress", ...outcome }));
+      const result = run(`--report-dispatch=${path}`);
+      assert.equal(result.status, settled ? 0 : 1, result.stderr);
+      assert.equal(JSON.parse(result.stdout).settled, settled);
+    }
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
 test("Unicode input evidence rejects stale identity or unknown focus and layout before dispatch", () => {
   const folder = mkdtempSync(join(tmpdir(), "pi-cu-unicode-environment-"));
   try {
