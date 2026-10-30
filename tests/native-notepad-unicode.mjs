@@ -40,14 +40,24 @@ assert.ok(
   ["pi", "reference"].includes(engine),
   "engine must be pi or reference",
 );
+const selectedCase = option("case");
+assert.ok(
+  selectedCase === undefined || /^[1-6]$/.test(selectedCase),
+  "case must be an integer from 1 to 6",
+);
+const selectedCases = cases
+  .map((value, index) => ({ ...value, id: index + 1 }))
+  .filter(
+    (value) => selectedCase === undefined || value.id === Number(selectedCase),
+  );
 if (process.argv.includes("--list")) {
   console.log(
     JSON.stringify({
       engine,
       executed: false,
       requestedMethod: "sendinput",
-      cases: cases.map(({ seed, text }, index) => ({
-        id: index + 1,
+      cases: selectedCases.map(({ seed, text, id }) => ({
+        id,
         seed,
         text,
         expected: normalize(seed + text),
@@ -71,7 +81,7 @@ try {
     referencePath: option("reference"),
     cwd: folder,
   });
-  for (const [caseIndex, { seed, text }] of cases.entries()) {
+  for (const { id: caseId, seed, text } of selectedCases) {
     const started = performance.now();
     let typed;
     let dispatchMs;
@@ -220,7 +230,7 @@ try {
       console.log(
         JSON.stringify({
           engine,
-          case: caseIndex + 1,
+          case: caseId,
           ok: !failure,
           seed,
           text,

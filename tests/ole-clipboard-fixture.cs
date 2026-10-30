@@ -56,15 +56,15 @@ class OleClipboardFixture {
   var bytes=data.GetData("PiCUOleFixtureBytes",false) as MemoryStream;if(bytes==null)return false;
   byte[] actual=bytes.ToArray();if(actual.Length!=seedBinary.Length)return false;for(int i=0;i<actual.Length;i++)if(actual[i]!=seedBinary[i])return false;return true;
  }
- static bool CheckIndexed() {
-  if(!OwnsClipboard())return false;
+ static string CheckIndexed() {
+  if(!OwnsClipboard())return "indexed-mismatch:owner";
   OleDataObject data;Marshal.ThrowExceptionForHR(OleGetClipboard(out data));
   var format=new FORMATETC {cfFormat=(short)RegisterClipboardFormat("PiCUIndexedPayload"),dwAspect=DVASPECT.DVASPECT_CONTENT,lindex=0,tymed=TYMED.TYMED_HGLOBAL};
-  if(data.QueryGetData(ref format)!=0)return false;
+  int query=data.QueryGetData(ref format);if(query!=0)return "indexed-mismatch:query:"+query.ToString("X8");
   STGMEDIUM medium;data.GetData(ref format,out medium);
-  try {if(medium.tymed!=TYMED.TYMED_HGLOBAL || GlobalSize(medium.unionmember).ToUInt64()<4)return false;
-   IntPtr memory=GlobalLock(medium.unionmember);if(memory==IntPtr.Zero)return false;
-   try {byte[] actual=new byte[4];Marshal.Copy(memory,actual,0,4);return actual[0]==1 && actual[1]==2 && actual[2]==3 && actual[3]==4;}
+  try {if(medium.tymed!=TYMED.TYMED_HGLOBAL)return "indexed-mismatch:tymed";if(GlobalSize(medium.unionmember).ToUInt64()<4)return "indexed-mismatch:size";
+   IntPtr memory=GlobalLock(medium.unionmember);if(memory==IntPtr.Zero)return "indexed-mismatch:lock";
+   try {byte[] actual=new byte[4];Marshal.Copy(memory,actual,0,4);return actual[0]==1 && actual[1]==2 && actual[2]==3 && actual[3]==4?"indexed-preserved":"indexed-mismatch:bytes";}
    finally {GlobalUnlock(medium.unionmember);}
   }finally {ReleaseStgMedium(ref medium);}
  }
@@ -82,7 +82,7 @@ class OleClipboardFixture {
     else if(next=="check-seed")Reply(CheckSeed()?"seed-preserved":"seed-mismatch");
     else if(next=="copy-on-paste"){copyOnPaste=true;Reply("copy-armed");}
     else if(next=="check-newer")Reply(Equals(Clipboard.GetDataObject().GetData(DataFormats.UnicodeText,false),"Fixture newer copy 中文")?"newer-preserved":"newer-mismatch");
-    else if(next=="check-indexed")Reply(CheckIndexed()?"indexed-preserved":"indexed-mismatch");
+    else if(next=="check-indexed")Reply(CheckIndexed());
     else if(next=="restore-close") {if(OwnsClipboard()){Clipboard.SetDataObject(original,true);Reply("original-restored");}else Reply(seeded?"newer-copy-preserved":"original-unchanged");seeded=false;form.Close();}
    });if(next=="restore-close")return;}form.BeginInvoke((Action)delegate{if(OwnsClipboard())Clipboard.SetDataObject(original,true);seeded=false;form.Close();});});
   try{Application.Run(form);}finally{GC.KeepAlive(retained);if(OwnsClipboard())Clipboard.SetDataObject(original,true);}

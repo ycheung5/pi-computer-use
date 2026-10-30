@@ -29,3 +29,5 @@ On a **dedicated interactive desktop**, use the opt-in physical runner/fixture f
 ## Paired comparison preparation (#30)
 
 Only portable CLI planning/refusal is validated in the current preparation. The `--list` output distinguishes the implemented runner cases from pending coverage; listing is not a test pass. Successful drag/drop, independent foreground/restoration, user interference, menus/dialogs, same-process distractors, disappeared/replaced targets, mixed DPI/negative origins and physical stop still need dedicated-session comparison work. Existing passive guard results remain scoped Pi evidence, not a paired reference baseline. The user deferred all physical runs; #30 remains open.
+
+The paired runner accepts DSH's single uniform screenshot scale and Pi's separate Y scale, retaining the raw capture metadata. Hover preparation explicitly activates the owned fixture and verifies foreground through the fixture's independent HWND observation; bounded read-only polling allows the event queue to update after the single move. These runner corrections require a new physical run and do not establish a product fix.

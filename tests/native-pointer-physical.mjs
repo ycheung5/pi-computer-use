@@ -142,11 +142,17 @@ try {
         buffered = lines.pop();
         for (const line of lines) {
           if (line.startsWith("pointer-state:")) {
-            const [clicks, doubles, hover, scroll, held, releases] = line
-              .slice(14)
-              .split(":")
-              .map(Number);
-            finish(null, { clicks, doubles, hover, scroll, held, releases });
+            const [clicks, doubles, hover, scroll, held, releases, foreground] =
+              line.slice(14).split(":").map(Number);
+            finish(null, {
+              clicks,
+              doubles,
+              hover,
+              scroll,
+              held,
+              releases,
+              foreground,
+            });
             return;
           }
         }
@@ -179,13 +185,17 @@ try {
   const captured = await call("screenshot", { maxWidth: 260 });
   assert.equal(captured.ok, true, JSON.stringify(captured));
   const capture = captured.screenshot;
+  // DSH exposes one uniform scale; Pi additionally exposes exact Y scaling.
+  const scaleY = capture.imageScaleY ?? capture.imageScale;
+  assert.ok(Number.isFinite(capture.imageScale) && capture.imageScale > 0);
+  assert.ok(Number.isFinite(scaleY) && scaleY > 0);
   const imagePoint = {
     x: (screenPoint.x - capture.origin.x) * capture.imageScale,
-    y: (screenPoint.y - capture.origin.y) * capture.imageScaleY,
+    y: (screenPoint.y - capture.origin.y) * scaleY,
   };
   const mapped = {
     x: Math.round(imagePoint.x / capture.imageScale + capture.origin.x),
-    y: Math.round(imagePoint.y / capture.imageScaleY + capture.origin.y),
+    y: Math.round(imagePoint.y / scaleY + capture.origin.y),
   };
   const clicked = await call("click", { ...mapped, dispatch: "foreground" });
   assert.equal(clicked.ok, true, JSON.stringify(clicked));
@@ -205,13 +215,22 @@ try {
     1,
     "fixture received exactly one double click",
   );
-  const moved = await call("move", { elementId: button.id });
-  assert.equal(moved.ok, true, JSON.stringify(moved));
+  const activated = await call("activate_window", { activate: true });
+  assert.equal(activated.activated, true, JSON.stringify(activated));
   assert.equal(
-    (await observePointer()).hover,
-    1,
-    "fixture independently observed hover",
+    (await observePointer()).foreground,
+    target.nativeWindowHandle,
+    "owned fixture must independently be foreground before hover",
   );
+  const moved = await call("move", { elementId: button.id, activate: true });
+  assert.equal(moved.ok, true, JSON.stringify(moved));
+  let hoverState;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    hoverState = await observePointer();
+    if (hoverState.hover === 1) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(hoverState.hover, 1, "fixture independently observed hover");
   const panel = (await find("Background scroller", "Pane"))[0];
   const scrolled = await call("scroll", {
     x: Math.round(panel.boundingBox.centerX),

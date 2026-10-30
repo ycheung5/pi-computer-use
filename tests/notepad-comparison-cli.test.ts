@@ -28,3 +28,17 @@ test("Unicode comparison refuses execution before backend startup", () => {
     /MODULE_NOT_FOUND|ENOENT|Run with Windows/,
   );
 });
+
+test("Unicode comparison selects original case IDs and rejects invalid selection before input", () => {
+  const listed = run("--list", "--engine=reference", "--case=3");
+  assert.equal(listed.status, 0, listed.stderr);
+  const plan = JSON.parse(listed.stdout);
+  assert.equal(plan.cases.length, 1);
+  assert.equal(plan.cases[0].id, 3);
+  assert.equal(plan.cases[0].seed, "Reuse test\n中文測試 café 😀");
+  for (const value of ["0", "7", "1.5", "abc", ""]) {
+    const invalid = run("--list", `--case=${value}`);
+    assert.notEqual(invalid.status, 0);
+    assert.match(invalid.stderr, /case must be an integer from 1 to 6/);
+  }
+});

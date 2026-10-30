@@ -220,6 +220,11 @@ try {
     "Unicode, HTML and binary clipboard formats must survive",
   );
   assert.equal(await command("seed-indexed"), "indexed-seeded");
+  assert.equal(
+    await command("check-indexed"),
+    "indexed-preserved",
+    "indexed fixture payload must be readable before dispatch",
+  );
   const refused = await execute("type_text", {
     ...target,
     text: "MUST NOT APPEAR",
