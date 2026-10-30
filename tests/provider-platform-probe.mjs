@@ -1,19 +1,19 @@
 // Passive diagnostic: compare a direct managed UIA cache read to provider entry.
 import assert from "node:assert/strict";
-import { execFile, spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 
 if (process.argv.slice(2).join(" ") === "--plan") {
   console.log(
     JSON.stringify({
       executed: false,
       physicalInput: false,
+      fromHandleBeforeArm: true,
       cases: ["provider.platform-normalization"],
     }),
   );
@@ -22,7 +22,7 @@ if (process.argv.slice(2).join(" ") === "--plan") {
 assert.equal(process.argv.length, 2, "Unknown argument");
 assert.equal(process.platform, "win32", "Run on an interactive Windows host");
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-provider-platform-"));
-let child, result;
+let child, observer, result;
 try {
   const framework = join(
     process.env.WINDIR,
@@ -85,9 +85,8 @@ try {
   assert.ok(hwnd > 0 && child.pid > 0);
   const h = (await command("child-handle")).match(/^child-handle:(\d+)$/);
   assert.ok(h);
-  assert.equal(await command("arm:unavailable"), "armed");
-  const ps = `$ErrorActionPreference='Stop'; Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes; $e=[System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]${h[1]}); $c=New-Object System.Windows.Automation.CacheRequest; $c.TreeScope=[System.Windows.Automation.TreeScope]::Element; $c.TreeFilter=[System.Windows.Automation.Automation]::RawViewCondition; $c.AutomationElementMode=[System.Windows.Automation.AutomationElementMode]::Full; foreach($n in @('Name','AutomationId','ClassName','ControlType','BoundingRectangle','IsEnabled','IsOffscreen','HasKeyboardFocus','ProcessId','NativeWindowHandle','RuntimeId','FrameworkId')) {$c.Add([System.Windows.Automation.AutomationElement]::("${"$"}{n}Property"))}; try {$v=$e.GetUpdatedCache($c); @{observation='returned';name=$v.Cached.Name}|ConvertTo-Json -Compress} catch {@{observation='exception';type=$_.Exception.GetType().FullName;message=$_.Exception.Message}|ConvertTo-Json -Compress}`;
-  const run = promisify(execFile)(
+  const ps = `$ErrorActionPreference='Stop'; Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes; $e=[System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]${h[1]}); if($null -eq $e){throw 'FromHandle returned null'}; $c=New-Object System.Windows.Automation.CacheRequest; $c.TreeScope=[System.Windows.Automation.TreeScope]::Element; $c.TreeFilter=[System.Windows.Automation.Automation]::RawViewCondition; $c.AutomationElementMode=[System.Windows.Automation.AutomationElementMode]::Full; foreach($n in @('Name','AutomationId','ClassName','ControlType','BoundingRectangle','IsEnabled','IsOffscreen','HasKeyboardFocus','ProcessId','NativeWindowHandle','RuntimeId','FrameworkId')) {$c.Add([System.Windows.Automation.AutomationElement]::("${"$"}{n}Property"))}; [Console]::WriteLine('platform:ready'); [Console]::Out.Flush(); if([Console]::ReadLine() -ne 'read'){throw 'Invalid cache-read gate'}; try {$v=$e.GetUpdatedCache($c); @{observation='returned';name=$v.Cached.Name}|ConvertTo-Json -Compress} catch {@{observation='exception';type=$_.Exception.GetType().FullName;message=$_.Exception.Message}|ConvertTo-Json -Compress}`;
+  observer = spawn(
     "powershell.exe",
     [
       "-NoProfile",
@@ -95,22 +94,60 @@ try {
       "-EncodedCommand",
       Buffer.from(ps, "utf16le").toString("base64"),
     ],
-    { timeout: 12000, windowsHide: true },
+    { stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
   );
+  const observerClosed = once(observer, "close");
+  observer.stderr.resume();
+  const observerLines = createInterface({ input: observer.stdout })[
+    Symbol.asyncIterator
+  ]();
+  async function observerNext() {
+    let timer;
+    try {
+      return await Promise.race([
+        observerLines.next().then((x) => {
+          if (x.done) throw new Error("Observer exited");
+          return x.value.trim();
+        }),
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Observer response timeout")),
+            10000,
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  assert.equal(
+    await observerNext(),
+    "platform:ready",
+    "FromHandle and cache setup must finish before arming",
+  );
+  assert.equal(await command("arm:unavailable"), "armed");
+  observer.stdin.end("read\n");
   const entry = await next();
   assert.equal(entry, "provider:entered:unavailable");
-  const { stdout } = await run;
-  const observation = JSON.parse(stdout.replace(/^\uFEFF/, ""));
+  const observation = JSON.parse((await observerNext()).replace(/^\uFEFF/, ""));
+  const [observerCode] = await observerClosed;
+  assert.equal(observerCode, 0, "Observer must exit cleanly");
   assert.ok(["returned", "exception"].includes(observation.observation));
   result = {
     ok: true,
     physicalInput: false,
     entry,
+    fromHandleBeforeArm: true,
     observation,
     scope:
       "direct-child compact managed cache; not the DSH walker or an engine comparison",
   };
 } finally {
+  if (observer && observer.exitCode === null && observer.signalCode === null) {
+    const closed = once(observer, "close");
+    observer.kill();
+    await closed;
+  }
   if (child && child.exitCode === null && child.signalCode === null) {
     const closed = once(child, "close");
     child.stdin.end("stop\n");

@@ -141,4 +141,5 @@ test("platform provider probe plan needs no backend, Windows, or desktop", () =>
   assert.equal(plan.executed, false);
   assert.equal(plan.physicalInput, false);
   assert.deepEqual(plan.cases, ["provider.platform-normalization"]);
+  assert.equal(plan.fromHandleBeforeArm, true);
 });
