@@ -72,7 +72,9 @@ const diagnostics = {
     after: 2,
   },
 };
-const diagnostic = diagnostics[diagnosticName];
+const diagnostic = Object.hasOwn(diagnostics, diagnosticName)
+  ? diagnostics[diagnosticName]
+  : undefined;
 assert.ok(
   diagnostic && (!diagnostic.engine || diagnostic.engine === engine),
   "diagnostic must be known and match the selected engine",

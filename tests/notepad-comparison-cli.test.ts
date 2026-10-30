@@ -68,6 +68,8 @@ test("Unicode diagnostics select one labelled mechanism without starting a backe
   }
   for (const args of [
     ["--diagnostic=unknown"],
+    ["--diagnostic=constructor"],
+    ["--diagnostic=toString"],
     ["--engine=pi", "--diagnostic=reference-keyup-scan"],
     ["--engine=reference", "--diagnostic=pi-no-delay"],
     ["--unexpected=true"],
