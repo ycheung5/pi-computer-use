@@ -2,6 +2,15 @@
 import assert from "node:assert/strict";
 
 const args = process.argv.slice(2);
+function retainCoordinator() {
+  return setInterval(() => {}, 10000);
+}
+if (args.length === 1 && args[0] === "--retention-check") {
+  retainCoordinator();
+  console.log(JSON.stringify({ status: "retained" }));
+}
+if (args.length === 1 && args[0] === "--retention-check")
+  await new Promise(() => {});
 for (const arg of args)
   assert.ok(
     arg === "--plan" ||
@@ -267,6 +276,7 @@ if (args.includes("--plan")) {
       ...(args.includes("--provenance")
         ? { inputProvenance: "aggregate hook counts only" }
         : {}),
+      ...(dialogMode ? { fixtureExpiry: "explicit-stop-only" } : {}),
       cases: [
         dialogMode
           ? "owned-dialog-foreground"
@@ -323,11 +333,15 @@ let client,
   },
   cleanupConfirmed = false;
 async function fixture(label) {
-  const child = spawn(join(folder, "controls.exe"), [label], {
-    cwd: folder,
-    windowsHide: false,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+  const child = spawn(
+    join(folder, "controls.exe"),
+    [label, ...(dialogMode ? ["--no-expiry"] : [])],
+    {
+      cwd: folder,
+      windowsHide: false,
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
   fixtures.push(child);
   child.stderr.resume();
   const iter = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
@@ -719,6 +733,7 @@ try {
         ? "Direct UIA settlement unconfirmed; owned processes retained"
         : "Dialog dispatch or clean observation unconfirmed; owned processes retained";
     result.retainedFolder = folder;
+    if (dialogDispatched && !dialogSettled) retainCoordinator();
     process.exitCode = 1;
   } else
     try {
@@ -748,6 +763,7 @@ try {
       result.status = "fail";
       result.cleanupError = String(error);
       result.retainedFolder = folder;
+      if (dialogMode) retainCoordinator();
       process.exitCode = 1;
     }
 }
