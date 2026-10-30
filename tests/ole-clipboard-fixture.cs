@@ -60,7 +60,7 @@ class OleClipboardFixture {
   STGMEDIUM medium;try{data.GetData(ref descriptor,out medium);}catch(COMException error){return "virtual-descriptor-get:"+error.ErrorCode.ToString("X8");}
   try {if(medium.tymed!=TYMED.TYMED_HGLOBAL || GlobalSize(medium.unionmember).ToUInt64()<596)return "virtual-descriptor-size";
    IntPtr memory=GlobalLock(medium.unionmember);if(memory==IntPtr.Zero)return "virtual-descriptor-lock";
-   try {if(Marshal.ReadInt32(memory)!=1 || (Marshal.ReadInt32(memory,4) & unchecked((int)0x80000040))!=unchecked((int)0x80000040) || Marshal.ReadInt32(memory,72)!=4 || Marshal.PtrToStringUni(IntPtr.Add(memory,76))!="pi-cu-fixture.txt")return "virtual-descriptor-mismatch";}
+   try {if(Marshal.ReadInt32(memory)!=1 || (Marshal.ReadInt32(memory,4) & unchecked((int)0x80000040))!=unchecked((int)0x80000040) || Marshal.ReadInt32(memory,68)!=0 || Marshal.ReadInt32(memory,72)!=4 || Marshal.PtrToStringUni(IntPtr.Add(memory,76),260).TrimEnd('\0')!="pi-cu-fixture.txt")return "virtual-descriptor-mismatch";}
    finally {GlobalUnlock(medium.unionmember);}
   }finally{ReleaseStgMedium(ref medium);}
   var content=new FORMATETC {cfFormat=(short)RegisterClipboardFormat("FileContents"),dwAspect=DVASPECT.DVASPECT_CONTENT,lindex=0,tymed=TYMED.TYMED_HGLOBAL};
