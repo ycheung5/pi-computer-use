@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 const run = (...args: string[]) =>
@@ -77,5 +80,60 @@ test("Unicode diagnostics select one labelled mechanism without starting a backe
     const result = run("--list", ...args);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /Unknown option|diagnostic/);
+  }
+});
+
+test("Unicode cleanup report retains case failure and separately reports cleanup failure", () => {
+  const folder = mkdtempSync(join(tmpdir(), "pi-cu-unicode-report-"));
+  try {
+    const saved = join(folder, "result.json");
+    writeFileSync(
+      saved,
+      JSON.stringify({
+        caseFailure: { message: "text mismatch" },
+        cleanupFailures: [{ stage: "folder", message: "EBUSY" }],
+        retainedTabs: 0,
+      }),
+    );
+    const result = run(`--report-cleanup=${saved}`);
+    assert.notEqual(result.status, 0);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.caseFailure.message, "text mismatch");
+    assert.equal(report.cleanupFailures[0].message, "EBUSY");
+    assert.equal(report.cleanupConfirmed, false);
+    assert.equal(readFileSync(saved, "utf8").includes("text mismatch"), true);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test("Unicode cleanup reports retained tabs as incomplete and successful cleanup as complete", () => {
+  const folder = mkdtempSync(join(tmpdir(), "pi-cu-unicode-report-"));
+  try {
+    const saved = join(folder, "result.json");
+    writeFileSync(
+      saved,
+      JSON.stringify({
+        caseFailure: null,
+        cleanupFailures: [],
+        retainedTabs: 1,
+      }),
+    );
+    let result = run(`--report-cleanup=${saved}`);
+    assert.notEqual(result.status, 0);
+    assert.equal(JSON.parse(result.stdout).cleanupConfirmed, false);
+    writeFileSync(
+      saved,
+      JSON.stringify({
+        caseFailure: null,
+        cleanupFailures: [],
+        retainedTabs: 0,
+      }),
+    );
+    result = run(`--report-cleanup=${saved}`);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).cleanupConfirmed, true);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
   }
 });
