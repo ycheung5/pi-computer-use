@@ -53,6 +53,37 @@ function cleanupReport({ caseFailure = null, cleanupFailures, retainedTabs }) {
   };
 }
 const reportPath = option("report-cleanup");
+function legacyContextReport(observation) {
+  assert.equal(typeof observation.succeeded, "boolean");
+  assert.ok(Array.isArray(observation.contexts));
+  return {
+    observation,
+    classification:
+      observation.succeeded &&
+      observation.contexts.length === 1 &&
+      observation.contexts[0].open === true
+        ? "observed"
+        : "unknown",
+    focusedContextIdentified: false,
+    legacyOpenState: "unknown",
+    tsfState: "unknown",
+  };
+}
+const imeReportPath = option("report-ime");
+if (imeReportPath !== undefined) {
+  assert.equal(
+    process.argv.length,
+    3,
+    "report-ime cannot be combined with other options",
+  );
+  assert.ok(imeReportPath, "report-ime requires a path");
+  console.log(
+    JSON.stringify(
+      legacyContextReport(JSON.parse(await readFile(imeReportPath, "utf8"))),
+    ),
+  );
+  process.exit();
+}
 if (reportPath !== undefined) {
   assert.equal(
     process.argv.length,
@@ -210,7 +241,9 @@ function inputState(target) {
     { encoding: "utf8", windowsHide: true, cwd: folder },
   );
   assert.equal(observed.status, 0, observed.stdout + observed.stderr);
-  return JSON.parse(observed.stdout);
+  const state = JSON.parse(observed.stdout);
+  state.legacyContexts = legacyContextReport(state.legacyContexts);
+  return state;
 }
 try {
   const built = spawnSync(

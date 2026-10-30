@@ -15,6 +15,8 @@ class UnicodeInputState {
  [DllImport("imm32.dll")] static extern bool ImmReleaseContext(IntPtr window,IntPtr context);
  [DllImport("imm32.dll")] static extern bool ImmGetOpenStatus(IntPtr context);
  [DllImport("imm32.dll")] static extern bool ImmGetConversionStatus(IntPtr context,out uint conversion,out uint sentence);
+ delegate bool EnumInputContextCallback(IntPtr context,IntPtr parameter);
+ [DllImport("imm32.dll",SetLastError=true)] static extern bool ImmEnumInputContext(uint thread,EnumInputContextCallback callback,IntPtr parameter);
  static void Main(string[] args) {
   IntPtr window=new IntPtr(Int64.Parse(args[0]));int requestedProcess=Int32.Parse(args[1]);uint process,foregroundProcess,focusProcess=0;
   uint thread=GetWindowThreadProcessId(window,out process);IntPtr foreground=GetForegroundWindow();GetWindowThreadProcessId(foreground,out foregroundProcess);
@@ -23,8 +25,13 @@ class UnicodeInputState {
   IntPtr layout=GetKeyboardLayout(thread),context=focusAvailable?ImmGetContext(gui.Focus):IntPtr.Zero;
   var ime=new Dictionary<string,object>{{"available",context!=IntPtr.Zero},{"scope","legacy IMM context; absence does not establish TSF/IME disabled"}};
   if(context!=IntPtr.Zero)try{uint conversion,sentence;ime["open"]=ImmGetOpenStatus(context);bool modes=ImmGetConversionStatus(context,out conversion,out sentence);ime["conversionStatusAvailable"]=modes;if(modes){ime["conversionMode"]=conversion;ime["sentenceMode"]=sentence;}}finally{ImmReleaseContext(gui.Focus,context);}
+  var contexts=new List<object>();
+  EnumInputContextCallback callback=delegate(IntPtr item,IntPtr ignored){contexts.Add(new Dictionary<string,object>{{"open",ImmGetOpenStatus(item)}});return true;};
+  bool enumerated=ImmEnumInputContext(thread,callback,IntPtr.Zero);int enumerationError=enumerated?0:Marshal.GetLastWin32Error();
+  var legacyContexts=new Dictionary<string,object>{{"succeeded",enumerated},{"error",enumerationError},{"contexts",contexts},{"scope","target-thread legacy contexts; open-status cross-process readability unverified; does not establish focused context or TSF state"}};
   string version=null;try{version=Process.GetProcessById(requestedProcess).MainModule.FileVersionInfo.FileVersion;}catch(Exception){}
   var value=new Dictionary<string,object>{{"targetHwnd",window.ToInt64()},{"targetProcessId",process},{"targetThreadId",thread},{"foregroundHwnd",foreground.ToInt64()},{"foregroundProcessId",foregroundProcess},{"focusAvailable",focusAvailable},{"focusHwnd",gui.Focus.ToInt64()},{"focusProcessId",focusProcess},{"keyboardLayoutHex","0x"+layout.ToInt64().ToString("X")},{"keyboardLanguageId",layout.ToInt64() & 0xFFFF},{"ime",ime},{"processFileVersion",version},{"osVersion",Environment.OSVersion.VersionString}};
+  value["legacyContexts"]=legacyContexts;
   Console.WriteLine(new JavaScriptSerializer().Serialize(value));
  }
 }
