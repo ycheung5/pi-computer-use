@@ -135,7 +135,7 @@ assert.equal(
 if (engine === "reference" && !probe)
   assert.ok(referencePath, "--reference requires the pinned DSH checkout path");
 // No backend import, directory, compiler, client or fixture precedes the opt-in.
-const { detachFixture, waitForFixtureClose } = await import(
+const { detachFixture, runFixtureCommand, waitForFixtureClose } = await import(
   "./clipboard-fixture-close.mjs"
 );
 const {
@@ -219,11 +219,14 @@ const next = async () => {
     clearTimeout(timer);
   }
 };
+const fixtureCommand = { unconfirmed: false };
 const command = async (text) => {
   if (fixtureExit) throw Error("fixture already exited; no command dispatched");
-  const reply = next();
-  fixture.stdin.write(`${text}\n`);
-  return reply;
+  return runFixtureCommand(fixtureCommand, async () => {
+    const reply = next();
+    fixture.stdin.write(`${text}\n`);
+    return reply;
+  });
 };
 let fixtureReady = false;
 let fixtureCloseUnconfirmed = false;
@@ -520,10 +523,12 @@ try {
   // Do not close the fixture, restore clipboard, dispose the client or remove files
   // while a rejected call or missing acknowledgment could leave input active.
   console.log(JSON.stringify({ engine, observations }));
-  if (inputCleanupUnconfirmed) {
+  if (inputCleanupUnconfirmed || fixtureCommand.unconfirmed) {
     console.error(
       JSON.stringify({
-        fixtureCleanup: "retained: input cleanup unconfirmed",
+        fixtureCleanup: inputCleanupUnconfirmed
+          ? "retained: input cleanup unconfirmed"
+          : "retained: fixture command unconfirmed",
         folder,
       }),
     );
@@ -551,6 +556,16 @@ try {
       );
     }
   } catch (cleanupError) {
+    if (fixtureCommand.unconfirmed) {
+      console.error(
+        JSON.stringify({
+          fixtureCleanup: "retained: fixture command unconfirmed",
+          error: cleanupError.message,
+          folder,
+        }),
+      );
+      await retainUnconfirmedOwner();
+    }
     if (fixtureReady && !fixtureExit) {
       fixtureCloseUnconfirmed = true;
       detachFixture(fixture);
