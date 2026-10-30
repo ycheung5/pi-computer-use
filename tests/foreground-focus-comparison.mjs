@@ -18,8 +18,11 @@ for (const arg of args)
       arg === "--direct-uia" ||
       arg === "--dialog" ||
       arg === "--menu" ||
+      arg === "--native-menu" ||
       arg === "--direct-mta" ||
-      /^--(engine|reference|report|direct-report)=.+/.test(arg),
+      /^--(engine|reference|report|direct-report|menu-settlement-report)=.+/.test(
+        arg,
+      ),
     `Unknown option: ${arg}`,
   );
 const option = (name) =>
@@ -199,6 +202,19 @@ function classifyMenu(e) {
         reason: "Unmarked or other injected event observed",
       };
   }
+  if (
+    e.nativeMenu &&
+    (e.menuUia?.ok !== true ||
+      !Array.isArray(e.menuUia.matches) ||
+      e.menuUia.matches.length !== 1 ||
+      e.menuUia.matches[0].processId !== target.processId ||
+      e.menuUia.matches[0].name !== "Owned menu item" ||
+      e.menuUia.matches[0].controlType !== "MenuItem")
+  )
+    return {
+      status: "inconclusive",
+      reason: "Native menu item UIA identity unavailable",
+    };
   if (action?.ok !== true || menu.visible !== true)
     return { status: "fail", reason: "Owned menu not observed after dispatch" };
   if (
@@ -367,6 +383,22 @@ if (directReportPath) {
   console.log(JSON.stringify({ executed: false, ...outcome }));
   process.exit(outcome.outcome === "returned" ? 0 : 1);
 }
+function nativeMenuSettlementConfirmed(reply) {
+  return reply === "native-menu-settlement:True:True:True";
+}
+const settlementReportPath = option("menu-settlement-report");
+if (settlementReportPath) {
+  assert.equal(
+    args.length,
+    1,
+    "menu settlement report cannot be combined with other options",
+  );
+  const { readFile } = await import("node:fs/promises");
+  const evidence = JSON.parse(await readFile(settlementReportPath, "utf8"));
+  const confirmed = nativeMenuSettlementConfirmed(evidence.reply);
+  console.log(JSON.stringify({ executed: false, confirmed }));
+  process.exit(confirmed ? 0 : 1);
+}
 const reportPath = option("report");
 if (reportPath) {
   assert.equal(args.length, 1, "report cannot be combined with other options");
@@ -382,7 +414,9 @@ assert.ok(["pi", "reference"].includes(engine));
 const directUia = args.includes("--direct-uia");
 const directMta = args.includes("--direct-mta");
 const dialogMode = args.includes("--dialog");
-const menuMode = args.includes("--menu");
+const nativeMenu = args.includes("--native-menu");
+const menuMode = args.includes("--menu") || nativeMenu;
+assert.ok(!(nativeMenu && args.includes("--menu")), "Choose one menu fixture");
 assert.ok(!(menuMode && dialogMode), "Choose either dialog or menu");
 assert.ok(
   !menuMode || (args.includes("--provenance") && !directUia),
@@ -419,7 +453,9 @@ if (args.includes("--plan")) {
         dialogMode
           ? "owned-dialog-foreground"
           : menuMode
-            ? "owned-menu-foreground"
+            ? nativeMenu
+              ? "native-menu-foreground"
+              : "owned-menu-foreground"
             : "cross-process-prior-foreground",
       ],
     }),
@@ -475,7 +511,11 @@ let client,
 async function fixture(label) {
   const child = spawn(
     join(folder, "controls.exe"),
-    [label, ...(popupMode ? ["--no-expiry"] : [])],
+    [
+      label,
+      ...(popupMode ? ["--no-expiry"] : []),
+      ...(nativeMenu ? ["--native-menu"] : []),
+    ],
     {
       cwd: folder,
       windowsHide: false,
@@ -617,6 +657,7 @@ try {
   }
 
   if (popupMode) result.comparison = menuMode ? "owned-menu" : "owned-dialog";
+  if (nativeMenu) result.nativeMenu = true;
   const prior = await fixture("Pi CU prior foreground");
   const target = await fixture("Pi CU focus target");
   async function readMenuState() {
@@ -860,6 +901,14 @@ try {
     };
   }
   if (menuMode) result.menu = await readMenuState();
+  if (nativeMenu)
+    result.menuUia = await client.execute("find", {
+      ...target.identity,
+      query: "Owned menu item",
+      controlType: "MenuItem",
+      ocrFallback: false,
+      activate: false,
+    });
   if (observer) result.inputEventsAfter = await observer.snapshot();
   const samples = [];
   result.samples = samples;
@@ -883,7 +932,16 @@ try {
         ? "direct managed UIA control, not a Pi focus call; aggregate input counts cannot prove event source"
         : "public focus dispatch and independent after-return observations; no internal guard-phase observation";
   Object.assign(result, classifyEvidence(result));
-  if (popupMode && result.status === "pass") popupSettled = true;
+  if (popupMode && result.status === "pass") {
+    if (nativeMenu) {
+      result.nativeMenuSettlement = await target.command("dismiss-native-menu");
+      if (!nativeMenuSettlementConfirmed(result.nativeMenuSettlement)) {
+        result.status = "inconclusive";
+        result.reason = "Native menu handler settlement was not confirmed";
+      }
+    }
+    if (result.status === "pass") popupSettled = true;
+  }
   if (!["pass", "observed"].includes(result.status)) process.exitCode = 1;
 } catch (error) {
   result.status = error.inconclusive ? "inconclusive" : "fail";
