@@ -103,29 +103,19 @@ if (options.includes("--list")) {
   );
   process.exit(0);
 }
-if (selectedCase === "drop-discovery") {
-  assert.equal(
-    process.platform,
-    "win32",
-    "Run with Windows Node after building",
-  );
-  const { runDragDrop } = await import("./native-pointer-drop.mjs");
-  await runDragDrop({
-    engine,
-    referencePath: option("reference"),
-    discoveryOnly: true,
-  });
-  process.exit(0);
-}
 assert.equal(
   process.env.PI_CU_DEDICATED_INPUT_DESKTOP,
   "1",
   "Opt in with PI_CU_DEDICATED_INPUT_DESKTOP=1 only on a dedicated interactive test desktop; physical runs are deferred.",
 );
 assert.equal(process.platform, "win32", "Run with Windows Node after building");
-if (selectedCase === "drag-drop") {
+if (selectedCase === "drag-drop" || selectedCase === "drop-discovery") {
   const { runDragDrop } = await import("./native-pointer-drop.mjs");
-  await runDragDrop({ engine, referencePath: option("reference") });
+  await runDragDrop({
+    engine,
+    referencePath: option("reference"),
+    discoveryOnly: selectedCase === "drop-discovery",
+  });
   process.exit(0);
 }
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-controls-"));

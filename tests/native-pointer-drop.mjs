@@ -6,6 +6,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateGeometry } from "./pointer-drop-geometry.mjs";
 import { assessDrop } from "./pointer-drop-report.mjs";
 
 export async function runDragDrop({
@@ -70,6 +71,46 @@ export async function runDragDrop({
       fixture.stdout.on("data", receive);
       fixture.stdin.write("observe\n");
     });
+  const geometry = () =>
+    new Promise((resolve, reject) => {
+      let buffer = "";
+      const timeout = setTimeout(
+        () => finish(new Error("geometry oracle timed out")),
+        5000,
+      );
+      const receive = (chunk) => {
+        buffer += chunk.toString();
+        const match = buffer.match(/geometry:([-\d:]+)\r?\n/);
+        if (!match) return;
+        const [
+          nativeWindowHandle,
+          processId,
+          visible,
+          sx,
+          sy,
+          sw,
+          sh,
+          dx,
+          dy,
+          dw,
+          dh,
+        ] = match[1].split(":").map(Number);
+        finish(null, {
+          nativeWindowHandle,
+          processId,
+          visible: visible === 1,
+          source: { x: sx, y: sy, width: sw, height: sh },
+          destination: { x: dx, y: dy, width: dw, height: dh },
+        });
+      };
+      function finish(error, value) {
+        clearTimeout(timeout);
+        fixture.stdout.off("data", receive);
+        error ? reject(error) : resolve(value);
+      }
+      fixture.stdout.on("data", receive);
+      fixture.stdin.write("geometry\n");
+    });
   try {
     if (engine === "pi") {
       const [{ default: computerUse }, { computerUseHost }] = await Promise.all(
@@ -106,54 +147,37 @@ export async function runDragDrop({
       "fresh fixture and released button required",
     );
     if (discoveryOnly) {
-      for (const viewMode of ["control", "raw"]) {
-        await call("accessibility_tree", {
-          viewMode,
-          detailLevel: "full",
-          activate: false,
-        });
-      }
-    }
-    const find = async (query) => {
-      const result = await call("find", {
-        query,
-        controlType: "Button",
-        ocrFallback: false,
+      await call("accessibility_tree", {
+        viewMode: "raw",
+        detailLevel: "full",
         activate: false,
       });
-      assert.equal(result.ok, true);
-      assert.equal(result.matches.length, 1);
-      const match = result.matches[0];
-      assert.equal(match.isOffscreen, false, `${query} must be visible`);
-      assert.ok(
-        match.boundingBox &&
-          Number.isFinite(match.boundingBox.centerX) &&
-          Number.isFinite(match.boundingBox.centerY) &&
-          match.boundingBox.width > 0 &&
-          match.boundingBox.height > 0,
-        `${query} must have usable observed bounds`,
-      );
-      return match;
-    };
-    const source = await find("Drop source");
-    const destination = await find("Drop target");
-    if (discoveryOnly) {
-      console.log(
-        JSON.stringify({
-          engine,
-          check: "passive-drop-discovery",
-          ok: true,
-          inputDispatched: false,
-        }),
-      );
-      return;
+      for (const query of ["Drop source", "Drop target"]) {
+        await call("find", { query, ocrFallback: false, activate: false });
+      }
     }
-    const point = (item) => ({
-      x: Math.round(item.boundingBox.centerX),
-      y: Math.round(item.boundingBox.centerY),
+    // The provider root is an independent observation; control geometry is
+    // read from the fixture immediately before dispatch, never inferred from UIA.
+    const root = await call("accessibility_tree", {
+      maxDepth: 0,
+      maxNodes: 1,
+      activate: false,
     });
-    const start = point(source),
-      end = point(destination);
+    const ownedGeometry = await geometry();
+    const { start, end } = validateGeometry(target, root, ownedGeometry);
+    console.log(
+      JSON.stringify({
+        engine,
+        check: "owned-drop-geometry",
+        target,
+        root,
+        geometry: ownedGeometry,
+        start,
+        end,
+        inputDispatched: false,
+      }),
+    );
+    if (discoveryOnly) return;
     const path = Array.from({ length: 21 }, (_, i) => ({
       x: Math.round(start.x + ((end.x - start.x) * i) / 20),
       y: Math.round(start.y + ((end.y - start.y) * i) / 20),
