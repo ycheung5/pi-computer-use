@@ -180,6 +180,8 @@ The reference sends **compact action-specific descriptions and compact parameter
 | launch_app | Shell lifetime, interpreter restrictions, verify resulting window | Pi gives explicit reuse guidance; missing declared string bounds remain D07; C03 |
 | tools | List/describe/enable/disable/reset and startup exposure | Compare full versus compact describe payload and preset behavior; C00/C10 |
 
+A later implementation adds concise action-specific model-visible descriptions for these tools while retaining browser routing and input safeguards. This inventory records the earlier baseline; the new guidance has not yet been tested or evaluated in real-agent tasks.
+
 The existing capability matrix and C00–C13/A01–A06 catalog map these entries to executable or missing checks. This inventory identifies what to investigate; it does not prescribe copying reference wording or prematurely modifying production guidance.
 
 ### Unicode mechanism investigation
