@@ -63,3 +63,21 @@ test("paired window-management planning and refusal need no backend or Windows a
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("extended window cases are listed without loading a backend or using Windows", () => {
+  const env = { ...process.env, PI_CU_WINDOW_MANAGEMENT_TEST: "" };
+  for (const engine of ["pi", "reference"]) {
+    const result = spawnSync(
+      process.execPath,
+      [source, "--plan", "--extended", `--engine=${engine}`],
+      { env, encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.executed, false);
+    assert.equal(report.foregroundChangesPossible, true);
+    assert.ok(report.cases.includes("same-process-distractor"));
+    assert.ok(report.cases.includes("replacement-identity"));
+    assert.ok(report.cases.includes("foreground-restoration"));
+  }
+});

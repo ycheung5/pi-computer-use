@@ -4,12 +4,15 @@ import assert from "node:assert/strict";
 const options = process.argv.slice(2);
 for (const arg of options)
   assert.ok(
-    arg === "--plan" || /^--(engine|reference)=.+/.test(arg),
+    arg === "--plan" ||
+      arg === "--extended" ||
+      /^--(engine|reference)=.+/.test(arg),
     `Unknown option: ${arg}`,
   );
 const option = (name) =>
   options.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
 const engine = option("engine") ?? "pi";
+const extended = options.includes("--extended");
 assert.ok(
   ["pi", "reference"].includes(engine),
   "engine must be pi or reference",
@@ -30,6 +33,13 @@ if (options.includes("--plan")) {
         "close-veto",
         "close",
         "stale-identity",
+        ...(extended
+          ? [
+              "same-process-distractor",
+              "foreground-restoration",
+              "replacement-identity",
+            ]
+          : []),
       ],
     }),
   );
@@ -68,6 +78,9 @@ const folder = await mkdtemp(join(tmpdir(), "pi-cu-paired-management-"));
 const executable = join(folder, "Fixture app.exe");
 const events = join(folder, "fixture-events.txt");
 const title = `Pi paired window ${randomUUID()}`;
+const distractorTitle = `${title} distractor`;
+let distractor;
+let replacement;
 const report = {
   engine,
   check: "paired-window-management",
@@ -167,7 +180,9 @@ const call = async (action, args) => {
     // list_windows includes arbitrary user titles. Store only the owned target.
     if (action === "list_windows") {
       const matches = (value.windows ?? []).filter(
-        (window) => window.name === title,
+        (window) =>
+          window.name === title ||
+          (extended && window.name === distractorTitle),
       );
       report.steps.at(-1).tools.push({
         action,
@@ -186,14 +201,14 @@ const call = async (action, args) => {
     throw error;
   }
 };
-const find = async () => {
+const find = async (requestedTitle = title) => {
   const listed = await call("list_windows", {
     includeInvisible: true,
     maxWindows: 200,
   });
   assert.equal(listed.ok, true, JSON.stringify(listed.error));
   const matches = (listed.windows ?? []).filter(
-    (window) => window.name === title,
+    (window) => window.name === requestedTitle,
   );
   assert.ok(
     matches.length <= 1,
@@ -261,7 +276,7 @@ try {
     launchDispatched = true;
     const result = await call("launch_app", {
       target: executable,
-      arguments: `"${title}" veto-once "${events}"`,
+      arguments: `"${title}" veto-once "${events}"${extended ? " extended" : ""}`,
       workingDirectory: folder,
       waitMs: 150,
     });
@@ -283,6 +298,29 @@ try {
     startTicks = sample.processStartTicks;
     return { identity, os: sample };
   });
+  if (extended)
+    await step("same-process-distractor", async () => {
+      const window = await until("same-process distractor", () =>
+        find(distractorTitle),
+      );
+      distractor = {
+        nativeWindowHandle: window.nativeWindowHandle,
+        processId: window.processId,
+      };
+      assert.equal(
+        distractor.processId,
+        identity.processId,
+        "fixture windows must share a process",
+      );
+      assert.notEqual(
+        distractor.nativeWindowHandle,
+        identity.nativeWindowHandle,
+      );
+      return {
+        target: requireOwner(probe(identity)),
+        distractor: requireOwner(probe(distractor)),
+      };
+    });
   await step("worker-survival", async () => {
     await client.dispose();
     client = undefined;
@@ -318,6 +356,9 @@ try {
   });
   await step("move", async () => {
     const before = requireOwner(probe(identity));
+    const distractorBefore = extended
+      ? requireOwner(probe(distractor))
+      : undefined;
     const expected = { x: before.bounds.x + 20, y: before.bounds.y + 20 };
     const result = await call("move_window", { ...identity, ...expected });
     assert.equal(result.ok, true, JSON.stringify(result));
@@ -329,7 +370,20 @@ try {
     });
     assert.equal(after.bounds.width, before.bounds.width);
     assert.equal(after.bounds.height, before.bounds.height);
-    return { before, after };
+    const distractorAfter = extended
+      ? requireOwner(probe(distractor))
+      : undefined;
+    if (extended)
+      assert.deepEqual(
+        distractorAfter.bounds,
+        distractorBefore.bounds,
+        "targeted move must not move same-process distractor",
+      );
+    return {
+      before,
+      after,
+      ...(extended ? { distractorBefore, distractorAfter } : {}),
+    };
   });
   await step("activate", async () => {
     const before = requireOwner(probe(identity));
@@ -363,6 +417,67 @@ try {
       independentForeground: isForeground,
     };
   });
+  if (extended)
+    await step("foreground-restoration", async () => {
+      const activated = await call("activate_window", distractor);
+      assert.equal(activated.ok, true, JSON.stringify(activated));
+      if (!activated.activated) {
+        assert.ok(activated.warning, "activation refusal must explain why");
+        return { outcome: "refused", warning: activated.warning };
+      }
+      const before = requireOwner(probe(distractor));
+      assert.equal(
+        before.foregroundHandle,
+        distractor.nativeWindowHandle,
+        "prior foreground must be independently confirmed",
+      );
+      assert.equal(before.foregroundPid, distractor.processId);
+      const found = await call("find", {
+        ...identity,
+        query: "Pi foreground focus probe",
+        controlType: "Edit",
+        ocrFallback: false,
+        activate: false,
+      });
+      assert.equal(found.ok, true, JSON.stringify(found));
+      const matches = found.matches ?? found.results;
+      assert.equal(matches?.length, 1, "require exactly one owned focus probe");
+      const countFocus = (text) =>
+        (text.match(/^target-focused$/gm) ?? []).length;
+      const eventsBefore = countFocus(
+        await readFile(events, "utf8").catch(() => ""),
+      );
+      const focused = await call("focus", {
+        ...identity,
+        elementId: matches[0].id,
+        activate: false,
+      });
+      assert.equal(focused.ok, true, JSON.stringify(focused));
+      await until(
+        "new fixture focus event",
+        async () =>
+          countFocus(await readFile(events, "utf8").catch(() => "")) >
+          eventsBefore,
+      );
+      const after = requireOwner(probe(distractor));
+      try {
+        assert.equal(
+          after.foregroundHandle,
+          before.foregroundHandle,
+          "foreground must return to independently observed distractor",
+        );
+        assert.equal(after.foregroundPid, before.foregroundPid);
+      } catch (error) {
+        error.observation = { before, after, focus: focused };
+        throw error;
+      }
+      return {
+        before,
+        after,
+        fixtureEvent: "target-focused",
+        outcome: "observed",
+      };
+    });
   await step("close-veto", async () => {
     const before = requireOwner(probe(identity));
     const result = await call("close_window", identity);
@@ -378,21 +493,78 @@ try {
     const result = await call("close_window", identity);
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(result.posted, true);
-    const after = await until("fixture process exit", async () => {
+    const after = await until("fixture window close", async () => {
       const sample = probe(identity);
-      return !sample.exists && !sample.processAlive ? sample : undefined;
+      return !sample.exists &&
+        (extended ? sample.processAlive : !sample.processAlive)
+        ? sample
+        : undefined;
     });
     assert.match(await readFile(events, "utf8"), /(?:^|\n)close\n/);
-    return { after, fixtureEvent: "close" };
+    if (extended) {
+      const window = await until("replacement window", find);
+      replacement = {
+        nativeWindowHandle: window.nativeWindowHandle,
+        processId: window.processId,
+      };
+      assert.equal(replacement.processId, identity.processId);
+      assert.notEqual(
+        replacement.nativeWindowHandle,
+        identity.nativeWindowHandle,
+        "reused HWND cannot establish stale identity",
+      );
+      requireOwner(probe(replacement));
+    }
+    return {
+      after,
+      fixtureEvent: "close",
+      ...(extended ? { replacement } : {}),
+    };
   });
   await step("stale-identity", async () => {
+    const replacementBefore = extended
+      ? requireOwner(probe(replacement))
+      : undefined;
     const result = await call("activate_window", identity);
     assert.equal(result.ok, false, "closed fixture identity must be rejected");
     const after = probe(identity);
     assert.equal(after.exists, false);
-    assert.equal(after.processAlive, false);
-    return { after };
+    assert.equal(after.processAlive, extended);
+    const replacementAfter = extended
+      ? requireOwner(probe(replacement))
+      : undefined;
+    if (extended) {
+      assert.equal(
+        replacementAfter.foregroundHandle,
+        replacementBefore.foregroundHandle,
+        "stale request must not change foreground",
+      );
+      assert.deepEqual(
+        replacementAfter.bounds,
+        replacementBefore.bounds,
+        "stale request must not change replacement",
+      );
+    }
+    return {
+      after,
+      ...(extended ? { replacementBefore, replacementAfter } : {}),
+    };
   });
+  if (extended)
+    await step("replacement-identity", async () => {
+      const before = requireOwner(probe(replacement));
+      const close = await call("close_window", replacement);
+      assert.equal(close.ok, true, JSON.stringify(close));
+      const exited = await until("replacement process exit", async () => {
+        const sample = probe(replacement);
+        return !sample.exists && !sample.processAlive ? sample : undefined;
+      });
+      assert.match(
+        await readFile(events, "utf8"),
+        /(?:^|\n)replacement-close\n/,
+      );
+      return { before, exited };
+    });
 } catch (error) {
   primaryFailure = String(error);
 } finally {
