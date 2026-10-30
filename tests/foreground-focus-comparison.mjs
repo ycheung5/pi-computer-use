@@ -18,6 +18,7 @@ for (const arg of args)
       arg === "--direct-uia" ||
       arg === "--dialog" ||
       arg === "--menu" ||
+      arg === "--native-menu" ||
       arg === "--direct-mta" ||
       /^--(engine|reference|report|direct-report)=.+/.test(arg),
     `Unknown option: ${arg}`,
@@ -199,6 +200,19 @@ function classifyMenu(e) {
         reason: "Unmarked or other injected event observed",
       };
   }
+  if (
+    e.nativeMenu &&
+    (e.menuUia?.ok !== true ||
+      !Array.isArray(e.menuUia.matches) ||
+      e.menuUia.matches.length !== 1 ||
+      e.menuUia.matches[0].processId !== target.processId ||
+      e.menuUia.matches[0].name !== "Owned menu item" ||
+      e.menuUia.matches[0].controlType !== "MenuItem")
+  )
+    return {
+      status: "inconclusive",
+      reason: "Native menu item UIA identity unavailable",
+    };
   if (action?.ok !== true || menu.visible !== true)
     return { status: "fail", reason: "Owned menu not observed after dispatch" };
   if (
@@ -382,7 +396,9 @@ assert.ok(["pi", "reference"].includes(engine));
 const directUia = args.includes("--direct-uia");
 const directMta = args.includes("--direct-mta");
 const dialogMode = args.includes("--dialog");
-const menuMode = args.includes("--menu");
+const nativeMenu = args.includes("--native-menu");
+const menuMode = args.includes("--menu") || nativeMenu;
+assert.ok(!(nativeMenu && args.includes("--menu")), "Choose one menu fixture");
 assert.ok(!(menuMode && dialogMode), "Choose either dialog or menu");
 assert.ok(
   !menuMode || (args.includes("--provenance") && !directUia),
@@ -419,7 +435,9 @@ if (args.includes("--plan")) {
         dialogMode
           ? "owned-dialog-foreground"
           : menuMode
-            ? "owned-menu-foreground"
+            ? nativeMenu
+              ? "native-menu-foreground"
+              : "owned-menu-foreground"
             : "cross-process-prior-foreground",
       ],
     }),
@@ -475,7 +493,11 @@ let client,
 async function fixture(label) {
   const child = spawn(
     join(folder, "controls.exe"),
-    [label, ...(popupMode ? ["--no-expiry"] : [])],
+    [
+      label,
+      ...(popupMode ? ["--no-expiry"] : []),
+      ...(nativeMenu ? ["--native-menu"] : []),
+    ],
     {
       cwd: folder,
       windowsHide: false,
@@ -617,6 +639,7 @@ try {
   }
 
   if (popupMode) result.comparison = menuMode ? "owned-menu" : "owned-dialog";
+  if (nativeMenu) result.nativeMenu = true;
   const prior = await fixture("Pi CU prior foreground");
   const target = await fixture("Pi CU focus target");
   async function readMenuState() {
@@ -860,6 +883,14 @@ try {
     };
   }
   if (menuMode) result.menu = await readMenuState();
+  if (nativeMenu)
+    result.menuUia = await client.execute("find", {
+      ...target.identity,
+      query: "Owned menu item",
+      controlType: "MenuItem",
+      ocrFallback: false,
+      activate: false,
+    });
   if (observer) result.inputEventsAfter = await observer.snapshot();
   const samples = [];
   result.samples = samples;

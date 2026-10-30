@@ -565,6 +565,32 @@ test("owned-menu outcome requires OS menu-mode and owned visible menu evidence",
     };
     for (const [evidence, status] of [
       [base, "pass"],
+      [{ ...base, nativeMenu: true }, "inconclusive"],
+      [
+        {
+          ...base,
+          nativeMenu: true,
+          menuUia: { ok: true, matches: [{ processId: 999 }] },
+        },
+        "inconclusive",
+      ],
+      [
+        {
+          ...base,
+          nativeMenu: true,
+          menuUia: {
+            ok: true,
+            matches: [
+              {
+                processId: 40,
+                name: "Owned menu item",
+                controlType: "MenuItem",
+              },
+            ],
+          },
+        },
+        "pass",
+      ],
       [{ ...base, menu: { ...base.menu, menuMode: false } }, "inconclusive"],
       [{ ...base, menu: { ...base.menu, handle: undefined } }, "inconclusive"],
       [{ ...base, menu: { ...base.menu, source: 99 } }, "inconclusive"],
@@ -609,4 +635,19 @@ test("owned-menu outcome requires OS menu-mode and owned visible menu evidence",
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("native menu plan identifies the Win32 fixture explicitly", () => {
+  const script = fileURLToPath(
+    new URL("./foreground-focus-comparison.mjs", import.meta.url),
+  );
+  const result = spawnSync(
+    process.execPath,
+    [script, "--plan", "--native-menu", "--provenance"],
+    { encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const value = JSON.parse(result.stdout);
+  assert.deepEqual(value.cases, ["native-menu-foreground"]);
+  assert.equal(value.physicalInput, false);
 });
