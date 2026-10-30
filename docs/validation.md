@@ -247,7 +247,21 @@ For WSL2 use a Linux reference path and prefix with `flock -w 180 /tmp/pi-cu-liv
 
 The benchmark creates its own non-activating native Edit fixture. It compares reference Node/MCP/PowerShell calls with this package's Windows worker using the **same Windows Node executable** and alternating engine order. It measures process-cold health, process-cold native-ready find, warm find, background value dispatch, and a find → set_value → read-and-verify workflow. `fallbackType: false` prevents physical typing fallback; the fixture never requires clipboard input. Full browser/physical/model-driven workflows are outside this benchmark.
 
-Both engines receive an untimed warmup before measured new-process samples. Runtime downloads, helper file compilation caches and OS caches are therefore warm; process-cold means a new controller process, not installation-cold or clean OS. Health payloads differ, so health timing alone is not an equivalent-feature comparison. Native-ready and verified-workflow timings compare useful equivalent effects. Pi model/agent overhead is excluded. JSON includes versions, OS/CPU, artifact hashes, individual samples, aggregates and methodology. Use at least three repetitions; no statistical significance is claimed from three samples. Set `PI_CU_RELEASE_OUTPUT` for `benchmark.json`.
+Both engines receive an untimed warmup before measured new-process samples. Runtime downloads, helper file compilation caches and OS caches are therefore warm; process-cold means a new controller process, not installation-cold or clean OS. Health payloads differ, so health timing alone is not an equivalent-feature comparison. Native-ready and verified-workflow timings compare useful equivalent effects. Pi model/agent overhead is excluded. JSON includes versions, OS/CPU, artifact hashes, individual samples, aggregates and methodology. Each measured case records status/cause separately, expected/actual text, independent reset evidence, timing and scoped cleanup. Failed attempts remain in `cases`; timing summaries include passing samples only. Use at least three repetitions; no statistical significance is claimed from three samples. Set `PI_CU_RELEASE_OUTPUT` for `benchmark.json`.
+
+### Comparison report and failure collection
+
+The fixture resets its own editor to the literal `initial` before and after each engine. Its UI thread independently returns the actual text over the owned fixture pipe, in addition to the engine's `element_info` readback. This prevents a tool response alone from proving the intended edit. Ordinary assertion failures are retained while later cases continue only after controller disposal and editor reset are confirmed. Cancellation/stopping or unconfirmed cleanup blocks remaining dependent cases. Final cleanup closes only the owned fixture and removes its temporary directory; this is not a claim that all product cleanup paths pass.
+
+The CLI exits nonzero when a case, warmup or cleanup fails, but still emits its structured report, including through the WSL relay. Invalid invocation arguments remain immediate CLI errors. Run the passive reporting regression from WSL2 after building:
+
+```sh
+flock -w 120 /tmp/pi-cu-live-tests.lock npm run test:benchmark:report -- /path/to/dsh-computer-use-win
+```
+
+This regression runs the same public benchmark CLI with `--verify-failure-collection`. It deliberately changes the first verification expectation, labels that case `injected: true` and `cause: test-defect`, and asserts the benchmark exits 1 with the failed case retained, five later passing cases, reset text before every case, alternating engine order and confirmed fixture cleanup. The regression itself exits 0 only when that reporting behavior is correct. Do not count the injected mismatch as a DSH/Pi product defect or include it in ordinary comparison evidence. No physical input, clipboard mutation, daily profile access or production behavior is added by either command.
+
+On 2026-10-30 this regression failed against the old collector (`ok: true` concealed the requested diagnostic expectation) and passed after the reporting/reset extension. A normal three-repetition run against reference 0.5.3 and Pi 0.1.0 passed all six measured cases and both warmups on Windows Node 22.23.4 via WSL2. The independently observed values and resets matched, and controller/editor plus final fixture cleanup were confirmed. These are background native Edit results only; physical, browser and real-agent workflows remain separate tickets.
 
 ## Dedicated physical-input runners
 

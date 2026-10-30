@@ -29,10 +29,16 @@ if (process.platform === "linux") {
     maxBuffer: 8 * 1024 * 1024,
   });
   child.child.stdin.end();
-  const result = await child;
-  process.stdout.write(result.stdout);
-  process.stderr.write(result.stderr);
-  process.exit(0);
+  try {
+    const result = await child;
+    process.stdout.write(result.stdout);
+    process.stderr.write(result.stderr);
+  } catch (error) {
+    process.stdout.write(error.stdout ?? "");
+    process.stderr.write(error.stderr ?? String(error));
+    process.exitCode = Number.isInteger(error.code) ? error.code : 1;
+  }
+  process.exit(process.exitCode ?? 0);
 }
 
 assert.equal(process.platform, "win32", "Run the benchmark with Windows Node");
@@ -54,27 +60,110 @@ const compiler = join(
   "v4.0.30319",
   "csc.exe",
 );
-const built = spawnSync(
-  compiler,
-  [
-    "/nologo",
-    "/target:exe",
-    `/out:${executable}`,
-    "/r:System.Windows.Forms.dll",
-    fileURLToPath(new URL("./benchmark-fixture.cs", import.meta.url)),
-  ],
-  { encoding: "utf8", cwd: folder, windowsHide: true },
-);
-assert.equal(built.status, 0, built.stdout + built.stderr);
-const fixture = spawn(executable, [`Pi benchmark ${randomUUID()}`], {
-  stdio: ["pipe", "pipe", "pipe"],
-  cwd: folder,
-  windowsHide: true,
-});
-const [ready] = await once(fixture.stdout, "data");
-const target = {
-  nativeWindowHandle: Number(ready.toString().trim()),
-  processId: fixture.pid,
+let fixture, target;
+let fixtureOutput = "",
+  fixtureId = 0;
+const fixturePending = new Map();
+const fixtureRequest = (action) =>
+  new Promise((resolveRequest, reject) => {
+    const id = ++fixtureId;
+    const timer = setTimeout(() => {
+      fixturePending.delete(id);
+      reject(new Error(`Fixture ${action} timed out`));
+    }, 5000);
+    fixturePending.set(id, { resolve: resolveRequest, reject, timer });
+    fixture.stdin.write(`${id} ${action}\n`);
+  });
+const closeProcess = async (child, command) => {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  const ended = once(child, "close");
+  child.stdin.end(command);
+  const force = setTimeout(() => child.kill(), 3000);
+  let deadline;
+  try {
+    await Promise.race([
+      ended,
+      new Promise((_, reject) => {
+        deadline = setTimeout(
+          () => reject(new Error("Process cleanup unconfirmed")),
+          6000,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(force);
+    clearTimeout(deadline);
+  }
+};
+const startFixture = async () => {
+  const built = spawnSync(
+    compiler,
+    [
+      "/nologo",
+      "/target:exe",
+      `/out:${executable}`,
+      "/r:System.Windows.Forms.dll",
+      fileURLToPath(new URL("./benchmark-fixture.cs", import.meta.url)),
+    ],
+    { encoding: "utf8", cwd: folder, windowsHide: true },
+  );
+  assert.equal(built.status, 0, built.stdout + built.stderr);
+  fixture = spawn(executable, [`Pi benchmark ${randomUUID()}`], {
+    stdio: ["pipe", "pipe", "pipe"],
+    cwd: folder,
+    windowsHide: true,
+  });
+  await new Promise((resolveReady, reject) => {
+    const timeout = setTimeout(
+      () => reject(new Error("Fixture startup timed out")),
+      10000,
+    );
+    const fail = (error) => {
+      clearTimeout(timeout);
+      reject(error);
+      for (const waiter of fixturePending.values()) {
+        clearTimeout(waiter.timer);
+        waiter.reject(error);
+      }
+      fixturePending.clear();
+    };
+    fixture.on("error", fail);
+    fixture.on("close", () => fail(new Error("Fixture closed")));
+    fixture.stdout.setEncoding("utf8");
+    fixture.stdout.on("data", (chunk) => {
+      fixtureOutput += chunk;
+      for (;;) {
+        const end = fixtureOutput.indexOf("\n");
+        if (end < 0) break;
+        const line = fixtureOutput.slice(0, end).trim();
+        fixtureOutput = fixtureOutput.slice(end + 1);
+        if (!line) continue;
+        if (!target) {
+          const handle = Number(line);
+          if (!Number.isSafeInteger(handle) || handle <= 0) {
+            fail(new Error("Invalid fixture identity"));
+            return;
+          }
+          target = { nativeWindowHandle: handle, processId: fixture.pid };
+          clearTimeout(timeout);
+          resolveReady();
+          continue;
+        }
+        try {
+          const message = JSON.parse(line),
+            waiter = fixturePending.get(message.id);
+          if (!waiter) continue;
+          fixturePending.delete(message.id);
+          clearTimeout(waiter.timer);
+          waiter.resolve(
+            Buffer.from(message.valueBase64, "base64").toString("utf8"),
+          );
+        } catch (error) {
+          fail(error);
+        }
+      }
+    });
+  });
 };
 
 class ReferenceClient {
@@ -171,19 +260,23 @@ class ReferenceClient {
     return result;
   }
   async close() {
-    if (this.child.exitCode !== null) return;
-    const ended = once(this.child, "close");
-    this.child.stdin.end();
-    const timer = setTimeout(() => this.child.kill(), 3000);
-    await ended;
-    clearTimeout(timer);
+    await closeProcess(this.child);
   }
 }
 const engines = {
   reference: async () => {
     const client = new ReferenceClient();
-    await client.init();
-    return client;
+    try {
+      await client.init();
+      return client;
+    } catch (error) {
+      try {
+        await client.close();
+      } catch {
+        error.cleanupUnconfirmed = true;
+      }
+      throw error;
+    }
   },
   pi: async () => {
     const worker = new WorkerClient({
@@ -247,120 +340,238 @@ const verify = async (client, elementId, value) => {
   });
   assert.equal(result.element.value, value);
 };
-try {
-  // Warm file/assembly caches equally; measured cold samples always create new controller processes.
-  for (const create of Object.values(engines)) {
-    const client = await create();
-    try {
-      await client.call("health", {});
-      const id = await find(client);
-      await set(client, id, "warmup");
-      await verify(client, id, "warmup");
-    } finally {
-      await client.close();
+const cases = [];
+const warmup = [];
+const cleanup = { fixtureConfirmed: false, folderRemoved: false };
+const injectMismatch = process.argv.includes("--verify-failure-collection");
+let haltReason;
+const stopped = (error) =>
+  /(?:CANCELLED|CANCELED|STOPPED|stop requested|CLEANUP[_ ]UNCONFIRMED)/i.test(
+    String(error),
+  ) || error.cleanupUnconfirmed;
+const sample = async (name, index, isWarmup = false) => {
+  const row = {
+    id: isWarmup ? `warmup-${name}` : `edit-${index}-${name}`,
+    engine: name,
+    repetition: index,
+    status: "not-run",
+    cause: null,
+    expected: isWarmup ? "warmup" : `workflow-${index}`,
+    actual: null,
+    initial: null,
+    cleanup: { confirmed: false },
+    timings: {},
+  };
+  let client,
+    controllerCleanupUnconfirmed = false;
+  try {
+    row.initial = await fixtureRequest("reset");
+    assert.equal(
+      row.initial,
+      "initial",
+      "Fixture must start from known reset text",
+    );
+    const start = performance.now();
+    client = await engines[name]();
+    await client.call("health", {});
+    row.timings.processColdHealthMs =
+      Math.round((performance.now() - start) * 100) / 100;
+    const id = await find(client);
+    row.timings.processColdNativeReadyMs =
+      Math.round((performance.now() - start) * 100) / 100;
+    if (!isWarmup) {
+      const warmRead = await timed(() => find(client));
+      const dispatch = await timed(() => set(client, id, `dispatch-${index}`));
+      await verify(client, id, `dispatch-${index}`);
+      assert.equal(
+        await fixtureRequest("read"),
+        `dispatch-${index}`,
+        "Fixture must independently observe dispatch",
+      );
+      row.timings.warmReadMs = warmRead.ms;
+      row.timings.backgroundDispatchMs = dispatch.ms;
     }
+    const value = row.expected;
+    const workflow = await timed(async () => {
+      const fresh = await find(client);
+      await set(client, fresh, value);
+      await verify(client, fresh, value);
+    });
+    row.timings.observedWorkflowMs = workflow.ms;
+    row.actual = await fixtureRequest("read");
+    if (injectMismatch && !isWarmup && cases.length === 0) {
+      row.expected = "deliberate verification mismatch";
+      row.cause = "test-defect";
+      row.injected = true;
+    }
+    assert.equal(
+      row.actual,
+      row.expected,
+      "Owned fixture must independently observe workflow text",
+    );
+    row.status = "pass";
+  } catch (error) {
+    row.status = row.initial === null ? "blocked" : "fail";
+    row.cause ??= row.initial === null ? "environment" : "unknown";
+    row.error = String(error);
+    controllerCleanupUnconfirmed = error.cleanupUnconfirmed === true;
+    if (row.initial !== null && row.actual === null) {
+      try {
+        row.actual = await fixtureRequest("read");
+      } catch (observationError) {
+        row.observationError = String(observationError);
+      }
+    }
+    if (stopped(error))
+      haltReason =
+        "Operation stopped or cleanup unconfirmed; dependent cases blocked";
+  } finally {
+    if (controllerCleanupUnconfirmed) {
+      row.cleanup.error = "Controller cleanup unconfirmed after failed startup";
+      row.status = "fail";
+    } else
+      try {
+        if (client) await client.close();
+        assert.equal(
+          await fixtureRequest("reset"),
+          "initial",
+          "Fixture reset must be independently confirmed",
+        );
+        row.cleanup.confirmed = true;
+        row.cleanup.scope = "controller disposal and owned editor reset";
+      } catch (error) {
+        row.cleanup.error = String(error);
+        row.status = "fail";
+        row.cause ??= "unknown";
+        haltReason =
+          "Controller cleanup or fixture reset unconfirmed; dependent cases blocked";
+      }
+  }
+  return row;
+};
+try {
+  await startFixture();
+  for (const name of Object.keys(engines)) {
+    if (haltReason) break;
+    warmup.push(await sample(name, -1, true));
   }
   for (let index = 0; index < repetitions; index++) {
     for (const name of index % 2 ? ["pi", "reference"] : ["reference", "pi"]) {
-      const start = performance.now(),
-        client = await engines[name]();
-      try {
-        await client.call("health", {});
-        const processColdHealthMs =
-          Math.round((performance.now() - start) * 100) / 100;
-        const id = await find(client);
-        const processColdNativeReadyMs =
-          Math.round((performance.now() - start) * 100) / 100;
-        const warmRead = await timed(() => find(client));
-        const dispatch = await timed(() =>
-          set(client, id, `dispatch-${index}`),
-        );
-        await verify(client, id, `dispatch-${index}`);
-        const workflow = await timed(async () => {
-          const fresh = await find(client);
-          const value = `workflow-${index}`;
-          await set(client, fresh, value);
-          await verify(client, fresh, value);
+      if (haltReason) {
+        cases.push({
+          id: `edit-${index}-${name}`,
+          engine: name,
+          repetition: index,
+          status: "blocked",
+          cause: "unknown",
+          reason: haltReason,
         });
-        measurements[name].push({
-          processColdHealthMs,
-          processColdNativeReadyMs,
-          warmReadMs: warmRead.ms,
-          backgroundDispatchMs: dispatch.ms,
-          observedWorkflowMs: workflow.ms,
-        });
-      } finally {
-        await client.close();
+        continue;
       }
+      const row = await sample(name, index);
+      cases.push(row);
+      if (row.status === "pass") measurements[name].push(row.timings);
     }
   }
-  const describe = (samples) =>
-    Object.fromEntries(
-      Object.keys(samples[0]).map((key) => {
-        const sorted = samples.map((row) => row[key]).sort((a, b) => a - b);
-        return [
-          key,
-          {
-            meanMs:
-              Math.round(
-                (sorted.reduce((a, b) => a + b, 0) / sorted.length) * 100,
-              ) / 100,
-            medianMs: sorted[Math.floor(sorted.length / 2)],
-            minMs: sorted[0],
-            maxMs: sorted.at(-1),
-          },
-        ];
-      }),
-    );
-  const artifact = async (path) =>
-    createHash("sha256")
-      .update(await readFile(path))
-      .digest("hex");
-  const report = {
-    ok: true,
-    node: process.version,
-    windows: release(),
-    cpu: cpus()[0]?.model,
-    repetitions,
-    packages: {
-      pi: JSON.parse(await readFile(join(root, "package.json"), "utf8"))
-        .version,
-      reference: JSON.parse(
-        await readFile(join(reference, "package.json"), "utf8"),
-      ).version,
-    },
-    artifactSha256: {
-      piWorker: await artifact(join(root, "dist", "worker.js")),
-      referenceServer: await artifact(join(reference, "mcp", "server.mjs")),
-    },
-    methodology:
-      "Same Windows Node, disposable native edit, alternating engines. Process-cold samples use warm runtime/compiler/assembly caches; no install/download timing. Reference MCP handshake+PowerShell path versus Pi worker request path; Pi agent/model overhead excluded. Health payloads differ; native-ready/find and verified edit workflow provide comparable effects. Only background set_value with fallbackType:false; no physical input or clipboard mutation.",
-    samples: measurements,
-    summary: {
-      reference: describe(measurements.reference),
-      pi: describe(measurements.pi),
-    },
-  };
-  if (process.env.PI_CU_RELEASE_OUTPUT) {
-    await mkdir(process.env.PI_CU_RELEASE_OUTPUT, { recursive: true });
-    await writeFile(
-      join(process.env.PI_CU_RELEASE_OUTPUT, "benchmark.json"),
-      `${JSON.stringify(report, null, 2)}\n`,
-    );
+} catch (error) {
+  haltReason = String(error);
+  for (let index = 0; index < repetitions; index++) {
+    for (const name of index % 2 ? ["pi", "reference"] : ["reference", "pi"]) {
+      cases.push({
+        id: `edit-${index}-${name}`,
+        engine: name,
+        repetition: index,
+        status: "blocked",
+        cause: "environment",
+        reason: haltReason,
+      });
+    }
   }
-  console.log(JSON.stringify(report));
 } finally {
-  if (fixture.exitCode === null) {
-    const ended = once(fixture, "close");
-    fixture.stdin.end("stop\n");
-    const timer = setTimeout(() => fixture.kill(), 1000);
-    await ended;
-    clearTimeout(timer);
+  try {
+    await closeProcess(fixture, "stop\n");
+    cleanup.fixtureConfirmed = true;
+    await rm(folder, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
+    cleanup.folderRemoved = true;
+  } catch (error) {
+    cleanup.error = String(error);
   }
-  await rm(folder, {
-    recursive: true,
-    force: true,
-    maxRetries: 5,
-    retryDelay: 100,
-  });
 }
+const describe = (samples) =>
+  samples.length === 0
+    ? {}
+    : Object.fromEntries(
+        Object.keys(samples[0]).map((key) => {
+          const sorted = samples.map((row) => row[key]).sort((a, b) => a - b);
+          return [
+            key,
+            {
+              meanMs:
+                Math.round(
+                  (sorted.reduce((a, b) => a + b, 0) / sorted.length) * 100,
+                ) / 100,
+              medianMs: sorted[Math.floor(sorted.length / 2)],
+              minMs: sorted[0],
+              maxMs: sorted.at(-1),
+            },
+          ];
+        }),
+      );
+const artifact = async (path) =>
+  createHash("sha256")
+    .update(await readFile(path))
+    .digest("hex");
+const report = {
+  ok:
+    cases.every((row) => row.status === "pass") &&
+    warmup.every((row) => row.status === "pass") &&
+    cleanup.fixtureConfirmed &&
+    cleanup.folderRemoved,
+  node: process.version,
+  windows: release(),
+  cpu: cpus()[0]?.model,
+  repetitions,
+  packages: {
+    pi: JSON.parse(await readFile(join(root, "package.json"), "utf8")).version,
+    reference: JSON.parse(
+      await readFile(join(reference, "package.json"), "utf8"),
+    ).version,
+  },
+  artifactSha256: {
+    piWorker: await artifact(join(root, "dist", "worker.js")),
+    referenceServer: await artifact(join(reference, "mcp", "server.mjs")),
+    referenceBackend: await artifact(
+      join(reference, "scripts", "windows-uia.ps1"),
+    ),
+    piNative: await artifact(join(root, "assets", "windows.cs")),
+    piControls: await artifact(join(root, "assets", "controls.cs")),
+    fixture: await artifact(
+      fileURLToPath(new URL("./benchmark-fixture.cs", import.meta.url)),
+    ),
+  },
+  methodology:
+    "Same Windows Node and owned non-activating native Edit. Reset independently before/after each engine; fixture observes actual text independently of tool readback. Alternating engines. Process-cold uses warm caches, excludes installation and model overhead. Health payloads differ. Only background set_value with fallbackType:false; no physical input/clipboard. Failed cases retained; timing summaries contain passing samples only. Cleanup means controller disposal, owned editor reset and fixture removal, not whole-product cleanup acceptance.",
+  diagnosticInjection: injectMismatch,
+  warmup,
+  cases,
+  cleanup,
+  samples: measurements,
+  summary: {
+    reference: describe(measurements.reference),
+    pi: describe(measurements.pi),
+  },
+};
+if (process.env.PI_CU_RELEASE_OUTPUT) {
+  await mkdir(process.env.PI_CU_RELEASE_OUTPUT, { recursive: true });
+  await writeFile(
+    join(process.env.PI_CU_RELEASE_OUTPUT, "benchmark.json"),
+    `${JSON.stringify(report, null, 2)}\n`,
+  );
+}
+console.log(JSON.stringify(report));
+if (!report.ok) process.exitCode = 1;

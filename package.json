@@ -63,6 +63,7 @@
     "test:package": "node tests/package-host.mjs",
     "test:pi": "node tests/pi-host.mjs",
     "benchmark:reference": "node tests/benchmark-reference.mjs",
+    "test:benchmark:report": "node tests/benchmark-report.mjs",
     "test:parity": "node tests/parity-host.mjs",
     "test:browser:foreground": "node tests/browser-foreground-host.mjs"
   },
