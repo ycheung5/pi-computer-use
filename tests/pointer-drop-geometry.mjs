@@ -13,6 +13,12 @@ export function validateGeometry(target, root, geometry) {
   assert.equal(geometry.nativeWindowHandle, target.nativeWindowHandle);
   assert.equal(geometry.processId, target.processId);
   assert.equal(geometry.visible, true);
+  assert.equal(
+    geometry.osVisible,
+    true,
+    "fixture window is hidden at OS level",
+  );
+  assert.notEqual(root.tree?.isOffscreen, true, "observed window is offscreen");
   const window = root.tree?.boundingBox;
   const rectangle = (rect) => {
     assert.ok(

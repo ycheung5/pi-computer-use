@@ -40,7 +40,6 @@ export async function runDragDrop({
   const fixture = spawn(executable, [`Pi CU Drop ${Date.now()}`], {
     stdio: ["pipe", "pipe", "pipe"],
     cwd: folder,
-    windowsHide: true,
   });
   const [ready] = await once(fixture.stdout, "data");
   const target = {
@@ -86,6 +85,7 @@ export async function runDragDrop({
           nativeWindowHandle,
           processId,
           visible,
+          osVisible,
           sx,
           sy,
           sw,
@@ -99,6 +99,7 @@ export async function runDragDrop({
           nativeWindowHandle,
           processId,
           visible: visible === 1,
+          osVisible: osVisible === 1,
           source: { x: sx, y: sy, width: sw, height: sh },
           destination: { x: dx, y: dy, width: dw, height: dh },
         });

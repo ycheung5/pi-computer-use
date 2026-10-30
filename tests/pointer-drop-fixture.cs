@@ -4,6 +4,7 @@ using System.Threading;
 using System.Windows.Forms;
 class PointerDropFixture {
   [System.Runtime.InteropServices.DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
+  [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
   static int drops;
   [STAThread] static void Main(string[] args) {
     Console.OutputEncoding=new System.Text.UTF8Encoding(false);
@@ -15,7 +16,7 @@ class PointerDropFixture {
     destination.DragDrop+=delegate(object sender,DragEventArgs e) {if((string)e.Data.GetData(DataFormats.Text)=="pi-drop-fixture") Interlocked.Increment(ref drops);};
     form.Controls.Add(source);form.Controls.Add(destination);
     form.Shown+=delegate {Console.WriteLine(form.Handle.ToInt64());Console.Out.Flush();};
-    ThreadPool.QueueUserWorkItem(delegate {string command;while((command=Console.ReadLine())!=null) {if(command=="geometry") form.BeginInvoke((Action)delegate {Point s=source.PointToScreen(Point.Empty),d=destination.PointToScreen(Point.Empty);Console.WriteLine("geometry:"+form.Handle.ToInt64()+":"+System.Diagnostics.Process.GetCurrentProcess().Id+":"+(form.Visible&&source.Visible&&destination.Visible?1:0)+":"+s.X+":"+s.Y+":"+source.Width+":"+source.Height+":"+d.X+":"+d.Y+":"+destination.Width+":"+destination.Height);Console.Out.Flush();});else if(command=="observe") {Console.WriteLine("state:"+Interlocked.CompareExchange(ref drops,0,0)+":"+((GetAsyncKeyState(1)&0x8000)!=0?1:0));Console.Out.Flush();} else if(command=="stop") {form.BeginInvoke((Action)delegate{form.Close();});break;}}});
+    ThreadPool.QueueUserWorkItem(delegate {string command;while((command=Console.ReadLine())!=null) {if(command=="geometry") form.BeginInvoke((Action)delegate {Point s=source.PointToScreen(Point.Empty),d=destination.PointToScreen(Point.Empty);Console.WriteLine("geometry:"+form.Handle.ToInt64()+":"+System.Diagnostics.Process.GetCurrentProcess().Id+":"+(form.Visible&&source.Visible&&destination.Visible?1:0)+":"+(IsWindowVisible(form.Handle)&&IsWindowVisible(source.Handle)&&IsWindowVisible(destination.Handle)?1:0)+":"+s.X+":"+s.Y+":"+source.Width+":"+source.Height+":"+d.X+":"+d.Y+":"+destination.Width+":"+destination.Height);Console.Out.Flush();});else if(command=="observe") {Console.WriteLine("state:"+Interlocked.CompareExchange(ref drops,0,0)+":"+((GetAsyncKeyState(1)&0x8000)!=0?1:0));Console.Out.Flush();} else if(command=="stop") {form.BeginInvoke((Action)delegate{form.Close();});break;}}});
     Application.Run(form);
   }
 }
