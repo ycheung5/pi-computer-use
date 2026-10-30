@@ -22,24 +22,39 @@ import { windowTools } from "./window-management.js";
 
 // Action-specific guidance mirrors public routing without promising verification.
 const actionDescriptions: Record<string, string> = {
-  snapshot: "Capture a UIA tree and optional screenshot; browserTab observes a page outline and viewport. Partial trees do not establish absence.",
-  accessibility_tree: "Read a bounded UIA tree or browser page outline with element IDs. Partial trees do not establish absence.",
+  snapshot:
+    "Capture a UIA tree and optional screenshot; browserTab observes a page outline and viewport. Partial trees do not establish absence.",
+  accessibility_tree:
+    "Read a bounded UIA tree or browser page outline with element IDs. Partial trees do not establish absence.",
   find: "Find UIA or page controls; sparse UIA searches may add OCR. OCR hits use physical screen coordinates, not element IDs.",
-  element_info: "Inspect a fresh UIA or page element ID, or a physical screen point.",
-  click: "Click a control or physical screen point; background delivery is unverified. Browser page IDs act inside the page. Observe effects before retrying.",
-  double_click: "Double-click a control or physical screen point; background delivery is unverified. Browser page IDs act inside the page. Observe effects before retrying.",
+  element_info:
+    "Inspect a fresh UIA or page element ID, or a physical screen point.",
+  click:
+    "Click a control or physical screen point; background delivery is unverified. Browser page IDs act inside the page. Observe effects before retrying.",
+  double_click:
+    "Double-click a control or physical screen point; background delivery is unverified. Browser page IDs act inside the page. Observe effects before retrying.",
   move: "Move the pointer to a control or physical screen point; browser page IDs act inside the page. Observe hover effects.",
   drag: "Drag a path of physical screen coordinates using guarded foreground input. Observe the drop and cleanup before retrying.",
-  scroll: "Scroll a control or physical screen point; native element scrolling tries background first. Positive deltaY scrolls down. Browser tabs scroll inside the page.",
-  type_text: "Type into the focused control. Native auto tries a background edit then clipboard paste; clipboard restoration is requested by default. Background WM_CHAR is unverified.",
-  keypress: 'Send a key or chord, for example ["ctrl","a"]. Windows keys are blocked; native background dispatch supports one printable character only.',
-  focus: "Focus a fresh UIA or browser page element; observe the intended focus before typing.",
-  invoke: "Invoke, toggle or select a control, or request expand, collapse or scroll-into-view. Optional native click fallback is guarded; verify its effect.",
-  set_value: 'Set a native or browser field value with supported guarded fallback. Browser "new-tab" opens an isolated tab and "<tab>:address" navigates it.',
-  activate_window: "Activate the explicitly identified window; activation is requested regardless of the activate option. Verify foreground state.",
-  close_window: "Request a graceful close of the identified window or browser tab. An application may veto closure or show a save dialog; observe the result.",
-  wait_for: "Wait for a window, UIA element or literal OCR text, including supported browser targets. A positive observation is evidence; partial observation cannot prove absence.",
-  move_window: "Move the identified window to physical screen x/y without resizing; observe the resulting bounds.",
+  scroll:
+    "Scroll a control or physical screen point; native element scrolling tries background first. Positive deltaY scrolls down. Browser tabs scroll inside the page.",
+  type_text:
+    "Type into the focused control. Native auto tries a background edit then clipboard paste; clipboard restoration is requested by default. Background WM_CHAR is unverified.",
+  keypress:
+    'Send a key or chord, for example ["ctrl","a"]. Windows keys are blocked; native background dispatch supports one printable character only.',
+  focus:
+    "Focus a fresh UIA or browser page element; observe the intended focus before typing.",
+  invoke:
+    "Invoke, toggle or select a control, or request expand, collapse or scroll-into-view. Optional native click fallback is guarded; verify its effect.",
+  set_value:
+    'Set a native or browser field value with supported guarded fallback. Browser "new-tab" opens an isolated tab and "<tab>:address" navigates it.',
+  activate_window:
+    "Activate the explicitly identified window; activation is requested regardless of the activate option. Verify foreground state.",
+  close_window:
+    "Request a graceful close of the identified window or browser tab. An application may veto closure or show a save dialog; observe the result.",
+  wait_for:
+    "Wait for a window, UIA element or literal OCR text, including supported browser targets. A positive observation is evidence; partial observation cannot prove absence.",
+  move_window:
+    "Move the identified window to physical screen x/y without resizing; observe the resulting bounds.",
 };
 
 export function registerComputerUse(
