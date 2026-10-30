@@ -125,7 +125,7 @@ try {
       ...assessment,
       jobEmpty: report.jobEmpty,
       workerInJob: report.members.some((x) => x.pid === report.workerPid),
-      helperObserved: report.members.some(
+      windowsNameObserved: report.members.some(
         (x) => x.name.toLowerCase() === "windows",
       ),
       scope:
