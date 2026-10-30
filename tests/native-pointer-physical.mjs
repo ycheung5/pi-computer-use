@@ -62,7 +62,10 @@ if (option("report-drop")) {
 }
 const engine = option("engine") ?? "pi";
 const selectedCase = option("case");
-assert.ok(!selectedCase || selectedCase === "drag-drop", "unknown case");
+assert.ok(
+  !selectedCase || ["drag-drop", "drop-discovery"].includes(selectedCase),
+  "unknown case",
+);
 assert.ok(
   ["pi", "reference"].includes(engine),
   "engine must be pi or reference",
@@ -73,7 +76,11 @@ if (options.includes("--list")) {
       engine,
       executed: false,
       cases: selectedCase
-        ? ["successful-drag-drop"]
+        ? [
+            selectedCase === "drag-drop"
+              ? "successful-drag-drop"
+              : "passive-drop-discovery",
+          ]
         : [
             "scaled-click",
             "double-click",
@@ -102,9 +109,13 @@ assert.equal(
   "Opt in with PI_CU_DEDICATED_INPUT_DESKTOP=1 only on a dedicated interactive test desktop; physical runs are deferred.",
 );
 assert.equal(process.platform, "win32", "Run with Windows Node after building");
-if (selectedCase === "drag-drop") {
+if (selectedCase === "drag-drop" || selectedCase === "drop-discovery") {
   const { runDragDrop } = await import("./native-pointer-drop.mjs");
-  await runDragDrop({ engine, referencePath: option("reference") });
+  await runDragDrop({
+    engine,
+    referencePath: option("reference"),
+    discoveryOnly: selectedCase === "drop-discovery",
+  });
   process.exit(0);
 }
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-controls-"));

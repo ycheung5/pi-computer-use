@@ -28,6 +28,21 @@ test("Pointer comparison plans without resources and refuses unapproved input", 
       assert.deepEqual(JSON.parse(dragPlan.stdout).cases, [
         "successful-drag-drop",
       ]);
+      const discovery = run(
+        "--list",
+        `--engine=${engine}`,
+        "--case=drop-discovery",
+      );
+      assert.equal(discovery.status, 0, discovery.stderr);
+      assert.deepEqual(JSON.parse(discovery.stdout).cases, [
+        "passive-drop-discovery",
+      ]);
+      const discoveryRefused = run(
+        `--engine=${engine}`,
+        "--case=drop-discovery",
+      );
+      assert.notEqual(discoveryRefused.status, 0);
+      assert.match(discoveryRefused.stderr, /PI_CU_DEDICATED_INPUT_DESKTOP=1/);
       const dragRefused = run(`--engine=${engine}`, "--case=drag-drop");
       assert.notEqual(dragRefused.status, 0);
       assert.match(dragRefused.stderr, /PI_CU_DEDICATED_INPUT_DESKTOP=1/);
@@ -99,6 +114,85 @@ test("Pointer drag reporting retains a timeout and held-button evidence", async 
   } finally {
     await rm(folder, { recursive: true, force: true });
   }
+});
+
+test("Drop fixture geometry requires finite visible points within the observed owner", async () => {
+  const { validateGeometry } = await import("./pointer-drop-geometry.mjs");
+  const target = { nativeWindowHandle: 40, processId: 77 };
+  const root = {
+    ok: true,
+    nativeWindowHandle: 40,
+    processId: 77,
+    tree: { boundingBox: { x: -100, y: 20, width: 400, height: 300 } },
+  };
+  const geometry = {
+    nativeWindowHandle: 40,
+    processId: 77,
+    visible: true,
+    source: { x: -50, y: 30, width: 20, height: 20 },
+    destination: { x: 200, y: 200, width: 20, height: 20 },
+  };
+  assert.deepEqual(validateGeometry(target, root, geometry), {
+    start: { x: -40, y: 40 },
+    end: { x: 210, y: 210 },
+  });
+  const dshRoot = {
+    ok: true,
+    tree: {
+      nativeWindowHandle: 40,
+      processId: 77,
+      boundingBox: root.tree.boundingBox,
+    },
+  };
+  assert.deepEqual(validateGeometry(target, dshRoot, geometry), {
+    start: { x: -40, y: 40 },
+    end: { x: 210, y: 210 },
+  });
+  assert.throws(() =>
+    validateGeometry(
+      target,
+      {
+        ...root,
+        tree: { ...root.tree, nativeWindowHandle: 41, processId: 77 },
+      },
+      geometry,
+    ),
+  );
+  assert.throws(() =>
+    validateGeometry(
+      target,
+      {
+        ...root,
+        tree: { ...root.tree, nativeWindowHandle: 40, processId: 78 },
+      },
+      geometry,
+    ),
+  );
+  assert.throws(() =>
+    validateGeometry(
+      target,
+      { ok: true, tree: { boundingBox: root.tree.boundingBox } },
+      geometry,
+    ),
+  );
+  assert.throws(() =>
+    validateGeometry(target, root, { ...geometry, visible: false }),
+  );
+  assert.throws(() =>
+    validateGeometry(target, root, { ...geometry, processId: 78 }),
+  );
+  assert.throws(() =>
+    validateGeometry(target, root, {
+      ...geometry,
+      source: { ...geometry.source, width: Infinity },
+    }),
+  );
+  assert.throws(() =>
+    validateGeometry(target, root, {
+      ...geometry,
+      destination: { ...geometry.destination, x: 300 },
+    }),
+  );
 });
 
 test("Drop report retains an input owner when cleanup is explicitly unconfirmed", async () => {

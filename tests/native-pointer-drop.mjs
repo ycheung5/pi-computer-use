@@ -6,9 +6,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateGeometry } from "./pointer-drop-geometry.mjs";
 import { assessDrop } from "./pointer-drop-report.mjs";
 
-export async function runDragDrop({ engine, referencePath }) {
+export async function runDragDrop({
+  engine,
+  referencePath,
+  discoveryOnly = false,
+}) {
   const folder = await mkdtemp(join(tmpdir(), "pi-cu-drop-"));
   process.env.PI_CU_SETTINGS_FILE = join(folder, "settings.json");
   const executable = join(folder, "fixture.exe");
@@ -66,6 +71,46 @@ export async function runDragDrop({ engine, referencePath }) {
       fixture.stdout.on("data", receive);
       fixture.stdin.write("observe\n");
     });
+  const geometry = () =>
+    new Promise((resolve, reject) => {
+      let buffer = "";
+      const timeout = setTimeout(
+        () => finish(new Error("geometry oracle timed out")),
+        5000,
+      );
+      const receive = (chunk) => {
+        buffer += chunk.toString();
+        const match = buffer.match(/geometry:([-\d:]+)\r?\n/);
+        if (!match) return;
+        const [
+          nativeWindowHandle,
+          processId,
+          visible,
+          sx,
+          sy,
+          sw,
+          sh,
+          dx,
+          dy,
+          dw,
+          dh,
+        ] = match[1].split(":").map(Number);
+        finish(null, {
+          nativeWindowHandle,
+          processId,
+          visible: visible === 1,
+          source: { x: sx, y: sy, width: sw, height: sh },
+          destination: { x: dx, y: dy, width: dw, height: dh },
+        });
+      };
+      function finish(error, value) {
+        clearTimeout(timeout);
+        fixture.stdout.off("data", receive);
+        error ? reject(error) : resolve(value);
+      }
+      fixture.stdout.on("data", receive);
+      fixture.stdin.write("geometry\n");
+    });
   try {
     if (engine === "pi") {
       const [{ default: computerUse }, { computerUseHost }] = await Promise.all(
@@ -101,24 +146,38 @@ export async function runDragDrop({ engine, referencePath }) {
       { drops: 0, held: 0 },
       "fresh fixture and released button required",
     );
-    const find = async (query) => {
-      const result = await call("find", {
-        query,
-        controlType: "Pane",
-        ocrFallback: false,
+    if (discoveryOnly) {
+      await call("accessibility_tree", {
+        viewMode: "raw",
+        detailLevel: "full",
+        activate: false,
       });
-      assert.equal(result.ok, true);
-      assert.equal(result.matches.length, 1);
-      return result.matches[0];
-    };
-    const source = await find("Drop source");
-    const destination = await find("Drop target");
-    const point = (item) => ({
-      x: Math.round(item.boundingBox.centerX),
-      y: Math.round(item.boundingBox.centerY),
+      for (const query of ["Drop source", "Drop target"]) {
+        await call("find", { query, ocrFallback: false, activate: false });
+      }
+    }
+    // The provider root is an independent observation; control geometry is
+    // read from the fixture immediately before dispatch, never inferred from UIA.
+    const root = await call("accessibility_tree", {
+      maxDepth: 0,
+      maxNodes: 1,
+      activate: false,
     });
-    const start = point(source),
-      end = point(destination);
+    const ownedGeometry = await geometry();
+    const { start, end } = validateGeometry(target, root, ownedGeometry);
+    console.log(
+      JSON.stringify({
+        engine,
+        check: "owned-drop-geometry",
+        target,
+        root,
+        geometry: ownedGeometry,
+        start,
+        end,
+        inputDispatched: false,
+      }),
+    );
+    if (discoveryOnly) return;
     const path = Array.from({ length: 21 }, (_, i) => ({
       x: Math.round(start.x + ((end.x - start.x) * i) / 20),
       y: Math.round(start.y + ((end.y - start.y) * i) / 20),
