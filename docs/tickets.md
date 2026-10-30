@@ -6,7 +6,7 @@ Parent: [spec #23](https://github.com/ycheung5/pi-computer-use/issues/23). The a
 
 GitHub supports native dependencies, but the connected tools expose no dependency-write operation and GitHub CLI is unavailable here. Ticket bodies therefore record explicit blocking issue links; native dependency links have not been created. No parent issue was modified.
 
-Current progress: #24 resolved on 2026-10-30 with published audit/checker commits `fd51aca` and `a905fde`; #25 and #34 are now in progress on isolated branches. The audit found five declaration differences and missing reference-plugin setup in the inspected DSH web profile. Those findings remain obligations; completing baseline discovery is not a parity pass. See [baseline evidence](validation.md#baseline-identity-and-schema-evidence).
+Current progress: #24 resolved on 2026-10-30 with audit/checker commits `fd51aca` and `a905fde`; #34's automated/passive host baseline resolved in `e051a45`. #25's normal and injected-failure comparisons passed, but review identified dropped reference stop evidence; that fix remains in progress before dependent comparisons start. The audit's five declaration differences, missing DSH profile plugin setup and broader release gates remain obligations. See [baseline evidence](validation.md#baseline-identity-and-schema-evidence) and [host evidence](validation.md#current-host-acceptance-evidence).
 
 Current run constraint (user decision, 2026-10-30): continue passive/background and browser-protocol validation; defer physical keyboard, pointer and clipboard runs. Prepare relevant coverage where useful, but keep unexecuted physical acceptance criteria open. This does not remove them from the release scope.
 
