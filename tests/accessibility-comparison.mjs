@@ -85,7 +85,7 @@ async function recordCase(report, name, id, expected, run) {
   try {
     row.actual = await run();
   } catch (error) {
-    row.status = "fail";
+    row.status = error.prerequisiteBlocked ? "blocked" : "fail";
     row.error = String(error);
     row.actual = error.actual ?? null;
     if (error.observation) row.observation = error.observation;
@@ -335,6 +335,9 @@ async function engine(name) {
         retainCall(action, args, async () =>
           referenceResult(await client.call(action, args, signal)),
         ),
+      controllerPid: async () => client.child.pid,
+      settle: async () => {},
+      freshOperation: () => {},
       close: () => client.close(),
     };
   }
@@ -346,12 +349,17 @@ async function engine(name) {
     }),
     timeoutMs: 60000,
   });
-  const operation = randomUUID();
+  let operation = randomUUID();
   return {
     call: (action, args, signal) =>
       retainCall(action, args, () =>
         worker.execute(action, args, signal, operation),
       ),
+    controllerPid: async () => (await worker.execute("health", {})).processId,
+    settle: () => worker.execute("operation_end", {}, undefined, operation),
+    freshOperation: () => {
+      operation = randomUUID();
+    },
     close: () => worker.dispose(),
   };
 }
@@ -876,6 +884,43 @@ async function runProvider(name) {
     await stop(owned.child, "\n");
   }
 }
+// OS observations identify owned descendants by parent/creation identity only.
+// No executable names, private handles or production test-only APIs are used.
+async function processSnapshot() {
+  const script =
+    "@(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,@{n='created';e={$_.CreationDate.ToUniversalTime().ToString('o')}}) | ConvertTo-Json -Compress";
+  const { stdout } = await promisify(execFile)(
+    "powershell.exe",
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-EncodedCommand",
+      Buffer.from(script, "utf16le").toString("base64"),
+    ],
+    { timeout: 5000, windowsHide: true },
+  );
+  return JSON.parse(stdout.replace(/^\uFEFF/, ""));
+}
+function descendants(processes, controllerPid) {
+  const ids = new Set([controllerPid]);
+  let changed;
+  do {
+    changed = false;
+    for (const process of processes) {
+      if (ids.has(process.ParentProcessId) && !ids.has(process.ProcessId)) {
+        ids.add(process.ProcessId);
+        changed = true;
+      }
+    }
+  } while (changed);
+  return processes.filter(
+    (process) =>
+      process.ProcessId !== controllerPid && ids.has(process.ProcessId),
+  );
+}
+const sameProcess = (a, b) =>
+  a.ProcessId === b.ProcessId && a.created === b.created;
 async function runProviderFailures(name) {
   const refs = [
     "UIAutomationClient.dll",
@@ -894,10 +939,58 @@ async function runProviderFailures(name) {
           ? "Owned fault trigger and honest returned metadata"
           : "Bound caller cancellation of an entered provider, then release fixture",
         async () => {
-          await client.call("snapshot", {
-            ...owned.target,
-            includeScreenshot: false,
-          });
+          const controllerPid =
+            mode === "hang" ? await client.controllerPid() : undefined;
+          const beforeWarm =
+            mode === "hang"
+              ? descendants(await processSnapshot(), controllerPid)
+              : [];
+          success(
+            await client.call("snapshot", {
+              ...owned.target,
+              includeScreenshot: false,
+            }),
+          );
+          let reader, readerRetirement;
+          if (mode === "hang") {
+            // operation_end exposes the mutex holder's PID through the normal
+            // worker response; releasing the mutex keeps that helper alive.
+            const settlement = await client.settle();
+            const candidates = (processes) =>
+              descendants(processes, controllerPid).filter(
+                (p) =>
+                  p.ParentProcessId === controllerPid &&
+                  p.ProcessId !== settlement?.processId &&
+                  !beforeWarm.some((q) => sameProcess(p, q)),
+              );
+            const first = candidates(await processSnapshot());
+            await delay(100);
+            const second = candidates(await processSnapshot());
+            const persistent = second.filter((p) =>
+              first.some((q) => sameProcess(p, q)),
+            );
+            readerRetirement = {
+              controllerPid,
+              beforeWarm,
+              ownershipHolderPid: settlement?.processId,
+              candidates: persistent,
+              confirmed: false,
+            };
+            if (
+              first.length !== 1 ||
+              second.length !== 1 ||
+              persistent.length !== 1
+            ) {
+              const error = new Error(
+                "Reader identification blocked prerequisite: expected one new persistent owned direct child after warm read and ownership-holder exclusion",
+              );
+              error.prerequisiteBlocked = true;
+              error.observation = { readerRetirement };
+              throw error;
+            }
+            reader = persistent[0];
+            client.freshOperation();
+          }
           assert.equal(await owned.command(`arm:${mode}`), "armed");
           const controller = new AbortController();
           const started = performance.now();
@@ -924,6 +1017,7 @@ async function runProviderFailures(name) {
           const outcome = () => ({
             entered,
             settledBeforeAbort,
+            readerRetirement,
             elapsedMs: Math.round(performance.now() - started),
             ...returned,
           });
@@ -951,6 +1045,32 @@ async function runProviderFailures(name) {
                 "Cancelled call must not claim successful observation",
               );
             }
+            if (mode === "hang") {
+              const deadline = performance.now() + 4000;
+              let alive;
+              do {
+                alive = (await processSnapshot()).some((p) =>
+                  sameProcess(p, reader),
+                );
+                if (!alive) break;
+                await delay(100);
+              } while (performance.now() < deadline);
+              readerRetirement.exitObservedMs = Math.round(
+                performance.now() - started,
+              );
+              readerRetirement.providerState =
+                await owned.command("provider-state");
+              readerRetirement.oldReaderAlive = alive;
+              readerRetirement.confirmed =
+                !alive &&
+                readerRetirement.providerState === "provider-state:1:False" &&
+                performance.now() - started < 12000;
+              assert.equal(
+                readerRetirement.confirmed,
+                true,
+                "Old reader must exit while the provider is still blocked and unreleased",
+              );
+            }
             return outcome();
           } catch (error) {
             error.observation = outcome();
@@ -959,6 +1079,26 @@ async function runProviderFailures(name) {
             // Independent fixture IPC always releases the owned provider before disposal.
             owned.child.stdin.write("release\n");
             await pending;
+            if (mode === "hang") {
+              const released = [await owned.next(), await owned.next()];
+              assert.deepEqual(released.sort(), [
+                "provider:released",
+                "release:ack",
+              ]);
+              await client.settle();
+              client.freshOperation();
+              const recovered = await client.call("snapshot", {
+                ...owned.target,
+                includeScreenshot: false,
+              });
+              success(recovered);
+              assert.ok(recovered.tree);
+              assert.match(
+                JSON.stringify(recovered.tree),
+                /Before custom provider/,
+              );
+              readerRetirement.freshReadRecovered = true;
+            }
           }
         },
       );

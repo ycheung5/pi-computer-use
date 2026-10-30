@@ -9,6 +9,7 @@ class UnknownTypeControl : Control, IRawElementProviderSimple {
   public static int Mode;
   public static readonly ManualResetEvent Release = new ManualResetEvent(false);
   public static int Entries;
+  public static int Active;
   public ProviderOptions ProviderOptions { get { return ProviderOptions.ServerSideProvider; } }
   public IRawElementProviderSimple HostRawElementProvider { get { return AutomationInteropProvider.HostProviderFromHandle(Handle); } }
   public object GetPatternProvider(int id) { return null; }
@@ -20,7 +21,9 @@ class UnknownTypeControl : Control, IRawElementProviderSimple {
         Interlocked.Increment(ref Entries);
         Console.WriteLine("provider:entered:" + (mode == 1 ? "fault" : "hang")); Console.Out.Flush();
         if (mode == 1) throw new COMException("Owned provider intentional failure", unchecked((int)0x80004005));
+        Interlocked.Exchange(ref Active, 1);
         Release.WaitOne(12000);
+        Interlocked.Exchange(ref Active, 0);
         Console.WriteLine("provider:released"); Console.Out.Flush();
       }
       return "Newer UIA control";
@@ -55,6 +58,8 @@ class NullProviderFixture {
         } else if (line == "release") {
           UnknownTypeControl.Release.Set();
           Console.WriteLine("release:ack"); Console.Out.Flush();
+        } else if (line == "provider-state") {
+          Console.WriteLine("provider-state:" + UnknownTypeControl.Active + ":" + UnknownTypeControl.Release.WaitOne(0)); Console.Out.Flush();
         } else if (line == "state") {
           Console.WriteLine("entries:" + UnknownTypeControl.Entries); Console.Out.Flush();
         } else break;
