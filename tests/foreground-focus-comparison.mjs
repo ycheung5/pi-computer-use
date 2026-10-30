@@ -4,7 +4,9 @@ import assert from "node:assert/strict";
 const args = process.argv.slice(2);
 for (const arg of args)
   assert.ok(
-    arg === "--plan" || /^--(engine|reference|report)=.+/.test(arg),
+    arg === "--plan" ||
+      arg === "--provenance" ||
+      /^--(engine|reference|report)=.+/.test(arg),
     `Unknown option: ${arg}`,
   );
 const option = (name) =>
@@ -45,6 +47,39 @@ function classifyEvidence(evidence) {
     samples.some((x) => x.lastInputTick !== pre.lastInputTick)
   )
     return { status: "inconclusive", reason: "Intervening input observed" };
+  if (evidence.inputEventsBefore || evidence.inputEventsAfter) {
+    const names = [
+      "unmarkedMouse",
+      "injectedMouse",
+      "taggedMouse",
+      "unmarkedKey",
+      "injectedKey",
+      "taggedKey",
+    ];
+    const a = evidence.inputEventsBefore,
+      b = evidence.inputEventsAfter;
+    if (
+      !a ||
+      !b ||
+      names.some(
+        (name) =>
+          !Number.isSafeInteger(a[name]) ||
+          a[name] < 0 ||
+          !Number.isSafeInteger(b[name]) ||
+          b[name] < a[name],
+      )
+    )
+      return { status: "inconclusive", reason: "Invalid input event counters" };
+    if (
+      ["unmarkedMouse", "injectedMouse", "unmarkedKey", "injectedKey"].some(
+        (name) => b[name] > a[name],
+      )
+    )
+      return {
+        status: "inconclusive",
+        reason: "Unmarked or foreign-injected input events observed",
+      };
+  }
   if (focus?.ok !== true || !samples.some((x) => x.activeEditor === true))
     return { status: "fail", reason: "Target focus not observed" };
   const preserved = samples.every(
@@ -76,6 +111,9 @@ if (args.includes("--plan")) {
       engine,
       physicalInput: false,
       foregroundChangesPossible: true,
+      ...(args.includes("--provenance")
+        ? { inputProvenance: "aggregate hook counts only" }
+        : {}),
       cases: ["cross-process-prior-foreground"],
     }),
   );
@@ -114,6 +152,7 @@ const folder = await mkdtemp(join(tmpdir(), "pi-cu-cross-focus-"));
 process.env.PI_CU_SETTINGS_FILE = join(folder, "settings.json");
 const fixtures = [];
 let client,
+  observer,
   result = {
     engine,
     physicalInput: false,
@@ -169,6 +208,7 @@ async function fixture(label) {
         lastInputTick: Number(x[9]),
         fixtureHandle: Number(x[10]),
         foregroundPid: Number(x[11]),
+        foregroundRoot: Number(x[12]),
       };
     },
   };
@@ -194,6 +234,73 @@ try {
     { encoding: "utf8", windowsHide: true, cwd: folder },
   );
   assert.equal(build.status, 0, build.stdout + build.stderr);
+  if (args.includes("--provenance")) {
+    const observerExe = join(folder, "input-observer.exe");
+    const compiled = spawnSync(
+      compiler,
+      [
+        "/nologo",
+        "/target:exe",
+        `/out:${observerExe}`,
+        fileURLToPath(
+          new URL("./input-provenance-fixture.cs", import.meta.url),
+        ),
+      ],
+      { encoding: "utf8", windowsHide: true, cwd: folder },
+    );
+    assert.equal(compiled.status, 0, compiled.stdout + compiled.stderr);
+    observer = spawn(observerExe, [], {
+      cwd: folder,
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    fixtures.push(observer);
+    observer.stderr.resume();
+    const lines = createInterface({ input: observer.stdout })[
+      Symbol.asyncIterator
+    ]();
+    async function readObserver() {
+      let timer;
+      try {
+        return await Promise.race([
+          lines.next().then((x) => {
+            if (x.done) throw new Error("Input observer exited");
+            return x.value.trim();
+          }),
+          new Promise((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error("Input observer timeout")),
+              5000,
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    assert.equal(
+      await readObserver(),
+      "ready",
+      "Both low-level observer hooks must be available",
+    );
+    observer.snapshot = async () => {
+      observer.stdin.write("snapshot\n");
+      const value = (await readObserver()).split(":");
+      assert.equal(value[0], "counts");
+      assert.equal(value.length, 7);
+      const numbers = value.slice(1).map(Number);
+      assert.ok(numbers.every(Number.isSafeInteger));
+      return {
+        unmarkedMouse: numbers[0],
+        injectedMouse: numbers[1],
+        taggedMouse: numbers[2],
+        unmarkedKey: numbers[3],
+        injectedKey: numbers[4],
+        taggedKey: numbers[5],
+      };
+    };
+  }
+
   const prior = await fixture("Pi CU prior foreground");
   const target = await fixture("Pi CU focus target");
   result.prior = prior.identity;
@@ -239,6 +346,7 @@ try {
     e.inconclusive = true;
     throw e;
   }
+  if (observer) result.inputEventsBefore = await observer.snapshot();
   result.phase = "focus";
   const dispatchedAt = performance.now();
   const focus = await client.execute("focus", {
@@ -247,6 +355,7 @@ try {
     activate: false,
   });
   result.focus = focus;
+  if (observer) result.inputEventsAfter = await observer.snapshot();
   const samples = [];
   result.samples = samples;
   for (const wait of [0, 50, 200, 500]) {
