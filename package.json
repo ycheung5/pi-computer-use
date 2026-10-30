@@ -50,6 +50,7 @@
     "test:native:waits": "node tests/native-waits.mjs",
     "test:settings": "node tests/settings-host.mjs",
     "test:native:management": "node tests/native-window-management.mjs",
+    "test:reference:management": "node tests/window-management-comparison.mjs",
     "test:native:session:locked": "node tests/native-session-activation.mjs",
     "test:native:activation": "node tests/native-activation-roundtrip.mjs",
     "test:native:pointer:guards": "node tests/native-pointer-guards.mjs",
