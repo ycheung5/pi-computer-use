@@ -17,6 +17,7 @@ for (const arg of args)
       arg === "--provenance" ||
       arg === "--direct-uia" ||
       arg === "--dialog" ||
+      arg === "--menu" ||
       arg === "--direct-mta" ||
       /^--(engine|reference|report|direct-report)=.+/.test(arg),
     `Unknown option: ${arg}`,
@@ -120,8 +121,117 @@ function classifyDialog(e) {
     };
   return { status: "pass", reason: "Owned dialog remained foreground" };
 }
+function classifyMenu(e) {
+  const { prior, target, before, pre, action, menu, samples } = e;
+  const valid = (x) =>
+    x &&
+    Number.isFinite(x.foregroundHandle) &&
+    Number.isFinite(x.foregroundPid) &&
+    Number.isFinite(x.foregroundRoot) &&
+    Number.isFinite(x.lastInputTick);
+  if (
+    !prior ||
+    !Number.isSafeInteger(prior.nativeWindowHandle) ||
+    prior.nativeWindowHandle <= 0 ||
+    !Number.isSafeInteger(prior.processId) ||
+    prior.processId <= 0 ||
+    !target ||
+    !Number.isSafeInteger(target.nativeWindowHandle) ||
+    target.nativeWindowHandle <= 0 ||
+    !Number.isSafeInteger(target.processId) ||
+    target.processId <= 0 ||
+    !valid(before) ||
+    !valid(pre) ||
+    !Array.isArray(samples) ||
+    !samples.length ||
+    !samples.every(valid) ||
+    !menu
+  )
+    return {
+      status: "inconclusive",
+      reason: "Incomplete independent observation",
+    };
+  if (
+    before.foregroundHandle !== prior.nativeWindowHandle ||
+    before.foregroundPid !== prior.processId ||
+    pre.foregroundHandle !== prior.nativeWindowHandle ||
+    pre.foregroundPid !== prior.processId
+  )
+    return {
+      status: "inconclusive",
+      reason: "Prior foreground changed before dispatch",
+    };
+  if (
+    pre.lastInputTick !== before.lastInputTick ||
+    samples.some((x) => x.lastInputTick !== pre.lastInputTick)
+  )
+    return { status: "inconclusive", reason: "Input tick changed" };
+  if (e.inputEventsBefore || e.inputEventsAfter) {
+    const names = [
+        "unmarkedMouse",
+        "injectedMouse",
+        "taggedMouse",
+        "unmarkedKey",
+        "injectedKey",
+        "taggedKey",
+      ],
+      a = e.inputEventsBefore,
+      b = e.inputEventsAfter;
+    if (
+      !a ||
+      !b ||
+      names.some(
+        (k) =>
+          !Number.isSafeInteger(a[k]) ||
+          a[k] < 0 ||
+          !Number.isSafeInteger(b[k]) ||
+          b[k] < a[k],
+      )
+    )
+      return { status: "inconclusive", reason: "Invalid input counters" };
+    if (
+      ["unmarkedMouse", "injectedMouse", "unmarkedKey", "injectedKey"].some(
+        (k) => b[k] > a[k],
+      )
+    )
+      return {
+        status: "inconclusive",
+        reason: "Unmarked or other injected event observed",
+      };
+  }
+  if (action?.ok !== true || menu.visible !== true)
+    return { status: "fail", reason: "Owned menu not observed after dispatch" };
+  if (
+    !Number.isSafeInteger(menu.handle) ||
+    menu.handle <= 0 ||
+    menu.source !== target.nativeWindowHandle ||
+    menu.processId !== target.processId ||
+    menu.itemCount !== 1 ||
+    menu.menuMode !== true
+  )
+    return {
+      status: "inconclusive",
+      reason: "Menu ownership or OS menu mode not established",
+    };
+  if (
+    !samples.every(
+      (x) =>
+        x.foregroundPid === target.processId &&
+        [target.nativeWindowHandle, menu.handle].includes(x.foregroundRoot),
+    )
+  )
+    return {
+      status: "inconclusive",
+      reason: "Target/menu foreground was not independently established",
+    };
+  return {
+    status: "pass",
+    reason: "Owned menu remained open while target process was foreground",
+  };
+}
 function classifyEvidence(evidence) {
   if (evidence?.comparison === "owned-dialog") return classifyDialog(evidence);
+  if (evidence?.comparison === "owned-menu") return classifyMenu(evidence);
   const { prior, before, pre, focus, samples } = evidence;
   const valid = (x) =>
     x &&
@@ -251,6 +361,13 @@ assert.ok(["pi", "reference"].includes(engine));
 const directUia = args.includes("--direct-uia");
 const directMta = args.includes("--direct-mta");
 const dialogMode = args.includes("--dialog");
+const menuMode = args.includes("--menu");
+assert.ok(!(menuMode && dialogMode), "Choose either dialog or menu");
+assert.ok(
+  !menuMode || (args.includes("--provenance") && !directUia),
+  "Menu comparison requires --provenance and excludes --direct-uia",
+);
+const popupMode = dialogMode || menuMode;
 assert.ok(
   !dialogMode || (args.includes("--provenance") && !directUia),
   "Dialog comparison requires --provenance and excludes --direct-uia",
@@ -276,11 +393,13 @@ if (args.includes("--plan")) {
       ...(args.includes("--provenance")
         ? { inputProvenance: "aggregate hook counts only" }
         : {}),
-      ...(dialogMode ? { fixtureExpiry: "explicit-stop-only" } : {}),
+      ...(popupMode ? { fixtureExpiry: "explicit-stop-only" } : {}),
       cases: [
         dialogMode
           ? "owned-dialog-foreground"
-          : "cross-process-prior-foreground",
+          : menuMode
+            ? "owned-menu-foreground"
+            : "cross-process-prior-foreground",
       ],
     }),
   );
@@ -322,8 +441,8 @@ let client,
   observer,
   directDispatched = false,
   directSettled = false,
-  dialogDispatched = false,
-  dialogSettled = false,
+  popupDispatched = false,
+  popupSettled = false,
   result = {
     engine,
     physicalInput: false,
@@ -335,7 +454,7 @@ let client,
 async function fixture(label) {
   const child = spawn(
     join(folder, "controls.exe"),
-    [label, ...(dialogMode ? ["--no-expiry"] : [])],
+    [label, ...(popupMode ? ["--no-expiry"] : [])],
     {
       cwd: folder,
       windowsHide: false,
@@ -476,7 +595,7 @@ try {
     };
   }
 
-  if (dialogMode) result.comparison = "owned-dialog";
+  if (popupMode) result.comparison = menuMode ? "owned-menu" : "owned-dialog";
   const prior = await fixture("Pi CU prior foreground");
   const target = await fixture("Pi CU focus target");
   result.prior = prior.identity;
@@ -507,11 +626,24 @@ try {
       visible: state[4] === "True",
     };
   }
+  if (menuMode) {
+    const state = (await target.command("menu-state")).split(":");
+    assert.equal(state[0], "menu-state");
+    assert.equal(Number(state[1]), 0, "Menu must not exist before action");
+    result.menuBefore = {
+      handle: Number(state[1]),
+      visible: state[4] === "True",
+    };
+  }
   result.phase = "find";
   const found = await client.execute("find", {
     ...target.identity,
-    query: dialogMode ? "Open owned test dialog" : "Background editor",
-    controlType: dialogMode ? "Button" : "Edit",
+    query: dialogMode
+      ? "Open owned test dialog"
+      : menuMode
+        ? "Open owned test menu"
+        : "Background editor",
+    controlType: popupMode ? "Button" : "Edit",
     ocrFallback: false,
     activate: false,
   });
@@ -666,8 +798,8 @@ try {
       method: "direct-uia-control",
       verification: "sent",
     };
-  } else if (dialogMode) {
-    dialogDispatched = true;
+  } else if (popupMode) {
+    popupDispatched = true;
     focus = await client.execute("invoke", {
       ...target.identity,
       elementId: found.matches[0].id,
@@ -693,6 +825,19 @@ try {
       visible: x[4] === "True",
     };
   }
+  if (menuMode) {
+    const x = (await target.command("menu-state")).split(":");
+    assert.equal(x[0], "menu-state");
+    assert.equal(x.length, 7);
+    result.menu = {
+      handle: Number(x[1]),
+      source: Number(x[2]),
+      processId: Number(x[3]),
+      visible: x[4] === "True",
+      itemCount: Number(x[5]),
+      menuMode: x[6] === "True" ? true : x[6] === "False" ? false : null,
+    };
+  }
   if (observer) result.inputEventsAfter = await observer.snapshot();
   const samples = [];
   result.samples = samples;
@@ -704,15 +849,17 @@ try {
       ...observation,
     });
   }
-  if (dialogMode && observer)
+  if (popupMode && observer)
     result.inputEventsAfter = await observer.snapshot();
-  result.diagnostic = dialogMode
-    ? "public non-fallback invoke and independent owned-dialog/foreground observations; no internal guard-phase observation"
-    : directUia
-      ? "direct managed UIA control, not a Pi focus call; aggregate input counts cannot prove event source"
-      : "public focus dispatch and independent after-return observations; no internal guard-phase observation";
+  result.diagnostic = menuMode
+    ? "public non-fallback invoke and independent owned-menu/OS menu-mode observations; no internal guard-phase observation"
+    : dialogMode
+      ? "public non-fallback invoke and independent owned-dialog/foreground observations; no internal guard-phase observation"
+      : directUia
+        ? "direct managed UIA control, not a Pi focus call; aggregate input counts cannot prove event source"
+        : "public focus dispatch and independent after-return observations; no internal guard-phase observation";
   Object.assign(result, classifyEvidence(result));
-  if (dialogMode && result.status === "pass") dialogSettled = true;
+  if (popupMode && result.status === "pass") popupSettled = true;
   if (!["pass", "observed"].includes(result.status)) process.exitCode = 1;
 } catch (error) {
   result.status = error.inconclusive ? "inconclusive" : "fail";
@@ -725,15 +872,15 @@ try {
 } finally {
   if (
     (directDispatched && !directSettled) ||
-    (dialogDispatched && !dialogSettled)
+    (popupDispatched && !popupSettled)
   ) {
     if (result.status !== "fail") result.status = "inconclusive";
     result.cleanupError =
       directDispatched && !directSettled
         ? "Direct UIA settlement unconfirmed; owned processes retained"
-        : "Dialog dispatch or clean observation unconfirmed; owned processes retained";
+        : "Menu/dialog dispatch or clean observation unconfirmed; owned processes retained";
     result.retainedFolder = folder;
-    if (dialogDispatched && !dialogSettled) retainCoordinator();
+    if (popupDispatched && !popupSettled) retainCoordinator();
     process.exitCode = 1;
   } else
     try {
@@ -763,7 +910,7 @@ try {
       result.status = "fail";
       result.cleanupError = String(error);
       result.retainedFolder = folder;
-      if (dialogMode) retainCoordinator();
+      if (popupMode) retainCoordinator();
       process.exitCode = 1;
     }
 }
