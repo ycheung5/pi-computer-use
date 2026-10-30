@@ -41,6 +41,8 @@
     "test:native:chromium": "node tests/native-chromium-accessibility.mjs",
     "test:ownership": "node tests/ownership-host.mjs",
     "test:native:capture": "node tests/native-capture.mjs",
+    "test:reference:capture": "node tests/reference-capture.mjs",
+    "test:reference:capture:report": "node tests/reference-capture-report.mjs",
     "test:native:ocr": "node tests/native-ocr.mjs",
     "test:stop": "node tests/stop-host.mjs",
     "test:browser": "node tests/browser-host.mjs",
@@ -68,6 +70,8 @@
     "test:parity": "node tests/parity-host.mjs",
     "test:browser:foreground": "node tests/browser-foreground-host.mjs",
     "test:reference:transport": "node tests/reference-client-check.mjs",
+    "test:browser:comparison": "node tests/browser-comparison.mjs",
+    "test:browser:comparison:oracle": "node tests/browser-comparison-check.mjs",
     "benchmark:accessibility": "node tests/accessibility-comparison.mjs",
     "test:accessibility:report": "node tests/accessibility-comparison-check.mjs"
   },

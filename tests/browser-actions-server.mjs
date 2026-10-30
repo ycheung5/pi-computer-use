@@ -31,8 +31,41 @@ const html = `<!doctype html><title>Browser action fixture</title>
 <a href="/download" download>Download fixture</a><a href="/child" target="_blank">Open child</a>
 <button onclick="setTimeout(()=>delayed.textContent='Delayed result',200)">Start delayed</button><p id="delayed">Waiting</p>
 <div style="height:1800px"></div><p>Bottom fixture</p><script>window.counter=0</script>`;
+let formSubmission = null;
+const formHtml = `<!doctype html><meta charset="utf-8"><title>Paired browser form fixture</title>
+<h1>Paired browser form fixture</h1>
+<form id="form"><label>Name<input id="name"></label>
+<label>Notes<textarea id="notes"></textarea></label>
+<label>Accept terms<input id="accepted" type="checkbox"></label>
+<label>Choice<select id="choice"><option value="alpha">Alpha</option><option value="beta">Beta</option></select></label>
+<label>Disabled field<input disabled value="Disabled value"></label>
+<label>Read-only field<input readonly value="Read-only value"></label>
+<button>Submit form</button></form><pre id="result">Not submitted</pre>
+<button id="delayedButton" onclick="delayed.textContent='Pending';setTimeout(()=>delayed.textContent='Delayed result ready',300)">Start delayed result</button>
+<p id="delayed">Not started</p><div style="height:1600px"></div><p>Form bottom marker</p>
+<script>form.addEventListener('submit',async event=>{event.preventDefault();
+const payload={name:document.getElementById('name').value,notes:notes.value,accepted:accepted.checked,choice:choice.value};
+const response=await fetch('/form/submit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
+result.textContent=JSON.stringify(await response.json());});</script>`;
 const server = createServer((request, response) => {
-  if (request.url === "/download") {
+  if (request.url === "/form/state") {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(formSubmission));
+  } else if (request.url === "/form/submit" && request.method === "POST") {
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      formSubmission = JSON.parse(body);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(formSubmission));
+    });
+  } else if (request.url === "/form") {
+    formSubmission = null;
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    response.end(formHtml);
+  } else if (request.url === "/download") {
     response.writeHead(200, {
       "content-type": "text/plain",
       "content-disposition": "attachment; filename=fixture-download.txt",
