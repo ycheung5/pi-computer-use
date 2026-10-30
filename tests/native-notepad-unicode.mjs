@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { retainUnconfirmedOwner } from "./clipboard-editor-observation.mjs";
 import { createComparisonClient } from "./comparison-client.mjs";
 
 const flatten = (node) =>
@@ -53,6 +54,29 @@ function cleanupReport({ caseFailure = null, cleanupFailures, retainedTabs }) {
   };
 }
 const reportPath = option("report-cleanup");
+function dispatchReport({ action, response }) {
+  return {
+    settled:
+      typeof response?.ok === "boolean" &&
+      response?.action === action &&
+      response.cleanupConfirmed === true,
+  };
+}
+const dispatchReportPath = option("report-dispatch");
+if (dispatchReportPath !== undefined) {
+  assert.equal(
+    process.argv.length,
+    3,
+    "report-dispatch cannot be combined with other options",
+  );
+  assert.ok(dispatchReportPath, "report-dispatch requires a path");
+  const report = dispatchReport(
+    JSON.parse(await readFile(dispatchReportPath, "utf8")),
+  );
+  console.log(JSON.stringify(report));
+  if (!report.settled) process.exitCode = 1;
+  process.exit();
+}
 function environmentReport({ target, editor, observation }) {
   const checks = {
     targetIdentity:
@@ -229,6 +253,22 @@ let client;
 let variant;
 let provenance;
 let operationError;
+let inputUnsettled = false;
+let inputAction;
+let inputResult;
+async function dispatchInput(action, args) {
+  inputUnsettled = true;
+  inputAction = action;
+  inputResult = undefined;
+  const response = await client.execute(action, args);
+  inputResult = response;
+  if (!dispatchReport({ action, response }).settled)
+    throw new Error(
+      "INPUT_CLEANUP_UNCONFIRMED: retain the input owner and fixture",
+    );
+  inputUnsettled = false;
+  return response;
+}
 const cleanupFailures = [];
 const retained = new Set();
 const hash = (value) => createHash("sha256").update(value).digest("hex");
@@ -376,7 +416,12 @@ try {
         normalize(seed),
         "test file must contain only its known seed",
       );
-      const activated = await client.execute("activate_window", target);
+      // The reference can inject an Alt key when foreground activation is refused.
+      // Its response does not acknowledge input cleanup, so retain on uncertainty.
+      const activated =
+        engine === "reference"
+          ? await dispatchInput("activate_window", target)
+          : await client.execute("activate_window", target);
       assert.equal(activated.activated, true, JSON.stringify(activated));
       const focused = await client.execute("focus", {
         ...target,
@@ -398,7 +443,7 @@ try {
       };
       checkEnvironment();
       if (seed) {
-        const end = await client.execute("keypress", {
+        const end = await dispatchInput("keypress", {
           ...target,
           keys: ["Ctrl", "End"],
         });
@@ -406,7 +451,7 @@ try {
         checkEnvironment();
       }
       const dispatchStarted = performance.now();
-      typed = await client.execute("type_text", {
+      typed = await dispatchInput("type_text", {
         ...target,
         text,
         method: "sendinput",
@@ -414,8 +459,6 @@ try {
       });
       dispatchMs = performance.now() - dispatchStarted;
       assert.equal(typed.ok, true, JSON.stringify(typed));
-      if (typed.cleanupConfirmed !== undefined)
-        assert.equal(typed.cleanupConfirmed, true);
       // Let the application process its queued character messages before reading.
       await delay(1000);
       const after = await client.execute("element_info", {
@@ -431,7 +474,7 @@ try {
         current.tree?.name.includes(stem),
         "tab identity must still match before save",
       );
-      const saved = await client.execute("keypress", {
+      const saved = await dispatchInput("keypress", {
         ...target,
         keys: ["Ctrl", "s"],
       });
@@ -451,7 +494,7 @@ try {
         savedView.tree?.name.includes(stem),
         "tab identity must still match before close",
       );
-      const closed = await client.execute("keypress", {
+      const closed = await dispatchInput("keypress", {
         ...target,
         keys: ["Ctrl", "w"],
       });
@@ -521,6 +564,20 @@ try {
 } catch (error) {
   operationError = error;
 } finally {
+  if (inputUnsettled) {
+    console.log(
+      JSON.stringify({
+        engine,
+        action: "cleanup",
+        cleanupConfirmed: false,
+        inputAction,
+        inputResult,
+        retainedFolder: folder,
+        error: "INPUT_CLEANUP_UNCONFIRMED: client and fixture retained",
+      }),
+    );
+    await retainUnconfirmedOwner();
+  }
   let shutdownAcknowledged = !client;
   try {
     await client?.dispose();
