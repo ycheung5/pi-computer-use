@@ -30,7 +30,8 @@ const line = result.stdout
   .find((item) => item.startsWith('{"ok":'));
 assert.ok(line, `Expected structured benchmark report: ${result.stderr}`);
 const report = JSON.parse(line);
-assert.equal(report.ok, false, "The injected mismatch must not be hidden");
+assert.equal(report.ok, false, "The injected failure must not be hidden");
+assert.equal(report.diagnosticInjection, true);
 assert.equal(Number(result.code), 1, "Failed comparison must fail the CLI");
 assert.equal(report.cases.length, 6);
 assert.equal(report.cases[0].status, "fail");

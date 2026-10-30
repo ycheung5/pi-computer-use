@@ -360,6 +360,7 @@ const cases = [];
 const warmup = [];
 const cleanup = { fixtureConfirmed: false, folderRemoved: false };
 const injectMismatch = process.argv.includes("--verify-failure-collection");
+const injectStop = process.argv.includes("--verify-stop-collection");
 let haltReason;
 const stopped = (error) =>
   /(?:CANCELLED|CANCELED|STOPPED|stop requested|CLEANUP[_ ]UNCONFIRMED)/i.test(
@@ -389,12 +390,7 @@ const sample = async (name, index, isWarmup = false) => {
     );
     const start = performance.now();
     client = await engines[name]();
-    if (
-      process.argv.includes("--verify-stop-collection") &&
-      !isWarmup &&
-      cases.length === 0 &&
-      name === "reference"
-    ) {
+    if (injectStop && !isWarmup && cases.length === 0 && name === "reference") {
       client.injectStop = true;
       row.injected = true;
       row.cause = "test-defect";
@@ -583,7 +579,7 @@ const report = {
   },
   methodology:
     "Same Windows Node and owned non-activating native Edit. Reset independently before/after each engine; fixture observes actual text independently of tool readback. Alternating engines. Process-cold uses warm caches, excludes installation and model overhead. Health payloads differ. Only background set_value with fallbackType:false; no physical input/clipboard. Failed cases retained; timing summaries contain passing samples only. Cleanup means controller disposal, owned editor reset and fixture removal, not whole-product cleanup acceptance.",
-  diagnosticInjection: injectMismatch,
+  diagnosticInjection: injectMismatch || injectStop,
   warmup,
   cases,
   cleanup,
