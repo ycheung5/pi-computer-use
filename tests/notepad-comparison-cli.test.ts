@@ -16,6 +16,7 @@ test("legacy context reports distinguish observed data from unknown state", () =
     const path = join(folder, "result.json");
     for (const [input, expected] of [
       [{ succeeded: true, contexts: [{ open: true }] }, "observed"],
+      [{ succeeded: true, contexts: [{ open: false }] }, "unknown"],
       [{ succeeded: true, contexts: [] }, "unknown"],
       [
         { succeeded: true, contexts: [{ open: true }, { open: false }] },
@@ -31,6 +32,7 @@ test("legacy context reports distinguish observed data from unknown state", () =
       assert.equal(report.classification, expected);
       assert.deepEqual(report.observation, input);
       assert.equal(report.focusedContextIdentified, false);
+      assert.equal(report.legacyOpenState, "unknown");
       assert.equal(report.tsfState, "unknown");
     }
   } finally {

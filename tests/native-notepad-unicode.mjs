@@ -61,10 +61,11 @@ function legacyContextReport(observation) {
     classification:
       observation.succeeded &&
       observation.contexts.length === 1 &&
-      typeof observation.contexts[0].open === "boolean"
+      observation.contexts[0].open === true
         ? "observed"
         : "unknown",
     focusedContextIdentified: false,
+    legacyOpenState: "unknown",
     tsfState: "unknown",
   };
 }
