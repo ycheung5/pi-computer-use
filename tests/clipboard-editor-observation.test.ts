@@ -5,6 +5,7 @@ import {
   compareEditorObservation,
   inputCleanupConfirmed,
   isSafeClipboardRefusal,
+  referenceActivationCleanupConfirmed,
 } from "./clipboard-editor-observation.mjs";
 
 test("blank fixture evidence remains usable when UIA omits its value", () => {
@@ -113,4 +114,40 @@ test("retained owner remains alive without any other active handles", async () =
     child.kill();
     await closed;
   }
+});
+
+test("reference activation requires its own explicit input cleanup acknowledgment", () => {
+  assert.equal(
+    referenceActivationCleanupConfirmed({
+      action: "activate_window",
+      ok: true,
+      cleanupConfirmed: true,
+    }),
+    true,
+  );
+  for (const result of [
+    undefined,
+    { action: "activate_window", ok: true },
+    { action: "type_text", ok: true, cleanupConfirmed: true },
+    { action: "activate_window", cleanupConfirmed: true },
+    {
+      action: "activate_window",
+      ok: true,
+      cleanupConfirmed: true,
+      inputCleanupConfirmed: false,
+    },
+    {
+      action: "activate_window",
+      ok: true,
+      cleanupConfirmed: true,
+      keyboardCleanupConfirmed: false,
+    },
+    {
+      action: "activate_window",
+      ok: true,
+      cleanupConfirmed: true,
+      cleanupVerification: "unconfirmed",
+    },
+  ])
+    assert.equal(referenceActivationCleanupConfirmed(result), false);
 });

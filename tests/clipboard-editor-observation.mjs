@@ -42,6 +42,19 @@ export function inputCleanupConfirmed(result) {
   );
 }
 
+// Reference window activation can synthesize Alt input, so missing or wrong-action
+// acknowledgment cannot establish that its keys were released.
+export function referenceActivationCleanupConfirmed(result) {
+  return (
+    result?.action === "activate_window" &&
+    typeof result.ok === "boolean" &&
+    result.cleanupConfirmed === true &&
+    result.inputCleanupConfirmed !== false &&
+    result.keyboardCleanupConfirmed !== false &&
+    !["unconfirmed", "held", "failed"].includes(result.cleanupVerification)
+  );
+}
+
 // An unresolved promise alone does not keep Node alive once child pipes close.
 export async function retainUnconfirmedOwner() {
   const keepAlive = setInterval(() => {}, 1000);

@@ -141,6 +141,7 @@ const { detachFixture, runFixtureCommand, waitForFixtureClose } = await import(
 const {
   compareEditorObservation,
   isSafeClipboardRefusal,
+  referenceActivationCleanupConfirmed,
   inputCleanupConfirmed,
   retainUnconfirmedOwner,
 } = await import("./clipboard-editor-observation.mjs");
@@ -237,14 +238,19 @@ let inputCleanupUnconfirmed = false;
 const observations = [];
 const execute = async (action, args) => {
   try {
-    if (action === "type_text") inputCleanupUnconfirmed = true;
+    const maySendInput =
+      action === "type_text" ||
+      (engine === "reference" && action === "activate_window");
+    if (maySendInput) inputCleanupUnconfirmed = true;
     const result = await client.execute(action, args);
     observations.push({ action, result });
     if (action === "type_text") {
       inputCleanupUnconfirmed = !inputCleanupConfirmed(result);
-      if (inputCleanupUnconfirmed)
-        throw Error("Clipboard input cleanup is unconfirmed; owner retained");
+    } else if (engine === "reference" && action === "activate_window") {
+      inputCleanupUnconfirmed = !referenceActivationCleanupConfirmed(result);
     }
+    if (maySendInput && inputCleanupUnconfirmed)
+      throw Error("Clipboard input cleanup is unconfirmed; owner retained");
     return result;
   } catch (error) {
     observations.push({

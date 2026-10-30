@@ -19,4 +19,16 @@ export function inputCleanupConfirmed(
     | undefined,
 ): boolean;
 
+export function referenceActivationCleanupConfirmed(
+  result:
+    | {
+        action?: unknown;
+        ok?: unknown;
+        cleanupConfirmed?: unknown;
+        inputCleanupConfirmed?: unknown;
+        keyboardCleanupConfirmed?: unknown;
+        cleanupVerification?: unknown;
+      }
+    | undefined,
+): boolean;
 export function retainUnconfirmedOwner(): Promise<never>;
