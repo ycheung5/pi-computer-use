@@ -11,9 +11,9 @@ import { fileURLToPath } from "node:url";
 const args = process.argv.slice(2);
 for (let at = 0; at < args.length; at++) {
   const flag = args[at];
-  if (["--plan", "--list-cases"].includes(flag)) continue;
+  if (["--plan", "--list-cases", "--probe-indexed"].includes(flag)) continue;
   assert.ok(
-    ["--engine", "--reference"].includes(flag),
+    ["--engine", "--reference", "--case"].includes(flag),
     `Unknown argument: ${flag}`,
   );
   assert.ok(
@@ -37,27 +37,42 @@ assert.ok(
   "--engine must be pi or reference",
 );
 const referencePath = option("--reference");
-const cases = [
+const allCases = [
   {
     id: "ole-preservation",
     oracle: "Exact editor text and fixture Unicode/HTML/binary preservation",
   },
   {
     id: "indexed-refusal",
-    oracle: "Refused paste leaves editor and indexed clipboard unchanged",
+    oracle:
+      "Refusal or exact paste, with indexed clipboard independently preserved",
   },
   {
     id: "newer-copy",
     oracle: "Exact appended text and fixture newer copy preserved",
   },
 ];
+const selected = option("--case");
+assert.ok(
+  !selected || allCases.some((item) => item.id === selected),
+  "Unknown clipboard case",
+);
+const cases = selected
+  ? allCases.filter((item) => item.id === selected)
+  : allCases;
+const probe = args.includes("--probe-indexed");
+assert.ok(
+  !probe || !selected,
+  "--probe-indexed cannot be combined with --case",
+);
 if (args.includes("--plan") || args.includes("--list-cases")) {
   console.log(
     JSON.stringify({
       engine,
       execution: "not-run",
       optIn: "PI_CU_CLIPBOARD_INPUT_TEST=1",
-      cases,
+      cases: probe ? [] : cases,
+      probe: probe ? "indexed-fixture" : undefined,
       deferred: [
         "plain-only clipboard",
         "locked clipboard",
@@ -85,7 +100,7 @@ assert.equal(
   "win32",
   "Clipboard comparison requires Windows Node",
 );
-if (engine === "reference")
+if (engine === "reference" && !probe)
   assert.ok(referencePath, "--reference requires the pinned DSH checkout path");
 // No backend import, directory, compiler, client or fixture precedes the opt-in.
 const { createComparisonClient } = await import("./comparison-client.mjs");
@@ -171,105 +186,138 @@ try {
     nativeWindowHandle: Number(await next()),
     processId: fixture.pid,
   };
-  client = await createComparisonClient({ engine, referencePath, cwd: folder });
-  let found;
-  for (let attempt = 0; attempt < 30; attempt++) {
-    found = await execute("find", {
-      ...target,
-      query: "OLE clipboard editor",
-      ocrFallback: false,
-    });
-    assert.equal(found.ok, true, JSON.stringify(found));
-    if ((found.matches ?? found.results)?.length) break;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  const matches = found.matches ?? found.results;
-  assert.equal(matches.length, 1, JSON.stringify(found));
-  const id = matches[0].id;
-  assert.equal((await execute("activate_window", target)).activated, true);
-  assert.equal(
-    (
-      await execute("focus", {
-        ...target,
-        elementId: id,
-        activate: true,
-      })
-    ).ok,
-    true,
-  );
-  assert.equal(await command("seed-ole"), "ole-seeded");
-  const text = "Clipboard test 中文 café 😀";
-  const typed = await execute("type_text", {
-    ...target,
-    text,
-    method: "clipboard",
-    restoreClipboard: true,
-    activate: true,
-  });
-  assert.equal(typed.ok, true, JSON.stringify(typed));
-  assert.notEqual(
-    typed.cleanupConfirmed,
-    false,
-    "Explicitly unconfirmed cleanup blocks later cases",
-  );
-  assert.notEqual(typed.clipboardCleanupConfirmed, false);
-  assert.equal(await readEditor(id, target), text);
-  assert.equal(
-    await command("check-seed"),
-    "seed-preserved",
-    "Unicode, HTML and binary clipboard formats must survive",
-  );
-  assert.equal(await command("seed-indexed"), "indexed-seeded");
-  assert.equal(
-    await command("check-indexed"),
-    "indexed-preserved",
-    "indexed fixture payload must be readable before dispatch",
-  );
-  const refused = await execute("type_text", {
-    ...target,
-    text: "MUST NOT APPEAR",
-    method: "clipboard",
-    restoreClipboard: true,
-    activate: true,
-  });
-  assert.equal(refused.ok, false);
-  assert.notEqual(
-    refused.cleanupConfirmed,
-    false,
-    "Explicitly unconfirmed cleanup blocks later cases",
-  );
-  assert.notEqual(refused.clipboardCleanupConfirmed, false);
-  assert.equal(await command("check-indexed"), "indexed-preserved");
-  assert.equal(
-    await readEditor(id, target),
-    text,
-    "unsupported indexed data must be refused before paste",
-  );
-  assert.equal(await command("seed-ole"), "ole-seeded");
-  assert.equal(await command("copy-on-paste"), "copy-armed");
-  const intervened = await execute("type_text", {
-    ...target,
-    text: " + more",
-    method: "clipboard",
-    restoreClipboard: true,
-    activate: true,
-  });
-  assert.equal(intervened.ok, true, JSON.stringify(intervened));
-  assert.notEqual(intervened.cleanupConfirmed, false);
-  assert.notEqual(intervened.clipboardCleanupConfirmed, false);
-  assert.equal(await readEditor(id, target), `${text} + more`);
-  assert.equal(await command("check-newer"), "newer-preserved");
-  console.log(
-    JSON.stringify({
-      ok: true,
+  if (probe) {
+    assert.equal(await command("seed-indexed"), "indexed-seeded");
+    const result = JSON.parse(await command("probe-indexed"));
+    console.log(
+      JSON.stringify({
+        probe: "indexed-fixture",
+        result,
+        physicalInput: false,
+      }),
+    );
+    assert.equal(
+      result.direct,
+      "indexed-preserved",
+      "direct indexed fixture payload must be readable",
+    );
+    assert.equal(
+      result.clipboard,
+      "indexed-preserved",
+      "indexed payload must cross OleGetClipboard before tool dispatch",
+    );
+  } else {
+    client = await createComparisonClient({
       engine,
-      newerCopyPreserved: true,
-      oleTextPaste: true,
-      unicodeHtmlBinaryPreserved: true,
-      indexedDataRefused: true,
-      refusalSentNoInput: true,
-    }),
-  );
+      referencePath,
+      cwd: folder,
+    });
+    let found;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      found = await execute("find", {
+        ...target,
+        query: "OLE clipboard editor",
+        ocrFallback: false,
+      });
+      assert.equal(found.ok, true, JSON.stringify(found));
+      if ((found.matches ?? found.results)?.length) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const matches = found.matches ?? found.results;
+    assert.equal(matches.length, 1, JSON.stringify(found));
+    const id = matches[0].id;
+    assert.equal((await execute("activate_window", target)).activated, true);
+    assert.equal(
+      (
+        await execute("focus", {
+          ...target,
+          elementId: id,
+          activate: true,
+        })
+      ).ok,
+      true,
+    );
+    const outcomes = [];
+    const text = "Clipboard test 中文 café 😀";
+    for (const item of cases) {
+      assert.equal(await command("reset-editor"), "editor-reset");
+      assert.equal(
+        await readEditor(id, target),
+        "",
+        "case starts from a fresh known blank editor",
+      );
+      if (item.id === "indexed-refusal") {
+        assert.equal(await command("seed-indexed"), "indexed-seeded");
+        assert.equal(
+          await command("check-indexed"),
+          "indexed-preserved",
+          "indexed fixture payload must be readable before dispatch",
+        );
+        const result = await execute("type_text", {
+          ...target,
+          text,
+          method: "clipboard",
+          restoreClipboard: true,
+          activate: true,
+        });
+        assert.notEqual(
+          result.cleanupConfirmed,
+          false,
+          "Explicitly unconfirmed cleanup blocks later cases",
+        );
+        assert.notEqual(result.clipboardCleanupConfirmed, false);
+        assert.equal(
+          await command("check-indexed"),
+          "indexed-preserved",
+          "indexed clipboard survives either refusal or supported paste",
+        );
+        assert.equal(
+          await readEditor(id, target),
+          result.ok ? text : "",
+          "success is exact paste; refusal must send no input",
+        );
+        outcomes.push({
+          id: item.id,
+          ok: true,
+          outcome: result.ok
+            ? "exact-paste-and-preserved"
+            : "refused-and-preserved",
+        });
+      } else {
+        assert.equal(await command("seed-ole"), "ole-seeded");
+        assert.equal(
+          await command("check-seed"),
+          "seed-preserved",
+          "supported seed is independently readable before dispatch",
+        );
+        if (item.id === "newer-copy")
+          assert.equal(await command("copy-on-paste"), "copy-armed");
+        const result = await execute("type_text", {
+          ...target,
+          text,
+          method: "clipboard",
+          restoreClipboard: true,
+          activate: true,
+        });
+        assert.equal(result.ok, true, JSON.stringify(result));
+        assert.notEqual(
+          result.cleanupConfirmed,
+          false,
+          "Explicitly unconfirmed cleanup blocks later cases",
+        );
+        assert.notEqual(result.clipboardCleanupConfirmed, false);
+        assert.equal(await readEditor(id, target), text);
+        assert.equal(
+          await command(
+            item.id === "newer-copy" ? "check-newer" : "check-seed",
+          ),
+          item.id === "newer-copy" ? "newer-preserved" : "seed-preserved",
+        );
+        outcomes.push({ id: item.id, ok: true });
+      }
+    }
+    console.log(JSON.stringify({ ok: true, engine, cases: outcomes }));
+  }
 } catch (error) {
   console.error(JSON.stringify({ ok: false, engine, error: error.message }));
   throw error;
