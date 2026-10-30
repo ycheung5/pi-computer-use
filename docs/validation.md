@@ -550,4 +550,20 @@ The same reviewed correction derives reference vertical coordinates from its doc
 
 Both clipboard fixtures reported original restoration; the corrected Pi run also restored before closing. After the DSH drag timeout, the independent cleanup probe recorded `beforeHeld:true`, dispatched release only, then `afterHeld:false`. Final OS inspection found no held mouse buttons/modifiers and no remaining owned runner/fixture processes. Uncertain DSH Notepad cases retained only their uniquely named disposable files/tabs for inspection; existing user documents were not edited. No physical input was sent after the final cleanup check.
 
+### Unicode mechanism probes and clipboard startup — follow-up
+
+In a second authorized idle session, the existing six-case runner was extended with isolated test-only source copies. The original Pi/DSH sources remained untouched, and each variant changed exactly one asserted source occurrence. Each run used a fresh owned Notepad file, case 4 (`Pi input check 中文 😀`), exact UIA and saved-byte comparison, and an independent target-thread foreground/focus/keyboard probe. Original/variant SHA-256 values and raw outcomes are retained in `/tmp/pi-cu-followup-evidence`. Windows Node was 22.23.4, Notepad was 11.2607.14.0, target process and foreground/focus process matched, and the target keyboard layout was `0x04040404` (language ID 1028). Legacy IMM context was unavailable; this does not establish TSF or IME state. The helper's compatibility-reported OS version is not the actual Windows build; the independently recorded build remains 26200.9711.
+
+| Controlled change | Observed exact case 4 | Interpretation |
+| --- | --- | --- |
+| Unchanged Pi, 50 ms | Pass; UIA and saved UTF-8 matched | Same-session control |
+| Pi delay 50 to 0 ms only | Fail; UIA and saved UTF-8 both `Pi nnput �` | Nonzero pacing protected this one case under this recorded state; 50 ms is not established as the minimum or universal requirement |
+| Unchanged DSH | Fail; UIA and saved text corrupted | Same-session control |
+| DSH Unicode key-up scan 0 to the key-down character only | Fail; UIA and saved text corrupted | This construction change alone did not fix this case |
+| DSH SendInput batch 64 to 2 events only | Fail; UIA and saved text corrupted | This batch-size change alone did not fix this case |
+
+These are single experiments per variant, not statistical reliability claims. Other interactions, timing minima and TSF state remain unresolved; no production delay or event construction was changed. The DSH calls returned success dispatch even though independent text checks failed. Its temporary-directory removal then produced `EBUSY` after the test's text-result record was emitted; those runs independently confirmed their disposable tabs closed but did not establish full temporary-directory removal. Do not treat `ownedCleanupConfirmed` as proof of directory/process cleanup. A test-only reporting fix is required to preserve both the original failed assertion and cleanup failure rather than letting one obscure the other.
+
+The first fixture-only indexed-clipboard probe exited before a window was ready. A subsequent bounded startup diagnostic reported `unsupported-original-value`, `clipboardChanged: false`, no seed and no tool dispatch. It would not safely duplicate the user's current clipboard value. The user's clipboard was therefore left unchanged; a plain-text sentinel is needed before repeating the fixture probe, followed by independently selectable newer-copy tests. The direct-vs-OLE indexed payload diagnosis has not run and is not a product conclusion.
+
 **Still open:** indexed-fixture repair and newer-copy coverage; active IME/keyboard-state capture and one-variable pacing/event experiments; successful drag/drop, broader paired window management, foreground restoration and interference; real Esc/custom shortcut; mixed DPI/layouts and other manual release gates. #26/#27/#30/#31 remain open. These results do not complete #35/#36 real-agent recovery or #37 mechanism diagnosis.
