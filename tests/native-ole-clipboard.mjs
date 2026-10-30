@@ -134,7 +134,7 @@ if (engine === "reference" && !probe)
 const { detachFixture, waitForFixtureClose } = await import(
   "./clipboard-fixture-close.mjs"
 );
-const { compareEditorObservation } = await import(
+const { compareEditorObservation, isSafeClipboardRefusal } = await import(
   "./clipboard-editor-observation.mjs"
 );
 const { createComparisonClient } = await import("./comparison-client.mjs");
@@ -361,11 +361,11 @@ try {
           "Explicitly unconfirmed cleanup blocks later cases",
         );
         assert.notEqual(result.clipboardCleanupConfirmed, false);
-        if (!result.ok && virtualFile) {
-          assert.match(
-            String(result.error ?? ""),
-            /clipboard|unsupported|format/i,
-            "refusal must report the clipboard limitation",
+        if (virtualFile && result.ok !== true) {
+          assert.equal(result.ok, false, "refusal must be explicit");
+          assert.ok(
+            isSafeClipboardRefusal(result),
+            "refusal must be a recognized pre-input clipboard snapshot limitation",
           );
         }
         assert.equal(

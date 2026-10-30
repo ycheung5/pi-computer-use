@@ -18,3 +18,12 @@ export function compareEditorObservation(element, fixtureValue) {
     uiaAvailability: available ? "available" : "unavailable",
   };
 }
+
+// Only this product error is documented as occurring before clipboard mutation/input.
+export function isSafeClipboardRefusal(result) {
+  return (
+    result?.ok === false &&
+    typeof result.error === "string" &&
+    /^CLIPBOARD_SNAPSHOT_UNSUPPORTED(?::|$)/.test(result.error)
+  );
+}
