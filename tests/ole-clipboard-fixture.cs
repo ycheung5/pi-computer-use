@@ -12,6 +12,11 @@ class OleClipboardFixture {
  [DllImport("user32.dll")]static extern uint GetClipboardSequenceNumber();
  [DllImport("user32.dll",CharSet=CharSet.Unicode)]static extern uint RegisterClipboardFormat(string name);
  [DllImport("ole32.dll")]static extern int OleSetClipboard(OleDataObject data);
+ [DllImport("ole32.dll")]static extern int OleGetClipboard(out OleDataObject data);
+ [DllImport("ole32.dll")]static extern void ReleaseStgMedium(ref STGMEDIUM medium);
+ [DllImport("kernel32.dll")]static extern IntPtr GlobalLock(IntPtr data);
+ [DllImport("kernel32.dll")]static extern bool GlobalUnlock(IntPtr data);
+ [DllImport("kernel32.dll")]static extern UIntPtr GlobalSize(IntPtr data);
  static readonly string token=Guid.NewGuid().ToString();
  static readonly uint marker=RegisterClipboardFormat("PiCUOleFixtureOwner");
  static readonly byte[] markerBytes=Encoding.Unicode.GetBytes(token+"\0");
@@ -51,6 +56,18 @@ class OleClipboardFixture {
   var bytes=data.GetData("PiCUOleFixtureBytes",false) as MemoryStream;if(bytes==null)return false;
   byte[] actual=bytes.ToArray();if(actual.Length!=seedBinary.Length)return false;for(int i=0;i<actual.Length;i++)if(actual[i]!=seedBinary[i])return false;return true;
  }
+ static bool CheckIndexed() {
+  if(!OwnsClipboard())return false;
+  OleDataObject data;Marshal.ThrowExceptionForHR(OleGetClipboard(out data));
+  var format=new FORMATETC {cfFormat=(short)RegisterClipboardFormat("PiCUIndexedPayload"),dwAspect=DVASPECT.DVASPECT_CONTENT,lindex=0,tymed=TYMED.TYMED_HGLOBAL};
+  if(data.QueryGetData(ref format)!=0)return false;
+  STGMEDIUM medium;data.GetData(ref format,out medium);
+  try {if(medium.tymed!=TYMED.TYMED_HGLOBAL || GlobalSize(medium.unionmember).ToUInt64()<4)return false;
+   IntPtr memory=GlobalLock(medium.unionmember);if(memory==IntPtr.Zero)return false;
+   try {byte[] actual=new byte[4];Marshal.Copy(memory,actual,0,4);return actual[0]==1 && actual[1]==2 && actual[2]==3 && actual[3]==4;}
+   finally {GlobalUnlock(medium.unionmember);}
+  }finally {ReleaseStgMedium(ref medium);}
+ }
  [STAThread]static void Main(){
   Console.OutputEncoding=new UTF8Encoding(false);original=PreserveOriginal();
   var form=new OleFixtureForm {Text="Pi OLE clipboard disposable fixture",Width=500,Height=220};
@@ -61,10 +78,11 @@ class OleClipboardFixture {
   ThreadPool.QueueUserWorkItem(delegate{string command;while((command=Console.ReadLine())!=null){string next=command;form.BeginInvoke((Action)delegate{
     if(next=="seed-ole")Seed(false);
     else if(next=="seed-indexed")Seed(true);
+    else if(next=="editor-base64")Reply(Convert.ToBase64String(Encoding.UTF8.GetBytes(editor.Text)));
     else if(next=="check-seed")Reply(CheckSeed()?"seed-preserved":"seed-mismatch");
     else if(next=="copy-on-paste"){copyOnPaste=true;Reply("copy-armed");}
     else if(next=="check-newer")Reply(Equals(Clipboard.GetDataObject().GetData(DataFormats.UnicodeText,false),"Fixture newer copy 中文")?"newer-preserved":"newer-mismatch");
-    else if(next=="check-indexed")Reply(OwnsClipboard()?"indexed-preserved":"indexed-mismatch");
+    else if(next=="check-indexed")Reply(CheckIndexed()?"indexed-preserved":"indexed-mismatch");
     else if(next=="restore-close") {if(OwnsClipboard()){Clipboard.SetDataObject(original,true);Reply("original-restored");}else Reply(seeded?"newer-copy-preserved":"original-unchanged");seeded=false;form.Close();}
    });if(next=="restore-close")return;}form.BeginInvoke((Action)delegate{if(OwnsClipboard())Clipboard.SetDataObject(original,true);seeded=false;form.Close();});});
   try{Application.Run(form);}finally{GC.KeepAlive(retained);if(OwnsClipboard())Clipboard.SetDataObject(original,true);}
