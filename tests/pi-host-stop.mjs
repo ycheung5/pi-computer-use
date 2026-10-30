@@ -296,6 +296,11 @@ try {
   }
   assert.equal(workerExited, true, "Worker exit not confirmed");
   hostClean = true;
+  assert.equal(
+    host.exitCode,
+    0,
+    "Pi orderly shutdown did not exit successfully",
+  );
   console.log(
     JSON.stringify({
       ...assessment,
