@@ -48,7 +48,7 @@ The first `test:wsl` run failed because its stale assertion expected `COMPUTER_U
 Remaining host acceptance is grouped into three sessions rather than another sequence of individual prompts:
 
 1. **Clean installation:** native Windows and WSL2 environments without the development tree; install/update/removal and missing/corrupt runtime or network diagnostics. Current-host package and portable failure tests do not close this gate (#2, #21).
-2. **Interactive Pi presentation:** actual terminal settings editor and reload, rendered images/errors and user-visible lifecycle. Automated CLI/provider and tool-result checks do not prove the full interactive experience (#34 follow-up acceptance, #21).
+2. **Interactive Pi presentation:** actual terminal settings editor and reload, rendered images/errors and user-visible lifecycle. Automated CLI/provider and tool-result checks do not prove the full interactive experience; the remaining gate stays owned by #21 after the automated baseline in #34 completes.
 3. **Dedicated desktop presentation/interference:** the [indicator checklist](indicators.md#manual-acceptance-checklist), physical shortcuts, pointer/key cleanup, mixed DPI/display changes and screen-sharing/recording behavior. The user deferred physical-input tests; all such checks remain **not run**, not passing (#20, #21, #31).
 
 This establishes the automated/passive host-validation baseline and records its gaps. It does not establish clean-machine readiness, physical-input acceptance, real-model reasoning quality or overall release acceptance. Real-agent tasks remain in #35/#36; DSH setup prerequisites are recorded in the [baseline identity audit](#baseline-identity-and-schema-evidence).
