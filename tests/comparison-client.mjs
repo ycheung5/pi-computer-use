@@ -24,6 +24,11 @@ export async function createComparisonClient({
         // Retain the entire MCP response, including isError and non-JSON blocks.
         return {
           ...result,
+          ...(action === "find" &&
+          result.matches === undefined &&
+          Array.isArray(result.results)
+            ? { matches: result.results }
+            : {}),
           ...(raw.isError ? { ok: false } : {}),
           mcpResult: raw,
         };
