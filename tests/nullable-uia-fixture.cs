@@ -19,8 +19,9 @@ class UnknownTypeControl : Control, IRawElementProviderSimple {
       int mode = Interlocked.Exchange(ref Mode, 0);
       if (mode != 0) {
         Interlocked.Increment(ref Entries);
-        Console.WriteLine("provider:entered:" + (mode == 1 ? "fault" : "hang")); Console.Out.Flush();
+        Console.WriteLine("provider:entered:" + (mode == 1 ? "fault" : mode == 3 ? "unavailable" : "hang")); Console.Out.Flush();
         if (mode == 1) throw new COMException("Owned provider intentional failure", unchecked((int)0x80004005));
+        if (mode == 3) throw new COMException("Owned provider reports element unavailable", unchecked((int)0x80040201));
         Interlocked.Exchange(ref Active, 1);
         Release.WaitOne(12000);
         Interlocked.Exchange(ref Active, 0);
@@ -51,9 +52,9 @@ class NullProviderFixture {
     ThreadPool.QueueUserWorkItem(delegate {
       string line;
       while ((line = Console.ReadLine()) != null) {
-        if (line == "arm:fault" || line == "arm:hang") {
+        if (line == "arm:fault" || line == "arm:hang" || line == "arm:unavailable") {
           UnknownTypeControl.Release.Reset();
-          Interlocked.Exchange(ref UnknownTypeControl.Mode, line == "arm:fault" ? 1 : 2);
+          Interlocked.Exchange(ref UnknownTypeControl.Mode, line == "arm:fault" ? 1 : line == "arm:unavailable" ? 3 : 2);
           Console.WriteLine("armed"); Console.Out.Flush();
         } else if (line == "release") {
           UnknownTypeControl.Release.Set();
