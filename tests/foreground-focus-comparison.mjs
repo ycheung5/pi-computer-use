@@ -7,7 +7,7 @@ for (const arg of args)
     arg === "--plan" ||
       arg === "--provenance" ||
       arg === "--direct-uia" ||
-      /^--(engine|reference|report)=.+/.test(arg),
+      /^--(engine|reference|report|direct-report)=.+/.test(arg),
     `Unknown option: ${arg}`,
   );
 const option = (name) =>
@@ -97,6 +97,35 @@ function classifyEvidence(evidence) {
           : "fail",
     foregroundPreserved: preserved,
   };
+}
+function classifyDirect(evidence) {
+  return evidence?.dispatched === true &&
+    evidence.marker === "sent" &&
+    evidence.closed === true &&
+    evidence.exitCode === 0 &&
+    evidence.signal === null
+    ? {
+        outcome: "returned",
+        detail: "Direct SetFocus returned and caller exited successfully",
+      }
+    : {
+        outcome: "unknown",
+        detail: "Direct SetFocus completion is not proven",
+      };
+}
+const directReportPath = option("direct-report");
+if (directReportPath) {
+  assert.equal(
+    args.length,
+    1,
+    "direct-report cannot be combined with other options",
+  );
+  const { readFile } = await import("node:fs/promises");
+  const outcome = classifyDirect(
+    JSON.parse(await readFile(directReportPath, "utf8")),
+  );
+  console.log(JSON.stringify({ executed: false, ...outcome }));
+  process.exit(outcome.outcome === "returned" ? 0 : 1);
 }
 const reportPath = option("report");
 if (reportPath) {
@@ -386,8 +415,33 @@ try {
       { cwd: folder, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] },
     );
     fixtures.push(child);
-    child.stderr.resume();
-    const closed = once(child, "close");
+    const directEvidence = {
+      pid: child.pid,
+      phase: "initializing",
+      dispatched: false,
+      marker: null,
+      closed: false,
+      exitCode: null,
+      signal: null,
+      stderr: "",
+      stderrTruncated: false,
+    };
+    result.directEvidence = directEvidence;
+    child.stdin.on("error", (error) => {
+      directEvidence.stdinError = String(error);
+    });
+    child.stderr.on("data", (chunk) => {
+      const text = String(chunk);
+      const available = 4096 - directEvidence.stderr.length;
+      if (available > 0) directEvidence.stderr += text.slice(0, available);
+      if (text.length > available) directEvidence.stderrTruncated = true;
+    });
+    const closed = once(child, "close").then(([code, signal]) => {
+      directEvidence.closed = true;
+      directEvidence.exitCode = code;
+      directEvidence.signal = signal;
+      return [code, signal];
+    });
     const lines = createInterface({ input: child.stdout })[
       Symbol.asyncIterator
     ]();
@@ -401,7 +455,8 @@ try {
       "ready",
       "Direct UIA FromHandle and identity validation must complete before sampling",
     );
-    direct = { child, closed, read };
+    directEvidence.phase = "ready";
+    direct = { child, closed, read, evidence: directEvidence };
     result.focusDispatch = "direct-uia-control";
     result.inputEventsAfterDirectPreparation = await observer.snapshot();
     result.directPre = await target.observe();
@@ -423,15 +478,39 @@ try {
   let focus;
   if (direct) {
     directDispatched = true;
+    direct.evidence.dispatched = true;
+    direct.evidence.phase = "gate-sent";
     direct.child.stdin.end("focus\n");
-    assert.equal(
-      await direct.read(),
-      "sent",
-      "Direct UIA SetFocus must return",
-    );
-    const [code] = await direct.closed;
+    try {
+      direct.evidence.marker = await direct.read();
+      direct.evidence.phase = "marker-received";
+    } catch (error) {
+      direct.evidence.readError = String(error);
+      direct.evidence.phase = "response-missing";
+    }
+    // A process exit alone is not evidence of SetFocus completion. Await close
+    // for bounded diagnostics, then retain the owners unless a return marker
+    // and a successful exit independently establish the caller boundary.
+    let timer;
+    try {
+      await Promise.race([
+        direct.closed,
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 2000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+    const assessment = classifyDirect(direct.evidence);
+    direct.evidence.outcome = assessment.outcome;
+    if (assessment.outcome !== "returned") {
+      const e = new Error("Direct UIA completion unconfirmed");
+      e.inconclusive = true;
+      throw e;
+    }
     directSettled = true;
-    assert.equal(code, 0, "Direct UIA process must exit successfully");
+    direct.evidence.phase = "returned";
     focus = {
       ok: true,
       action: "focus",
