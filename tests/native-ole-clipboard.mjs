@@ -128,22 +128,65 @@ const fixture = spawn(executable, [], {
   windowsHide: true,
   cwd: folder,
 });
-const closed = once(fixture, "close");
+let fixtureStderr = "";
+fixture.stderr.on("data", (chunk) => {
+  // Fixture emits fixed diagnostic categories, never original clipboard content.
+  fixtureStderr = (fixtureStderr + chunk.toString()).slice(-2048);
+});
+let fixtureExit;
+const closed = once(fixture, "close").then(([code, signal]) => {
+  fixtureExit = { code, signal };
+  return fixtureExit;
+});
 const lines = createInterface({ input: fixture.stdout });
+const startupDiagnostic = () => {
+  const match = fixtureStderr.match(
+    /fixture-startup:([a-z-]+);hresult=([0-9A-F]{8});clipboard-unchanged/,
+  );
+  return match
+    ? {
+        phase: "startup",
+        reason: match[1],
+        hresult: match[2],
+        clipboardChanged: false,
+      }
+    : undefined;
+};
 const next = async () => {
-  const result = await Promise.race([
-    once(lines, "line"),
-    closed.then(() => {
-      throw Error("fixture exited before reply");
-    }),
-  ]);
-  return result[0];
+  if (fixtureExit)
+    throw Error(
+      `fixture exited before reply: ${JSON.stringify({ ...fixtureExit, startup: startupDiagnostic() })}`,
+    );
+  let timer;
+  try {
+    const result = await Promise.race([
+      once(lines, "line"),
+      closed.then((exit) => {
+        throw Error(
+          `fixture exited before reply: ${JSON.stringify({ ...exit, startup: startupDiagnostic() })}`,
+        );
+      }),
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(Error("fixture reply timed out after 10000ms")),
+          10000,
+        );
+      }),
+    ]);
+    return result[0];
+  } finally {
+    clearTimeout(timer);
+  }
 };
 const command = async (text) => {
+  if (fixtureExit) throw Error("fixture already exited; no command dispatched");
   const reply = next();
   fixture.stdin.write(`${text}\n`);
   return reply;
 };
+let fixtureReady = false;
+let failure;
+
 let client;
 const observations = [];
 const execute = async (action, args) => {
@@ -182,10 +225,13 @@ const readEditor = async (id, target) => {
   return fixtureValue;
 };
 try {
-  const target = {
-    nativeWindowHandle: Number(await next()),
-    processId: fixture.pid,
-  };
+  const handle = Number(await next());
+  assert.ok(
+    Number.isSafeInteger(handle) && handle > 0,
+    "fixture must return a valid HWND before any seed or backend call",
+  );
+  fixtureReady = true;
+  const target = { nativeWindowHandle: handle, processId: fixture.pid };
   if (probe) {
     assert.equal(await command("seed-indexed"), "indexed-seeded");
     const result = JSON.parse(await command("probe-indexed"));
@@ -319,27 +365,104 @@ try {
     console.log(JSON.stringify({ ok: true, engine, cases: outcomes }));
   }
 } catch (error) {
-  console.error(JSON.stringify({ ok: false, engine, error: error.message }));
-  throw error;
+  failure = error;
+  console.error(
+    JSON.stringify({
+      ok: false,
+      engine,
+      error: error.message,
+      fixtureExit,
+      fixtureStartup: startupDiagnostic(),
+    }),
+  );
 } finally {
   // Retain raw tool errors/optional engine diagnostics; fixture oracles decide preservation.
   console.log(JSON.stringify({ engine, observations }));
   try {
-    const restoration = await command("restore-close");
-    assert.match(
-      restoration,
-      /original-restored|original-unchanged|newer-copy-preserved/,
+    if (fixtureReady && !fixtureExit) {
+      const restoration = await command("restore-close");
+      assert.match(
+        restoration,
+        /original-restored|original-unchanged|newer-copy-preserved/,
+      );
+      console.log(JSON.stringify({ fixtureCleanup: restoration }));
+      await closed;
+    } else {
+      console.log(
+        JSON.stringify({
+          fixtureCleanup: fixtureReady
+            ? "unconfirmed: fixture exited"
+            : "not-started: no seed dispatched",
+          fixtureExit,
+          fixtureStartup: startupDiagnostic(),
+        }),
+      );
+    }
+  } catch (cleanupError) {
+    console.error(
+      JSON.stringify({
+        fixtureCleanup: "unconfirmed",
+        error: cleanupError.message,
+      }),
     );
-    console.log(JSON.stringify({ fixtureCleanup: restoration }));
-    await closed;
-    lines.close();
+    failure ??= cleanupError;
   } finally {
-    await client?.dispose();
+    lines.close();
+    if (!fixtureReady && !fixtureExit) {
+      // No seed command was sent: retiring a stuck startup cannot discard fixture clipboard data.
+      fixture.kill();
+      let timer;
+      try {
+        await Promise.race([
+          closed,
+          new Promise((_, reject) => {
+            timer = setTimeout(
+              () =>
+                reject(Error("fixture startup process cleanup unconfirmed")),
+              3000,
+            );
+          }),
+        ]);
+      } catch (cleanupError) {
+        console.error(
+          JSON.stringify({
+            fixtureCleanup: "unconfirmed",
+            error: cleanupError.message,
+          }),
+        );
+        failure ??= cleanupError;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    try {
+      await client?.dispose();
+    } catch (cleanupError) {
+      failure ??= cleanupError;
+      console.error(
+        JSON.stringify({
+          backendCleanup: "unconfirmed",
+          error: cleanupError.message,
+        }),
+      );
+    }
   }
-  await rm(folder, {
-    recursive: true,
-    force: true,
-    maxRetries: 5,
-    retryDelay: 100,
-  });
+  try {
+    await rm(folder, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
+  } catch (cleanupError) {
+    console.error(
+      JSON.stringify({
+        fixtureFilesCleanup: "unconfirmed",
+        error: cleanupError.message,
+      }),
+    );
+    failure ??= cleanupError;
+  }
 }
+
+if (failure) throw failure;

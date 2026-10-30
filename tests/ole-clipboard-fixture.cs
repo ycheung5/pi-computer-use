@@ -82,7 +82,12 @@ class OleClipboardFixture {
   return "{\"direct\":\""+CheckIndexedData(direct)+"\",\"clipboard\":\""+CheckIndexedData(clipboard)+"\",\"expectedFormat\":"+RegisterClipboardFormat("PiCUIndexedPayload")+",\"directFormats\":"+IndexedFormats(direct)+",\"clipboardFormats\":"+IndexedFormats(clipboard)+"}";
  }
  [STAThread]static void Main(){
-  Console.OutputEncoding=new UTF8Encoding(false);original=PreserveOriginal();
+  Console.OutputEncoding=new UTF8Encoding(false);
+  try{original=PreserveOriginal();}
+  catch(Exception error){
+   string reason=error.Message=="unsupported original clipboard format; fixture did not replace it"?"unsupported-original-format":error.Message=="fixture requires text/stream clipboard data; original unchanged"?"unsupported-original-value":error.Message=="clipboard changed before fixture setup"?"clipboard-changed-during-setup":"clipboard-unavailable";
+   Console.Error.WriteLine("fixture-startup:"+reason+";hresult="+error.HResult.ToString("X8")+";clipboard-unchanged");Console.Error.Flush();Environment.ExitCode=2;return;
+  }
   var form=new OleFixtureForm {Text="Pi OLE clipboard disposable fixture",Width=500,Height=220};
   var editor=new TextBox {AccessibleName="OLE clipboard editor",Left=10,Top=10,Width=400};form.Controls.Add(editor);
   bool copyOnPaste=false;
