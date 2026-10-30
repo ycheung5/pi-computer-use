@@ -43,3 +43,70 @@ test("normal fixture exit completes without a cleanup warning", () => {
   assert.equal(result.status, 0, result.stderr || String(result.error));
   assert.equal(result.stdout.trim(), "confirmed");
 });
+
+test("a dispatched fixture command with no reply remains unconfirmed", () => {
+  const script = `
+    import { runFixtureCommand } from ${JSON.stringify(helper)};
+    const state = { unconfirmed: false };
+    try { await runFixtureCommand(state, async () => { throw Error('reply timed out'); }); } catch {}
+    console.log(JSON.stringify(state));
+  `;
+  const result = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", script],
+    {
+      encoding: "utf8",
+      timeout: 2000,
+    },
+  );
+  assert.equal(result.status, 0, result.stderr || String(result.error));
+  assert.deepEqual(JSON.parse(result.stdout), { unconfirmed: true });
+});
+
+test("an unconfirmed fixture command prevents later restore commands", () => {
+  const script = `
+    import { runFixtureCommand } from ${JSON.stringify(helper)};
+    const state = { unconfirmed: false };
+    try { await runFixtureCommand(state, async () => { throw Error('reply timed out'); }); } catch {}
+    let dispatched = false;
+    try { await runFixtureCommand(state, async () => { dispatched = true; return 'restored'; }); } catch {}
+    console.log(JSON.stringify({ dispatched, unconfirmed: state.unconfirmed }));
+  `;
+  const result = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", script],
+    {
+      encoding: "utf8",
+      timeout: 2000,
+    },
+  );
+  assert.equal(result.status, 0, result.stderr || String(result.error));
+  assert.deepEqual(JSON.parse(result.stdout), {
+    dispatched: false,
+    unconfirmed: true,
+  });
+});
+
+test("a confirmed fixture command allows orderly restoration", () => {
+  const script = `
+    import { runFixtureCommand } from ${JSON.stringify(helper)};
+    const state = { unconfirmed: false };
+    const seed = await runFixtureCommand(state, async () => 'seeded');
+    const restore = await runFixtureCommand(state, async () => 'restored');
+    console.log(JSON.stringify({ seed, restore, unconfirmed: state.unconfirmed }));
+  `;
+  const result = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", script],
+    {
+      encoding: "utf8",
+      timeout: 2000,
+    },
+  );
+  assert.equal(result.status, 0, result.stderr || String(result.error));
+  assert.deepEqual(JSON.parse(result.stdout), {
+    seed: "seeded",
+    restore: "restored",
+    unconfirmed: false,
+  });
+});
