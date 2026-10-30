@@ -222,7 +222,8 @@ export async function runDragDrop({
       console.error(
         "Input cleanup unconfirmed: retaining the engine and fixture; stop dependent tests and investigate before terminating the input owner.",
       );
-      await new Promise(() => {});
+      const { retainPointerOwner } = await import("./pointer-input-safety.mjs");
+      await retainPointerOwner();
     }
     for (const handler of host?.shutdown ?? []) await handler();
     await client?.dispose();
