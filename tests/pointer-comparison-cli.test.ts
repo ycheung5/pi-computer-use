@@ -23,6 +23,14 @@ test("Pointer comparison plans without resources and refuses unapproved input", 
       assert.equal(plan.executed, false);
       assert.equal(plan.engine, engine);
       assert.ok(plan.cases.includes("scaled-click"));
+      const dragPlan = run("--list", `--engine=${engine}`, "--case=drag-drop");
+      assert.equal(dragPlan.status, 0, dragPlan.stderr);
+      assert.deepEqual(JSON.parse(dragPlan.stdout).cases, [
+        "successful-drag-drop",
+      ]);
+      const dragRefused = run(`--engine=${engine}`, "--case=drag-drop");
+      assert.notEqual(dragRefused.status, 0);
+      assert.match(dragRefused.stderr, /PI_CU_DEDICATED_INPUT_DESKTOP=1/);
       assert.ok(plan.pending.includes("foreground-restoration"));
       const refused = run(
         `--engine=${engine}`,
@@ -88,6 +96,63 @@ test("Pointer drag reporting retains a timeout and held-button evidence", async 
       "evidence.json",
       "runner.mjs",
     ]);
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test("Drop report retains an input owner when cleanup is explicitly unconfirmed", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "pointer-drop-report-"));
+  try {
+    const runner = join(folder, "runner.mjs");
+    await cp(resolve("tests/native-pointer-physical.mjs"), runner);
+    await cp(
+      resolve("tests/pointer-drop-report.mjs"),
+      join(folder, "pointer-drop-report.mjs"),
+    );
+    const report = join(folder, "evidence.json");
+    await writeFile(
+      report,
+      JSON.stringify({
+        dispatch: {
+          status: "fulfilled",
+          value: { ok: true, cleanupConfirmed: false },
+        },
+        state: { drops: 1, held: 0 },
+      }),
+    );
+    const result = spawnSync(
+      process.execPath,
+      [runner, `--report-drop=${report}`],
+      {
+        cwd: folder,
+        encoding: "utf8",
+        env: { ...process.env, PI_CU_DEDICATED_INPUT_DESKTOP: "" },
+      },
+    );
+    assert.equal(result.status, 1, result.stderr);
+    const actual = JSON.parse(result.stdout);
+    assert.equal(actual.ok, false);
+    assert.equal(actual.cleanupVerification, "unconfirmed");
+    assert.equal(actual.inputDispatched, false);
+    await writeFile(
+      report,
+      JSON.stringify({
+        dispatch: { status: "fulfilled", value: { ok: true } },
+        state: { drops: 1, held: 0 },
+      }),
+    );
+    const passed = spawnSync(
+      process.execPath,
+      [runner, `--report-drop=${report}`],
+      {
+        cwd: folder,
+        encoding: "utf8",
+        env: { ...process.env, PI_CU_DEDICATED_INPUT_DESKTOP: "" },
+      },
+    );
+    assert.equal(passed.status, 0, passed.stderr);
+    assert.equal(JSON.parse(passed.stdout).cleanupVerification, "released");
   } finally {
     await rm(folder, { recursive: true, force: true });
   }
