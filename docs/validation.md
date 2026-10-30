@@ -444,14 +444,14 @@ try {
 }
 ```
 
-This path matches the tested runtime pin in this release; use the package's verified runtime if that pin changes. The pointer command sends real input. The older `native-text-physical.mjs` runner seeds its fixture by emptying and replacing the existing clipboard, and its fixture does not restore the original clipboard. Do not run it against ordinary user work; use a disposable clipboard or the ownership-aware OLE runner for supported clipboard checks. Record results alongside the remaining manual checks below; passing scripted cases alone is not full acceptance.
+This path matches the tested runtime pin in this release; use the package's verified runtime if that pin changes. The pointer command sends real input. The legacy `native-text-physical.mjs` runner now refuses execution before loading a backend: its old fixture overwrote the original clipboard and could retire an unsettled input owner. Use the ownership-aware OLE runner for supported clipboard checks; it does not establish cancellation acceptance. Record results alongside the remaining manual checks below; passing scripted cases alone is not full acceptance.
 
 ## Manual release gates
 
 These remain **pending until a named person records the environment, steps, expected/actual results and evidence**. The user planned to perform acceptance testing.
 
 - [ ] Clean Windows Pi installation outside this WSL job, and clean WSL2 Ubuntu installation, with no dev dependency tree or separately installed Windows Node; record install/update/removal and missing/corrupt runtime/network diagnostics.
-- [ ] Dedicated interactive desktop: complete the remaining pointer and keyboard cancellation checks. The older `test:native:text:physical` fixture replaces the existing clipboard without restoring it; a preservation-safe long-typing/cancellation runner is needed for ordinary user data. A disposable clipboard is required to use the older fixture.
+- [ ] Dedicated interactive desktop: complete the remaining pointer and keyboard cancellation checks. The legacy `test:native:text:physical` runner is blocked because its fixture overwrote the original clipboard and could retire an unsettled input owner; a preservation-safe long-typing/cancellation runner remains needed.
 - [ ] Repeat input at 100%, 150%, 200% scaling, negative-origin monitors and changed primary/layout. Check screenshots/OCR coordinate accuracy and restoration.
 - [ ] Real Esc and extra shortcut while input/UIA is busy; release held keys/buttons, prevent same-operation retries, and recover only on new user input. Repeat with both indicators disabled.
 - [ ] Pointer/focus/user-copy interference, same-process windows and menus/dialogs; confirm automation respects intervening user actions. Check cross-application drag destinations and target replacement.
