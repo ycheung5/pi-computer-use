@@ -41,6 +41,7 @@ partial class WindowsBridge {
     // Unknown/unavailable session state does not invent a lock diagnosis;
     // the existing identity, foreground and input guards still apply.
   }
+  [DllImport("user32.dll",EntryPoint="BringWindowToTop")]static extern bool ManagementBringToTop(IntPtr window);
   static bool ManagementActivate(IntPtr window,uint owner) {
     ManagementAssert(window,owner);ManagementEnsureUnlockedSession();
     if(IsIconic(window))ManagementShow(window,9);
@@ -48,7 +49,7 @@ partial class WindowsBridge {
     SetForegroundWindow(window);
     if(GetForegroundWindow()==window)return true;
     IntPtr front=GetForegroundWindow();uint ignored;uint frontThread=GetWindowThreadProcessId(front,out ignored),own=ManagementThread();bool attached=false;
-    try {if(frontThread!=0&&frontThread!=own)attached=ManagementAttach(own,frontThread,true);ManagementAssert(window,owner);SetForegroundWindow(window);}
+    try {if(frontThread!=0&&frontThread!=own)attached=ManagementAttach(own,frontThread,true);ManagementAssert(window,owner);ManagementBringToTop(window);ManagementAssert(window,owner);SetForegroundWindow(window);}
     finally {if(attached)ManagementAttach(own,frontThread,false);}
     for(int index=0;index<8&&GetForegroundWindow()!=window;index++)Thread.Sleep(10);
     return GetForegroundWindow()==window;
