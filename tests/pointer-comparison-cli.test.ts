@@ -263,7 +263,7 @@ test("Drop report retains an input owner when cleanup is explicitly unconfirmed"
       JSON.stringify({
         dispatch: {
           status: "fulfilled",
-          value: { ok: true, cleanupConfirmed: true },
+          value: { ok: true, action: "drag", cleanupConfirmed: true },
         },
         state: { drops: 1, held: 0 },
       }),
@@ -281,6 +281,30 @@ test("Drop report retains an input owner when cleanup is explicitly unconfirmed"
     assert.equal(
       JSON.parse(acknowledged.stdout).cleanupVerification,
       "released",
+    );
+    await writeFile(
+      report,
+      JSON.stringify({
+        dispatch: {
+          status: "fulfilled",
+          value: { ok: true, action: "move", cleanupConfirmed: true },
+        },
+        state: { drops: 1, held: 0 },
+      }),
+    );
+    const wrongAction = spawnSync(
+      process.execPath,
+      [runner, `--report-drop=${report}`],
+      {
+        cwd: folder,
+        encoding: "utf8",
+        env: { ...process.env, PI_CU_DEDICATED_INPUT_DESKTOP: "" },
+      },
+    );
+    assert.equal(wrongAction.status, 1, wrongAction.stderr);
+    assert.equal(
+      JSON.parse(wrongAction.stdout).cleanupVerification,
+      "unconfirmed",
     );
   } finally {
     await rm(folder, { recursive: true, force: true });

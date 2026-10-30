@@ -1,9 +1,17 @@
 // Test-runner lifecycle only: physical input may continue after a rejected call.
-export async function runPointerInput(state, dispatch) {
+export function actionMaySendInput(engine, action) {
+  return (
+    ["click", "double_click", "move", "scroll", "drag"].includes(action) ||
+    (engine === "reference" && action === "activate_window")
+  );
+}
+
+export async function runPointerInput(state, action, dispatch) {
   if (state.unconfirmed) throw Error("Prior pointer input is unconfirmed");
   state.unconfirmed = true;
   const result = await dispatch();
   state.unconfirmed =
+    result?.action !== action ||
     result?.cleanupConfirmed !== true ||
     result?.inputCleanupConfirmed === false ||
     result?.buttonCleanupConfirmed === false ||

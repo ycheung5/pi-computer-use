@@ -159,17 +159,9 @@ let host;
 let client;
 let execute;
 let watchdog;
-const { runPointerInput, retainPointerOwner } = await import(
-  "./pointer-input-safety.mjs"
-);
+const { actionMaySendInput, runPointerInput, retainPointerOwner } =
+  await import("./pointer-input-safety.mjs");
 const pointerState = { unconfirmed: false };
-const physicalActions = new Set([
-  "click",
-  "double_click",
-  "move",
-  "scroll",
-  "drag",
-]);
 try {
   if (engine === "pi") {
     const [{ default: computerUse }, { computerUseHost }] = await Promise.all([
@@ -195,11 +187,12 @@ try {
   const call = async (action, args = {}, signal) => {
     try {
       const dispatch = () => execute(action, { ...target, ...args }, signal);
-      const result = physicalActions.has(action)
-        ? await runPointerInput(pointerState, dispatch)
+      const maySendInput = actionMaySendInput(engine, action);
+      const result = maySendInput
+        ? await runPointerInput(pointerState, action, dispatch)
         : await dispatch();
       console.log(JSON.stringify({ engine, action, result }));
-      if (physicalActions.has(action) && pointerState.unconfirmed)
+      if (maySendInput && pointerState.unconfirmed)
         throw Error("Pointer input cleanup unconfirmed; owner retained");
       return result;
     } catch (error) {

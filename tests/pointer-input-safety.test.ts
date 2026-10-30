@@ -9,14 +9,14 @@ const moduleUrl = pathToFileURL(resolve("tests/pointer-input-safety.mjs")).href;
 
 test("uncertain pointer dispatch prevents teardown while acknowledged cleanup allows it", () => {
   const script = `
-    import { runPointerInput } from ${JSON.stringify(moduleUrl)};
+    import { runPointerInput, actionMaySendInput } from ${JSON.stringify(moduleUrl)};
     const results = [];
-    for (const fn of [async () => ({ok:true, cleanupConfirmed:true}), async () => ({ok:true}), async () => ({ok:true, cleanupConfirmed:true, buttonCleanupConfirmed:false}), async () => {throw Error('timeout')}]) {
+    for (const fn of [async () => ({ok:true, action:'click', cleanupConfirmed:true}), async () => ({ok:true}), async () => ({ok:true, action:'click', cleanupConfirmed:true, buttonCleanupConfirmed:false}), async () => ({ok:true, action:'other', cleanupConfirmed:true}), async () => {throw Error('timeout')}]) {
       const state={unconfirmed:false};
-      try { await runPointerInput(state,fn); } catch {}
+      try { await runPointerInput(state,'click',fn); } catch {}
       results.push(state.unconfirmed);
     }
-    console.log(JSON.stringify(results));
+    console.log(JSON.stringify({results, referenceActivation:actionMaySendInput("reference","activate_window"), piActivation:actionMaySendInput("pi","activate_window")}));
   `;
   const result = spawnSync(
     process.execPath,
@@ -24,7 +24,11 @@ test("uncertain pointer dispatch prevents teardown while acknowledged cleanup al
     { encoding: "utf8", timeout: 2000 },
   );
   assert.equal(result.status, 0, result.stderr || String(result.error));
-  assert.deepEqual(JSON.parse(result.stdout), [false, true, true, true]);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    results: [false, true, true, true, true],
+    referenceActivation: true,
+    piActivation: false,
+  });
 });
 
 test("unconfirmed pointer owner stays alive without other handles", async () => {
