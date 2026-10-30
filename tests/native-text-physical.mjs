@@ -6,9 +6,28 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import computerUse from "../dist/extension.js";
-import { nativeDesktop } from "../dist/native.js";
-import { computerUseHost } from "./native-host.mjs";
+
+// The fixture overwrites the original clipboard and can retire an unsettled
+// input owner. This gate is intentionally not bypassable by environment flags.
+if (process.argv.length === 3 && process.argv[2] === "--plan") {
+  console.log(
+    JSON.stringify({
+      executed: false,
+      blocked: true,
+      reason: "clipboard-and-input-settlement-unverified",
+    }),
+  );
+  process.exit(0);
+}
+function requireSafeFixture() {
+  throw new Error(
+    "LEGACY_TEXT_PHYSICAL_UNSAFE: original clipboard restoration and input settlement are unverified; use documented preservation-aware fixtures",
+  );
+}
+requireSafeFixture();
+const { default: computerUse } = await import("../dist/extension.js");
+const { nativeDesktop } = await import("../dist/native.js");
+const { computerUseHost } = await import("./native-host.mjs");
 
 assert.equal(process.platform, "win32");
 assert.equal(
