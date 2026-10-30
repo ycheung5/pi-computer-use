@@ -224,6 +224,16 @@ class ReferenceClient {
     );
   }
   request(method, params) {
+    if (this.injectStop && method === "tools/call") {
+      this.injectStop = false;
+      return Promise.resolve({
+        isError: true,
+        content: [
+          { type: "text", text: "CANCELLED: deliberate reference stop" },
+          { type: "text", text: "Stop requested by test fixture" },
+        ],
+      });
+    }
     const id = ++this.next;
     return new Promise((resolveRequest, reject) => {
       const timer = setTimeout(() => {
@@ -251,7 +261,13 @@ class ReferenceClient {
       name: `windows_computer_use_${action}`,
       arguments: args,
     });
-    assert.notEqual(response.isError, true, `Reference ${action} failed`);
+    if (response.isError === true) {
+      const error = new Error(
+        `Reference ${action} failed: ${JSON.stringify(response)}`,
+      );
+      error.referenceResult = response;
+      throw error;
+    }
     const content = response.content.find(
       (block) => block.type === "text" && block.text.trim().startsWith("{"),
     );
@@ -373,6 +389,16 @@ const sample = async (name, index, isWarmup = false) => {
     );
     const start = performance.now();
     client = await engines[name]();
+    if (
+      process.argv.includes("--verify-stop-collection") &&
+      !isWarmup &&
+      cases.length === 0 &&
+      name === "reference"
+    ) {
+      client.injectStop = true;
+      row.injected = true;
+      row.cause = "test-defect";
+    }
     await client.call("health", {});
     row.timings.processColdHealthMs =
       Math.round((performance.now() - start) * 100) / 100;
@@ -414,6 +440,7 @@ const sample = async (name, index, isWarmup = false) => {
     row.status = row.initial === null ? "blocked" : "fail";
     row.cause ??= row.initial === null ? "environment" : "unknown";
     row.error = String(error);
+    if (error.referenceResult) row.referenceResult = error.referenceResult;
     controllerCleanupUnconfirmed = error.cleanupUnconfirmed === true;
     if (row.initial !== null && row.actual === null) {
       try {

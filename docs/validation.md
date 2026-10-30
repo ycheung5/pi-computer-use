@@ -261,6 +261,14 @@ flock -w 120 /tmp/pi-cu-live-tests.lock npm run test:benchmark:report -- /path/t
 
 This regression runs the same public benchmark CLI with `--verify-failure-collection`. It deliberately changes the first verification expectation, labels that case `injected: true` and `cause: test-defect`, and asserts the benchmark exits 1 with the failed case retained, five later passing cases, reset text before every case, alternating engine order and confirmed fixture cleanup. The regression itself exits 0 only when that reporting behavior is correct. Do not count the injected mismatch as a DSH/Pi product defect or include it in ordinary comparison evidence. No physical input, clipboard mutation, daily profile access or production behavior is added by either command.
 
+The separate stop regression substitutes one deliberate MCP `isError` response at the reference request seam, before the first measured health dispatch. Both warmups still use the real engines. It checks that all text blocks and the complete error result survive in the report, the owned editor remains `initial`, all five later cases are blocked without execution, and cleanup completes:
+
+```sh
+flock -w 120 /tmp/pi-cu-live-tests.lock npm run test:benchmark:stop -- /path/to/dsh-computer-use-win
+```
+
+This uses `--verify-stop-collection`, labels the failed case as injected/test-defect, and does not exercise a real emergency-stop mechanism. Its red run exposed the old generic `Reference health failed` assertion discarding cancellation evidence and continuing later cases; the corrected collector retains the MCP error and blocks them. Keep this deliberate failure separate from normal product outcomes.
+
 On 2026-10-30 this regression failed against the old collector (`ok: true` concealed the requested diagnostic expectation) and passed after the reporting/reset extension. A normal three-repetition run against reference 0.5.3 and Pi 0.1.0 passed all six measured cases and both warmups on Windows Node 22.23.4 via WSL2. The independently observed values and resets matched, and controller/editor plus final fixture cleanup were confirmed. These are background native Edit results only; physical, browser and real-agent workflows remain separate tickets.
 
 ## Dedicated physical-input runners
