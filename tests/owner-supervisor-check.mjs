@@ -1,10 +1,10 @@
 // No desktop or clipboard APIs: verify timeout settlement of synthetic descendants.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ownerWorkspace } from "./owner-supervisor-workspace.mjs";
 
 if (process.argv[2] === "--synthetic") {
   const folder = process.argv[3];
@@ -28,7 +28,8 @@ if (process.argv[2] === "--synthetic") {
   );
 } else {
   assert.equal(process.platform, "win32");
-  const folder = mkdtempSync(join(tmpdir(), "pi-cu-owner-supervisor-"));
+  const workspace = ownerWorkspace("pi-cu-owner-supervisor-");
+  const { folder } = workspace;
   try {
     const exe = join(folder, "supervisor.exe");
     const compiler = join(
@@ -48,23 +49,13 @@ if (process.argv[2] === "--synthetic") {
       { encoding: "utf8", windowsHide: true, timeout: 30000 },
     );
     assert.equal(compile.status, 0, compile.stdout + compile.stderr);
-    const run = spawnSync(
-      exe,
-      [
-        "2000",
-        process.execPath,
-        fileURLToPath(import.meta.url),
-        "--synthetic",
-        folder,
-      ],
-      { encoding: "utf8", windowsHide: true, timeout: 12000 },
-    );
-    assert.equal(
-      run.status,
-      0,
-      run.stdout + run.stderr + String(run.error ?? ""),
-    );
-    const result = JSON.parse(run.stdout.trim());
+    const result = workspace.run(exe, [
+      "2000",
+      process.execPath,
+      fileURLToPath(import.meta.url),
+      "--synthetic",
+      folder,
+    ]);
     assert.equal(result.reason, "timeout");
     assert.equal(result.activeProcesses, 0);
     assert.ok(
@@ -83,6 +74,6 @@ if (process.argv[2] === "--synthetic") {
       JSON.stringify({ ...result, descendantStarted: true, lateWrites: false }),
     );
   } finally {
-    rmSync(folder, { recursive: true, force: true });
+    workspace.cleanup();
   }
 }
