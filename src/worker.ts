@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import {
   controlTools,
@@ -190,11 +191,51 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+const inputPreparations = new Map<
+  number,
+  { token: string; accept: () => void }
+>();
+async function acknowledgeInputPreparation(
+  requestId: number,
+  operationId: string,
+  signal: AbortSignal,
+): Promise<void> {
+  signal.throwIfAborted();
+  const token = randomUUID();
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      inputPreparations.delete(requestId);
+      signal.removeEventListener("abort", abort);
+      input.removeListener("close", abort);
+    };
+    const abort = () => {
+      cleanup();
+      process.stdout.write(
+        `${JSON.stringify({ event: "input_state", active: false })}\n`,
+      );
+      reject(signal.reason ?? new Error("COMPUTER_USE_STOPPED"));
+    };
+    inputPreparations.set(requestId, {
+      token,
+      accept: () => {
+        cleanup();
+        resolve();
+      },
+    });
+    signal.addEventListener("abort", abort, { once: true });
+    input.once("close", abort);
+    process.stdout.write(
+      `${JSON.stringify({ event: "input_prepare", requestId, operationId, token })}\n`,
+    );
+    if (signal.aborted) abort();
+  });
+}
 async function guardedInput(
   action: string,
   args: Record<string, unknown>,
   operationId: string,
   signal: AbortSignal,
+  requestId: number,
 ): Promise<WorkerResponse["result"]> {
   const armed = await stopListener.arm(operationId, signal);
   if (!armed.ok || typeof armed.cancelEvent !== "string")
@@ -202,10 +243,15 @@ async function guardedInput(
   const prepared = ["type_text", "keypress"].includes(action)
     ? await prepareTextInput(action, args, signal)
     : args;
-  signal.throwIfAborted();
-  process.stdout.write(
-    `${JSON.stringify({ event: "input_state", active: true })}\n`,
-  );
+  await acknowledgeInputPreparation(requestId, operationId, signal);
+  try {
+    signal.throwIfAborted();
+  } catch (error) {
+    process.stdout.write(
+      `${JSON.stringify({ event: "input_state", active: false })}\n`,
+    );
+    throw error;
+  }
   let result: WorkerResponse["result"];
   try {
     result = await executePointer(
@@ -380,6 +426,7 @@ async function dispatch(
         request.args,
         operationId,
         signal,
+        request.id,
       );
       rememberTarget(operationId, result);
       process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
@@ -429,6 +476,7 @@ async function dispatch(
         request.args,
         operationId,
         signal,
+        request.id,
       );
       rememberTarget(operationId, result);
       process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
@@ -498,6 +546,7 @@ async function dispatch(
         { ...request.args, dispatch: "foreground" },
         operationId,
         signal,
+        request.id,
       );
       response.result = {
         ...result,
@@ -530,6 +579,7 @@ async function dispatch(
         textArgs,
         operationId,
         signal,
+        request.id,
       );
       response.result = {
         ...result,
@@ -550,6 +600,16 @@ input.on("line", (line) => {
     parsed = JSON.parse(line);
   } catch {
     process.stderr.write("WORKER_PROTOCOL_ERROR: invalid JSON\n");
+    return;
+  }
+  if (
+    isObject(parsed) &&
+    typeof parsed.inputAck === "string" &&
+    Number.isSafeInteger(parsed.requestId)
+  ) {
+    const preparation = inputPreparations.get(Number(parsed.requestId));
+    if (preparation && preparation.token === parsed.inputAck)
+      preparation.accept();
     return;
   }
   if (isObject(parsed) && typeof parsed.stop === "string") {

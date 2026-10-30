@@ -17,6 +17,7 @@ export interface WorkerClientOptions {
 }
 
 interface Pending {
+  operationId?: string;
   resolve: (result: WorkerResult) => void;
   reject: (error: Error) => void;
   cleanup: () => void;
@@ -103,7 +104,30 @@ export class WorkerClient {
                 event?: string;
                 operationId?: string;
                 active?: boolean;
+                requestId?: number;
+                token?: string;
               };
+              if (response.event === "input_prepare") {
+                const pending = Number.isSafeInteger(response.requestId)
+                  ? this.pending.get(Number(response.requestId))
+                  : undefined;
+                if (
+                  !pending ||
+                  typeof response.token !== "string" ||
+                  response.token.length < 1 ||
+                  response.token.length > 200 ||
+                  typeof response.operationId !== "string" ||
+                  (pending.operationId !== undefined &&
+                    pending.operationId !== response.operationId)
+                )
+                  continue;
+                this.inputActive = true;
+                this.options.onInputState?.(true, response.operationId);
+                child.stdin.write(
+                  `${JSON.stringify({ inputAck: response.token, requestId: response.requestId })}\n`,
+                );
+                continue;
+              }
               if (
                 response.event === "input_state" &&
                 typeof response.active === "boolean"
@@ -258,6 +282,7 @@ export class WorkerClient {
         pending.reject(new Error("COMPUTER_USE_CANCELLED"));
       };
       this.pending.set(id, {
+        operationId,
         resolve,
         reject,
         cleanup: () => {
