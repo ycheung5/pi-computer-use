@@ -112,31 +112,45 @@ partial class WindowsBridge {
     return true;
   }
   static Dictionary<string,object> ScrollPosition(IntPtr handle) {return new Dictionary<string,object>{{"vertical",GetScrollPos(handle,1)},{"horizontal",GetScrollPos(handle,0)}};}
-  static int ScrollSteps(int delta) {return (int)Math.Max(1,((long)Math.Abs((long)delta)+119)/120);}
-  static bool NativeScroll(AutomationElement element,int x,int y,Dictionary<string,object> result) {
+  // Match the reference's Windows wheel-lines setting and midpoint-to-even
+  // rounding. Bound both modes: unlike the reference's page path, a huge
+  // requested delta must not dispatch millions of synchronous messages.
+  static int ScrollSteps(int delta,int lines,bool byPage) {
+    if(delta==0)return 0;
+    double scaled=Math.Abs((double)delta)*(byPage?1.0:lines)/120.0;
+    return (int)Math.Min(100,Math.Max(1,Math.Round(scaled)));
+  }
+  static bool NativeScroll(AutomationElement element,int x,int y,int countX,int countY,bool byPage,Dictionary<string,object> result) {
     IntPtr handle=new IntPtr(element.Current.NativeWindowHandle);if(handle==IntPtr.Zero)return false;
     long style=ControlStyle(handle,-16).ToInt64();
     if((y!=0 && (style & 0x200000)==0) || (x!=0 && (style & 0x100000)==0))return false;
     result["before"]=ScrollPosition(handle);
-    foreach(int axis in new int[]{0,1}) {
+    foreach(int axis in new int[]{1,0}) {
       int delta=axis==0?x:y;if(delta==0)continue;
-      for(int step=0;step<ScrollSteps(delta);step++) { UIntPtr dispatched;if(SendMessageTimeout(handle,axis==0?0x114U:0x115U,new UIntPtr(delta>0?1U:0U),IntPtr.Zero,2,500,out dispatched)==IntPtr.Zero)throw new InvalidOperationException("NATIVE_DISPATCH_UNCONFIRMED: scroll handler did not complete; observe before retrying"); }
+      uint message=axis==0?0x114U:0x115U;int count=axis==0?countX:countY;
+      uint command=(delta>0?1U:0U)+(byPage?2U:0U);
+      for(int step=0;step<count;step++) { UIntPtr dispatched;if(SendMessageTimeout(handle,message,new UIntPtr(command),IntPtr.Zero,2,500,out dispatched)==IntPtr.Zero)throw new InvalidOperationException("NATIVE_DISPATCH_UNCONFIRMED: scroll handler did not complete; observe before retrying"); }
+      UIntPtr completed;SendMessageTimeout(handle,message,new UIntPtr(8),IntPtr.Zero,2,500,out completed);
     }
     UIntPtr ignored;SendMessageTimeout(handle,0,UIntPtr.Zero,IntPtr.Zero,2,500,out ignored);
     result["after"]=ScrollPosition(handle);result["method"]="native_scroll";return true;
   }
   static void ControlScroll(AutomationElement element,IntPtr window,int x,int y,Dictionary<string,object> result) {
+    int lines=System.Windows.Forms.SystemInformation.MouseWheelScrollLines;
+    bool byPage=lines<0;int countX=ScrollSteps(x,lines,byPage),countY=ScrollSteps(y,lines,byPage);
     AutomationElement candidate=element;
     for(int level=0;candidate!=null && level<64;level++) {
       if(candidate.Current.ProcessId!=(int)WindowOwner(window))break;
-      if(NativeScroll(candidate,x,y,result))return;
+      if(NativeScroll(candidate,x,y,countX,countY,byPage,result))return;
       object raw;
       if(candidate.TryGetCurrentPattern(ScrollPattern.Pattern,out raw)) {
         ScrollPattern scroll=(ScrollPattern)raw;
         if((x==0 || scroll.Current.HorizontallyScrollable) && (y==0 || scroll.Current.VerticallyScrollable)) {
           result["before"]=new Dictionary<string,object>{{"vertical",scroll.Current.VerticalScrollPercent},{"horizontal",scroll.Current.HorizontalScrollPercent}};
-          int count=Math.Max(x==0?0:ScrollSteps(x),y==0?0:ScrollSteps(y));
-          for(int step=0;step<count;step++)scroll.Scroll(x!=0 && step<ScrollSteps(x)?(x>0?ScrollAmount.SmallIncrement:ScrollAmount.SmallDecrement):ScrollAmount.NoAmount,y!=0 && step<ScrollSteps(y)?(y>0?ScrollAmount.SmallIncrement:ScrollAmount.SmallDecrement):ScrollAmount.NoAmount);
+          ScrollAmount vertical=y>0?(byPage?ScrollAmount.LargeIncrement:ScrollAmount.SmallIncrement):(byPage?ScrollAmount.LargeDecrement:ScrollAmount.SmallDecrement);
+          ScrollAmount horizontal=x>0?(byPage?ScrollAmount.LargeIncrement:ScrollAmount.SmallIncrement):(byPage?ScrollAmount.LargeDecrement:ScrollAmount.SmallDecrement);
+          for(int step=0;step<countY;step++)scroll.Scroll(ScrollAmount.NoAmount,vertical);
+          for(int step=0;step<countX;step++)scroll.Scroll(horizontal,ScrollAmount.NoAmount);
           result["after"]=new Dictionary<string,object>{{"vertical",scroll.Current.VerticalScrollPercent},{"horizontal",scroll.Current.HorizontalScrollPercent}};result["method"]="uia_scroll";return;
         }
       }
