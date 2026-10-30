@@ -37,7 +37,7 @@ npm run test:package
 
 Individual commands: `npm test`, `npm run typecheck`, `npm run lint`, `npm run format`, and `npm run lint:fix`. CI runs portable checks and package/documentation validation; it does not imply live Windows or manual acceptance.
 
-For real Pi host, reference-schema and same-machine benchmark checks, use [release validation](docs/validation.md). Serialize live WSL tests with `flock -w 120 /tmp/pi-cu-live-tests.lock`; use dedicated disposable fixture windows and profiles. Physical runners require `PI_CU_DEDICATED_INPUT_DESKTOP=1` on a dedicated interactive desktop; text physical tests mutate its clipboard. Do not run them on ordinary user work.
+For real Pi host, reference-schema and same-machine benchmark checks, use [release validation](docs/validation.md). Serialize live WSL tests with `flock -w 120 /tmp/pi-cu-live-tests.lock`; use dedicated disposable fixture windows and profiles. Physical runners require their documented opt-in on a dedicated interactive desktop. The older `native-text-physical.mjs` fixture replaces the existing clipboard without restoring it; use a disposable clipboard or the preservation-aware OLE runner, and do not run the older fixture against ordinary user work.
 
 ## Troubleshooting
 
