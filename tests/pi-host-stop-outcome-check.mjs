@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { assessHostStop } from "./pi-host-stop-outcome.mjs";
+import { assessHostStop, canDiscardHost } from "./pi-host-stop-outcome.mjs";
 
 const good = {
   toolStarted: true,
@@ -34,3 +34,12 @@ for (const change of [
     JSON.stringify(change),
   );
 console.log("Pi host stop outcome checks passed");
+
+const { requireHostContainment } = await import(
+  "./pi-host-stop-containment.mjs"
+);
+assert.throws(() => requireHostContainment(), /HOST_CONTAINMENT_UNVERIFIED/);
+assert.equal(canDiscardHost({ workerExited: true, exitCode: 0 }), true);
+assert.equal(canDiscardHost({ workerExited: true, exitCode: 1 }), false);
+assert.equal(canDiscardHost({ workerExited: false, exitCode: 0 }), false);
+assert.equal(canDiscardHost({ workerExited: true, exitCode: null }), false);

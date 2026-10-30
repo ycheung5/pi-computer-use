@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { assessHostStop } from "./pi-host-stop-outcome.mjs";
+import { requireHostContainment } from "./pi-host-stop-containment.mjs";
+import { assessHostStop, canDiscardHost } from "./pi-host-stop-outcome.mjs";
 import { observeReleased, waitForStart } from "./stop-busy-coordination.mjs";
 
 assert.equal(process.platform, "win32");
@@ -18,6 +19,7 @@ assert.equal(
 );
 const mode = process.argv[2] ?? "esc";
 assert.ok(["esc", "shortcut"].includes(mode));
+requireHostContainment();
 const cli = process.env.PI_CU_PI_CLI;
 assert.ok(cli, "PI_CU_PI_CLI must name the installed Pi CLI");
 const extension = fileURLToPath(
@@ -294,13 +296,12 @@ try {
     if (error.code === "ESRCH") workerExited = true;
     else throw error;
   }
-  assert.equal(workerExited, true, "Worker exit not confirmed");
-  hostClean = true;
   assert.equal(
-    host.exitCode,
-    0,
-    "Pi orderly shutdown did not exit successfully",
+    canDiscardHost({ workerExited, exitCode: host.exitCode }),
+    true,
+    "Pi or worker shutdown not confirmed",
   );
+  hostClean = true;
   console.log(
     JSON.stringify({
       ...assessment,

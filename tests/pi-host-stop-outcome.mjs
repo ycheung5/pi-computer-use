@@ -1,4 +1,8 @@
 // Results describe the real Pi host, not an actual model or DSH.
+export function canDiscardHost({ workerExited, exitCode }) {
+  return workerExited === true && exitCode === 0;
+}
+
 export function assessHostStop(evidence) {
   const {
     toolStarted,
