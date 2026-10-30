@@ -21,6 +21,84 @@ import { WorkerClient } from "../dist/client.js";
 import { nativeWorkerLaunch } from "../dist/launcher.js";
 import { ReferenceClient, referenceResult } from "./reference-client.mjs";
 
+let activeCase;
+async function retainCall(action, args, invoke) {
+  const observation = { action, args };
+  activeCase?.observations.push(observation);
+  try {
+    const result = await invoke();
+    observation.response = result;
+    return result;
+  } catch (error) {
+    observation.error = String(error);
+    if (error.rpcError) observation.rpcError = error.rpcError;
+    throw error;
+  }
+}
+async function recordCase(report, name, id, expected, run) {
+  const row = {
+    engine: name,
+    id,
+    expected,
+    status: "pass",
+    actual: null,
+    observations: [],
+  };
+  const start = performance.now();
+  let halt;
+  activeCase = row;
+  try {
+    row.actual = await run();
+  } catch (error) {
+    row.status = "fail";
+    row.error = String(error);
+    row.actual = error.actual ?? null;
+    if (error.observation) row.observation = error.observation;
+    if (error.expected !== undefined) row.assertionExpected = error.expected;
+    row.cause = "unknown";
+    if (/cancel|stopp|cleanup unconfirmed/i.test(row.error)) halt = error;
+  } finally {
+    activeCase = undefined;
+    row.durationMs = Math.round(performance.now() - start);
+    report.cases.push(row);
+  }
+  if (halt) throw halt;
+  return row;
+}
+if (process.argv.includes("--diagnostic-report")) {
+  const diagnostic = { cases: [] };
+  await recordCase(
+    diagnostic,
+    "synthetic",
+    "depth",
+    "Retain raw response",
+    async () => {
+      const r = await retainCall(
+        "accessibility_tree",
+        { maxDepth: 0 },
+        async () => ({ ok: true, truncated: false, tree: { name: "owned" } }),
+      );
+      assert.equal(r.truncated, true);
+    },
+  );
+  try {
+    await recordCase(
+      diagnostic,
+      "synthetic",
+      "cancel",
+      "Retain interrupted case",
+      async () => {
+        await retainCall("wait_for", {}, async () => {
+          throw new Error("COMPUTER_USE_CANCELLED");
+        });
+      },
+    );
+  } catch (error) {
+    diagnostic.halted = String(error);
+  }
+  console.log(JSON.stringify(diagnostic));
+  process.exit(0);
+}
 if (process.platform === "linux") {
   const run = promisify(execFile),
     launch = await nativeWorkerLaunch();
@@ -207,7 +285,9 @@ async function engine(name) {
     }
     return {
       call: async (action, args) =>
-        referenceResult(await client.call(action, args)),
+        retainCall(action, args, async () =>
+          referenceResult(await client.call(action, args)),
+        ),
       close: () => client.close(),
     };
   }
@@ -221,7 +301,10 @@ async function engine(name) {
   });
   const operation = randomUUID();
   return {
-    call: (action, args) => worker.execute(action, args, undefined, operation),
+    call: (action, args) =>
+      retainCall(action, args, () =>
+        worker.execute(action, args, undefined, operation),
+      ),
     close: () => worker.dispose(),
   };
 }
@@ -242,24 +325,8 @@ function refused(result) {
   assert.ok(result.error, "Failure must include evidence");
   return result;
 }
-async function record(name, id, expected, run) {
-  const row = { engine: name, id, expected, status: "pass", actual: null };
-  const start = performance.now();
-  try {
-    row.actual = await run();
-  } catch (error) {
-    row.status = "fail";
-    row.error = String(error);
-    row.actual = error.actual ?? null;
-    if (error.observation) row.observation = error.observation;
-    if (error.expected !== undefined) row.assertionExpected = error.expected;
-    row.cause = "unknown";
-    if (/cancel|stopp|cleanup unconfirmed/i.test(row.error)) throw error;
-  }
-  row.durationMs = Math.round(performance.now() - start);
-  report.cases.push(row);
-  return row;
-}
+const record = (name, id, expected, run) =>
+  recordCase(report, name, id, expected, run);
 async function runNative(name) {
   const prefix = `Pi paired ${name} ${randomUUID()}`;
   const owned = await fixture("controls-fixture", prefix);

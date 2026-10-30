@@ -222,6 +222,8 @@ From WSL2 after building, use the existing serialized live-test discipline:
 PI_CU_RELEASE_OUTPUT=/tmp/pi-cu-accessibility-evidence flock -w 120 /tmp/pi-cu-live-tests.lock npm run benchmark:accessibility -- /path/to/dsh-computer-use-win
 ```
 
+`test:accessibility:diagnostics` runs the collector CLI without Windows interaction and verifies that assertion failures retain original action arguments/responses and that an interrupted case is recorded before dependent execution halts. Each live case now retains its raw public-interface observations before assertions; earlier artifacts remain unchanged.
+
 The source/version/hash metadata and full JSON report are written to the selected output directory; a nonzero comparison means failures or incomplete coverage, not necessarily a transport failure. The separate report regression can pass while preserving a failing product comparison. Never turn its green result into a parity claim.
 
 The 2026-10-30 run used Windows Node 22.23.4 from WSL2, reference 0.5.3 and Pi 0.1.0. It exercised owned native controls, a stable small Edit fixture, the existing newer-control-type provider, and an isolated installed Chromium page through native UIA. No keyboard, mouse or clipboard input was sent. Value-setting and invocation explicitly prohibited physical fallback; native scroll remained blocked because its public API has no no-fallback option. Fixture state, logical active child, actual foreground HWND/PID and last-input tick were observed independently over fixture IPC. Cleanup confirmed controller disposal, owned fixture exit and temporary-directory removal.

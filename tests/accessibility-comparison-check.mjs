@@ -5,6 +5,30 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
+if (process.argv.includes("--diagnostics")) {
+  const result = await run(process.execPath, [
+    fileURLToPath(new URL("./accessibility-comparison.mjs", import.meta.url)),
+    "--diagnostic-report",
+  ]);
+  const report = JSON.parse(result.stdout);
+  assert.equal(
+    report.cases.length,
+    2,
+    "Interrupted case retained and dependent cases halted",
+  );
+  const [depth, cancelled] = report.cases;
+  assert.equal(depth.status, "fail");
+  assert.equal(depth.observations[0].response.truncated, false);
+  assert.deepEqual(depth.observations[0].response.tree, { name: "owned" });
+  assert.equal(cancelled.id, "cancel");
+  assert.equal(cancelled.expected, "Retain interrupted case");
+  assert.match(cancelled.observations[0].error, /COMPUTER_USE_CANCELLED/);
+  assert.match(report.halted, /COMPUTER_USE_CANCELLED/);
+  console.log(
+    JSON.stringify({ ok: true, check: "accessibility diagnostic retention" }),
+  );
+  process.exit(0);
+}
 let result;
 try {
   result = await run(
