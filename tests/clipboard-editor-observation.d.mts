@@ -15,6 +15,9 @@ export function inputCleanupConfirmed(
         error?: unknown;
         cleanupConfirmed?: unknown;
         clipboardCleanupConfirmed?: unknown;
+        inputCleanupConfirmed?: unknown;
+        keyboardCleanupConfirmed?: unknown;
+        cleanupVerification?: unknown;
       }
     | undefined,
 ): boolean;

@@ -34,7 +34,10 @@ export function inputCleanupConfirmed(result) {
     result?.action !== "type_text" ||
     typeof result?.ok !== "boolean" ||
     result?.cleanupConfirmed !== true ||
-    result?.clipboardCleanupConfirmed === false
+    result?.clipboardCleanupConfirmed === false ||
+    result?.inputCleanupConfirmed === false ||
+    result?.keyboardCleanupConfirmed === false ||
+    ["unconfirmed", "held", "failed"].includes(result?.cleanupVerification)
   )
     return false;
   return (
