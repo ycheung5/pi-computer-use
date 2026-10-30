@@ -81,3 +81,44 @@ test("SDK preflight refuses a false successful handshake for the dummy provider"
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("synthetic model roster preflight requires reference discovery", () => {
+  const r = spawnSync(
+    process.execPath,
+    [preflight, "--host", "/unused", "--model-roster"],
+    {
+      encoding: "utf8",
+      timeout: 20000,
+    },
+  );
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /--model-roster requires --discover/);
+});
+
+test("synthetic provider sees every discovered reference tool", {
+  skip: !process.env.PI_CU_DSH_HOST || !process.env.PI_CU_DSH_REFERENCE,
+}, () => {
+  const r = spawnSync(
+    process.execPath,
+    [
+      preflight,
+      "--host",
+      process.env.PI_CU_DSH_HOST ?? "",
+      "--reference",
+      process.env.PI_CU_DSH_REFERENCE ?? "",
+      "--discover",
+      "--model-roster",
+    ],
+    { encoding: "utf8", timeout: 60000 },
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const report = JSON.parse(r.stdout);
+  assert.equal(report.modelCalls, "one-local-synthetic-request");
+  assert.equal(report.toolDiscovery.toolCount, 25);
+  assert.equal(
+    report.toolDiscovery.modelVisibleRoster,
+    "synthetic-provider-verified",
+  );
+  assert.equal(report.toolDiscovery.windowsBackend, "not-tested");
+  assert.equal(report.isolatedHomeRemoved, true);
+});
