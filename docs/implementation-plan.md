@@ -57,7 +57,7 @@ Phases 2 and 3 gather evidence before broad repair work; a scenario that cannot 
 
 Every investigation or implementation change must reconcile the affected documentation before its phase closes: requirements in the spec, sequencing here, cases/results in validation, current behavior in topic guides, and deliberate-deviation rationale in an ADR. Replace stale guidance and remove duplicate instructions; preserve concise historical evidence without presenting it as current acceptance. Update the index and check links after moves.
 
-First complete the [difference register](validation.md#reference-difference-register), diagnose the schema-runner failure and identify the installed DSH revision. Extend existing harnesses only as needed to gather comparable evidence. Implement production fixes after diagnosis. No new public test-only seam is planned.
+Current checkpoint (2026-10-30): phase 1 audit is complete. Phase 2 tool-baseline collection is partial, including the first dedicated physical session and retained fixture/reference failures. Phases 3–5 have not completed: real-agent baselines, mechanism repairs and optimization remain pending. Use the [current ticket statuses](tickets.md#current-investigation-and-acceptance-work) and [validation evidence](validation.md) for exact completed and missing criteria. Extend existing harnesses only as needed; implement production fixes after diagnosis. No new public test-only seam is planned.
 
 ## Completion criteria
 

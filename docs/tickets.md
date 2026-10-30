@@ -2,7 +2,7 @@
 
 ## Current investigation and acceptance work
 
-Parent: [spec #23](https://github.com/ycheung5/pi-computer-use/issues/23). The approved first wave establishes reproducible evidence; targeted production repair tickets follow the findings in #37. All tickets use `ready-for-agent`, but only work whose blockers are complete can start. Baseline completion does not turn failed product outcomes into passing acceptance.
+Parent: [spec #23](https://github.com/ycheung5/pi-computer-use/issues/23). The approved first wave establishes reproducible evidence; targeted production repair tickets follow the findings in #37. Open tickets use their recorded triage labels (`ready-for-agent` or `needs-info`); only work whose blockers are complete can start. Baseline completion does not turn failed product outcomes into passing acceptance.
 
 GitHub supports native dependencies, but the connected tools expose no dependency-write operation and GitHub CLI is unavailable here. Ticket bodies therefore record explicit blocking issue links; native dependency links have not been created. No parent issue was modified.
 
@@ -10,24 +10,26 @@ Current progress (2026-10-30): #24, #25, #29, #32, #33 and #34 have completed th
 
 Current run status (2026-10-30): the user authorized a dedicated idle desktop session after the initial deferral. The first scripted physical baseline has finished and desktop input is stopped. Keep unexecuted physical/manual criteria open; see [dedicated-session evidence](validation.md#dedicated-physical-comparison-evidence). Further live runs require an available dedicated idle session.
 
-| Issue | Deliverable | Blocked by |
-| --- | --- | --- |
-| [#24](https://github.com/ycheung5/pi-computer-use/issues/24) | Establish the DSH baseline and deviation inventory | None |
-| [#25](https://github.com/ycheung5/pi-computer-use/issues/25) | Run one reproducible DSH/Pi comparison end to end | #24 |
-| [#26](https://github.com/ycheung5/pi-computer-use/issues/26) | Compare Unicode typing and multiline append | #25 |
-| [#27](https://github.com/ycheung5/pi-computer-use/issues/27) | Compare clipboard entry and preservation | #25 |
-| [#28](https://github.com/ycheung5/pi-computer-use/issues/28) | Compare accessibility targeting and waits | #25 |
-| [#29](https://github.com/ycheung5/pi-computer-use/issues/29) | Compare screenshot, OCR and coordinate mapping | #25 |
-| [#30](https://github.com/ycheung5/pi-computer-use/issues/30) | Compare window management and pointer workflows | #29 |
-| [#31](https://github.com/ycheung5/pi-computer-use/issues/31) | Verify stopping, ownership and interrupted-operation cleanup | #25 |
-| [#32](https://github.com/ycheung5/pi-computer-use/issues/32) | Compare browser form completion and delayed results | #25 |
-| [#33](https://github.com/ycheung5/pi-computer-use/issues/33) | Compare browser navigation, dialogs, transfers and profiles | #32 |
-| [#34](https://github.com/ycheung5/pi-computer-use/issues/34) | Verify the installed Pi experience on Windows and WSL2 | #24 |
-| [#35](https://github.com/ycheung5/pi-computer-use/issues/35) | Measure real-agent native tasks and recovery | #26, #27, #28, #30, #31, #34 |
-| [#36](https://github.com/ycheung5/pi-computer-use/issues/36) | Measure real-agent browser and mixed workflows | #30, #33, #34 |
-| [#37](https://github.com/ycheung5/pi-computer-use/issues/37) | Diagnose baseline failures and define targeted repairs | #35, #36 |
+| Issue | Deliverable | Blocked by | Status |
+| --- | --- | --- | --- |
+| [#24](https://github.com/ycheung5/pi-computer-use/issues/24) | Establish the DSH baseline and deviation inventory | None | Done — comparison/audit scope |
+| [#25](https://github.com/ycheung5/pi-computer-use/issues/25) | Run one reproducible DSH/Pi comparison end to end | #24 | Done — comparison/audit scope |
+| [#26](https://github.com/ycheung5/pi-computer-use/issues/26) | Compare Unicode typing and multiline append | #25 | Partial — criteria remain |
+| [#27](https://github.com/ycheung5/pi-computer-use/issues/27) | Compare clipboard entry and preservation | #25 | Partial — criteria remain |
+| [#28](https://github.com/ycheung5/pi-computer-use/issues/28) | Compare accessibility targeting and waits | #25 | Partial — criteria remain |
+| [#29](https://github.com/ycheung5/pi-computer-use/issues/29) | Compare screenshot, OCR and coordinate mapping | #25 | Done — comparison/audit scope |
+| [#30](https://github.com/ycheung5/pi-computer-use/issues/30) | Compare window management and pointer workflows | #29 | Partial — criteria remain |
+| [#31](https://github.com/ycheung5/pi-computer-use/issues/31) | Verify stopping, ownership and interrupted-operation cleanup | #25 | Partial — criteria remain |
+| [#32](https://github.com/ycheung5/pi-computer-use/issues/32) | Compare browser form completion and delayed results | #25 | Done — comparison/audit scope |
+| [#33](https://github.com/ycheung5/pi-computer-use/issues/33) | Compare browser navigation, dialogs, transfers and profiles | #32 | Done — comparison/audit scope |
+| [#34](https://github.com/ycheung5/pi-computer-use/issues/34) | Verify the installed Pi experience on Windows and WSL2 | #24 | Done — comparison/audit scope |
+| [#35](https://github.com/ycheung5/pi-computer-use/issues/35) | Measure real-agent native tasks and recovery | #26, #27, #28, #30, #31, #34 | Blocked — prerequisites |
+| [#36](https://github.com/ycheung5/pi-computer-use/issues/36) | Measure real-agent browser and mixed workflows | #30, #33, #34 | Blocked — prerequisites |
+| [#37](https://github.com/ycheung5/pi-computer-use/issues/37) | Diagnose baseline failures and define targeted repairs | #35, #36 | Blocked — prerequisites |
 
 ## Original issue disposition
+
+Checklist audit after the dedicated physical session: completed subcriteria are checked on open GitHub issues where evidence supports them; compound criteria stay unchecked until all clauses are covered. No additional whole issue was closed from a partial pass. Requirements in #1/#23 and release gates in #21 remain unchanged.
 
 Reconciled on 2026-10-30 against recorded implementation/fixture evidence through `7a7c0c5`; no new desktop tests were run. Original issues #2–#20 now contain evidence summaries and links to the current follow-up tickets. These dispositions concern their original implementation scope, not acceptance of the whole product.
 
