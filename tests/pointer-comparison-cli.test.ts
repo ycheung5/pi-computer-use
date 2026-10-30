@@ -101,6 +101,63 @@ test("Pointer drag reporting retains a timeout and held-button evidence", async 
   }
 });
 
+test("Drop report retains an input owner when cleanup is explicitly unconfirmed", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "pointer-drop-report-"));
+  try {
+    const runner = join(folder, "runner.mjs");
+    await cp(resolve("tests/native-pointer-physical.mjs"), runner);
+    await cp(
+      resolve("tests/pointer-drop-report.mjs"),
+      join(folder, "pointer-drop-report.mjs"),
+    );
+    const report = join(folder, "evidence.json");
+    await writeFile(
+      report,
+      JSON.stringify({
+        dispatch: {
+          status: "fulfilled",
+          value: { ok: true, cleanupConfirmed: false },
+        },
+        state: { drops: 1, held: 0 },
+      }),
+    );
+    const result = spawnSync(
+      process.execPath,
+      [runner, `--report-drop=${report}`],
+      {
+        cwd: folder,
+        encoding: "utf8",
+        env: { ...process.env, PI_CU_DEDICATED_INPUT_DESKTOP: "" },
+      },
+    );
+    assert.equal(result.status, 1, result.stderr);
+    const actual = JSON.parse(result.stdout);
+    assert.equal(actual.ok, false);
+    assert.equal(actual.cleanupVerification, "unconfirmed");
+    assert.equal(actual.inputDispatched, false);
+    await writeFile(
+      report,
+      JSON.stringify({
+        dispatch: { status: "fulfilled", value: { ok: true } },
+        state: { drops: 1, held: 0 },
+      }),
+    );
+    const passed = spawnSync(
+      process.execPath,
+      [runner, `--report-drop=${report}`],
+      {
+        cwd: folder,
+        encoding: "utf8",
+        env: { ...process.env, PI_CU_DEDICATED_INPUT_DESKTOP: "" },
+      },
+    );
+    assert.equal(passed.status, 0, passed.stderr);
+    assert.equal(JSON.parse(passed.stdout).cleanupVerification, "released");
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
 test("Pointer drag reporting requires both cancellation and independently observed release", async () => {
   const folder = await mkdtemp(join(tmpdir(), "pointer-release-report-"));
   try {

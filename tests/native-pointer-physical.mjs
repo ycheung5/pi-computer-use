@@ -11,7 +11,7 @@ const options = process.argv.slice(2);
 for (const option of options)
   assert.ok(
     option === "--list" ||
-      /^--(engine|reference|report-drag|case)=.+/.test(option),
+      /^--(engine|reference|report-drag|report-drop|case)=.+/.test(option),
     `Unknown option: ${option}`,
   );
 const option = (name) =>
@@ -51,6 +51,13 @@ if (option("report-drag")) {
   const evidence = JSON.parse(await readFile(option("report-drag"), "utf8"));
   const report = dragReport(evidence);
   console.log(JSON.stringify({ ...report, inputDispatched: false }));
+  process.exit(report.ok ? 0 : 1);
+}
+if (option("report-drop")) {
+  const evidence = JSON.parse(await readFile(option("report-drop"), "utf8"));
+  const { assessDrop } = await import("./pointer-drop-report.mjs");
+  const report = assessDrop(evidence);
+  console.log(JSON.stringify({ ...report, evidence, inputDispatched: false }));
   process.exit(report.ok ? 0 : 1);
 }
 const engine = option("engine") ?? "pi";

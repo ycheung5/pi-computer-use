@@ -6,6 +6,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assessDrop } from "./pointer-drop-report.mjs";
 
 export async function runDragDrop({ engine, referencePath }) {
   const folder = await mkdtemp(join(tmpdir(), "pi-cu-drop-"));
@@ -139,32 +140,23 @@ export async function runDragDrop({ engine, referencePath }) {
         if (state.held === 0 && state.drops === 1) break;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
-      // A timed-out or failed dispatch can still have a live input owner even
-      // when the button happens to be up at this instant.
-      released =
-        dispatch.status === "fulfilled" &&
-        dispatch.value?.ok === true &&
-        state?.held === 0;
     } catch (error) {
       observationError = String(error.message);
     }
-    const ok =
-      dispatch.status === "fulfilled" &&
-      dispatch.value?.ok === true &&
-      state?.drops === 1 &&
-      released;
+    const report = assessDrop({ dispatch, state, observationError });
+    released = report.cleanupVerification === "released";
     console.log(
       JSON.stringify({
         engine,
         check: "successful-drag-drop",
-        ok,
+        ok: report.ok,
         dispatch,
         state,
         observationError,
-        cleanupVerification: released ? "released" : "unconfirmed",
+        cleanupVerification: report.cleanupVerification,
       }),
     );
-    assert.ok(ok, "drag/drop or independent cleanup was not confirmed");
+    assert.ok(report.ok, "drag/drop or independent cleanup was not confirmed");
   } finally {
     if (inputStarted && !released) {
       console.error(
