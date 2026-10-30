@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { WorkerClient } from "../src/client.js";
@@ -101,35 +104,43 @@ test("cancellation before startup never launches the worker", async () => {
 });
 
 test("an unresponsive worker times out without replay and later health can recover", async () => {
-  let first = true;
+  const folder = await mkdtemp(join(tmpdir(), "pi-cu-timeout-audit-"));
+  const audit = join(folder, "requests.jsonl");
+  // The external protocol peer records received requests before becoming stuck.
+  // Keep this evidence across replacement processes so replay cannot hide there.
+  const peer = `const fs=require('node:fs');
+const input=require('node:readline').createInterface({input:process.stdin});
+input.on('line',line=>{const r=JSON.parse(line);if(!r.action)return;
+fs.appendFileSync(process.argv[1],JSON.stringify({action:r.action,pid:process.pid})+'\\n');
+if(r.action==='health')process.stdout.write(JSON.stringify({id:r.id,result:{ok:true,action:r.action,processId:process.pid}})+'\\n');});`;
   const worker = new WorkerClient({
     timeoutMs: 300,
-    launch: async () => {
-      if (first) {
-        first = false;
-        return {
-          executable: process.execPath,
-          args: ["-e", "process.stdin.resume()"],
-        };
-      }
-      return {
-        executable: process.execPath,
-        args: [
-          "--import",
-          "tsx",
-          fileURLToPath(new URL("../src/worker.ts", import.meta.url)),
-        ],
-      };
-    },
+    launch: async () => ({
+      executable: process.execPath,
+      args: ["-e", peer, audit],
+    }),
   });
   try {
     await assert.rejects(
-      worker.execute("health", {}),
+      worker.execute("uncertain-action", {}),
       /WORKER_TIMEOUT.*not replayed/,
     );
-    assert.equal((await worker.execute("health", {})).ok, true);
+    const recovered = await worker.execute("health", {});
+    assert.equal(recovered.ok, true);
+    const received = (await readFile(audit, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(
+      received.map((request) => request.action),
+      ["uncertain-action", "health"],
+    );
+    assert.notEqual(received[0].pid, received[1].pid);
+    assert.equal(recovered.processId, received[1].pid);
+    assert.throws(() => process.kill(received[0].pid, 0), /ESRCH/);
   } finally {
     await worker.dispose();
+    await rm(folder, { recursive: true, force: true });
   }
 });
 

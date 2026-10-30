@@ -16,6 +16,6 @@ The internal worker envelope accepts an optional operation identifier; direct wo
 - `npm run build` followed by `npm run test:ownership` from WSL2: real native Windows and WSL2 extension factories invoke their registered window-listing tools against distinct Windows workers. The test verifies busy rejection, retention across `agent_end`, settlement handoff, non-stealing of a live owner and recovery after killing the owning worker. It sends no physical input and operates on no application contents.
 - Full Pi CLI acceptance remains a release check. Live testing requires WSL interop/Windows process access and the packaged private runtime.
 
-## Before enabling physical input
+## Physical-input acceptance
 
-The [stopping contract](stopping.md) now supplies independent listener/event control and bounded retirement for cancelled read-only bridges. Physical input remains gated until its action proves cancellation polling and key/button release before ownership handoff; caller cancellation alone is not that evidence.
+The [stopping contract](stopping.md) supplies independent listener/event control and bounded retirement for cancelled read-only bridges. Physical actions are available, but acceptance of key/button release before ownership handoff remains pending on a dedicated interactive desktop; caller cancellation alone is not that evidence. Current passive results and the difference from DSH host activity tracking are recorded in the [passive operation baseline](validation.md#passive-operation-evidence).
