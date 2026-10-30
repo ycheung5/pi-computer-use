@@ -106,6 +106,9 @@ if (engine === "reference" && !probe)
 const { detachFixture, waitForFixtureClose } = await import(
   "./clipboard-fixture-close.mjs"
 );
+const { compareEditorObservation } = await import(
+  "./clipboard-editor-observation.mjs"
+);
 const { createComparisonClient } = await import("./comparison-client.mjs");
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-ole-clipboard-"));
 const executable = join(folder, "fixture.exe");
@@ -221,12 +224,13 @@ const readEditor = async (id, target) => {
     await command("editor-base64"),
     "base64",
   ).toString("utf8");
-  assert.equal(
-    result.element.value,
-    fixtureValue,
-    "UIA and fixture editor text must agree",
+  const observed = compareEditorObservation(result.element, fixtureValue);
+  console.log(
+    JSON.stringify({
+      editorObservation: { uiaAvailability: observed.uiaAvailability },
+    }),
   );
-  return fixtureValue;
+  return observed.fixtureValue;
 };
 try {
   const handle = Number(await next());
