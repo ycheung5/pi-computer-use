@@ -77,7 +77,8 @@
     "benchmark:accessibility": "node tests/accessibility-comparison.mjs",
     "test:accessibility:report": "node tests/accessibility-comparison-check.mjs",
     "test:accessibility:diagnostics": "node tests/accessibility-comparison-check.mjs --diagnostics",
-    "test:native:clipboard:plan": "node tests/native-ole-clipboard-check.mjs"
+    "test:native:clipboard:plan": "node tests/native-ole-clipboard-check.mjs",
+    "test:native:process-containment": "node tests/process-containment-check.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
