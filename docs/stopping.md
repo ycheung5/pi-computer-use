@@ -12,15 +12,17 @@ The explicit stop control bypasses the worker request queue. The worker blocks t
 
 Pointer and keyboard actions use the cancellation event and report `inputReady: true` with an explicit `readyActions` list. See [pointer guards](pointer.md) and [text/clipboard cleanup](text.md) for pending physical acceptance. Each enabled action must:
 
-1. Arms the independent listener before sending input and checks the operation's cancellation event.
-2. Checks cancellation between input steps and releases every held key/button in `finally`.
-3. Confirms cleanup before retiring a native input bridge or releasing desktop ownership.
-4. Handles listener failure and timeout without silently replaying input or claiming success.
+1. Arm the independent listener before sending input and checks the operation's cancellation event.
+2. Check cancellation between input steps and releases every held key/button in `finally`.
+3. Confirm cleanup before retiring a native input bridge or releasing desktop ownership.
+4. Handle listener failure and timeout without silently replaying input or claiming success.
 
-A blocked read-only UIA/capture process can be killed after a bounded grace period. That policy alone is not proof of safe held-input cleanup; input tickets must supply dedicated fixture tests before removing their gate.
+A blocked read-only UIA/capture process can be killed after a bounded grace period. Physical actions are implemented and advertised by `readyActions`; this is not proof that held keys/buttons are released correctly. Their dedicated interactive acceptance remains open.
 
 ## Validation
 
 - `npm test` covers a busy disposable protocol peer, queued cancellation, same-operation rejection, custom-continuation rejection, Pi abort, new-user recovery and confirmed retirement of an unresponsive peer.
-- After `npm run build`, `npm run test:stop` verifies real Windows hook registration, named-event signaling through the normal stop control, worker rejection/recovery and a deliberately invalid pointer target refusal. It sends no keys or pointer input.
+- After `npm run build`, `npm run test:stop` verifies real Windows hook registration, an initially unsignaled kernel event, signaling through the normal stop control, a distinct unsignaled event for the next operation, and worker rejection/recovery and a deliberately invalid pointer target refusal. It sends no keys or pointer input.
 - Actual physical Esc stopping while a fixture is busy, and key/button cleanup during physical actions, remain manual/dedicated-desktop acceptance checks. Hook registration and explicit signaling are not reported as a physical-key test.
+
+The [passive operation baseline](validation.md#passive-operation-evidence) records current results and reference source comparison. User-reported earlier Esc/command checks do not replace a recorded busy-input/held-key acceptance run. A rejected promise, hook registration or `cleanupConfirmed` alone cannot establish actual key/button release.
