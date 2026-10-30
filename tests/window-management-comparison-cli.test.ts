@@ -209,3 +209,67 @@ test("provenance reports distinguish tagged input from unmarked or other injecte
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("direct UIA focus control plans offline and does not imply an engine comparison", () => {
+  const script = fileURLToPath(
+    new URL("./foreground-focus-comparison.mjs", import.meta.url),
+  );
+  const plan = spawnSync(
+    process.execPath,
+    [script, "--plan", "--provenance", "--direct-uia"],
+    {
+      encoding: "utf8",
+      env: { ...process.env, PI_CU_WINDOW_MANAGEMENT_TEST: "" },
+    },
+  );
+  assert.equal(plan.status, 0, plan.stderr);
+  const result = JSON.parse(plan.stdout);
+  assert.equal(result.executed, false);
+  assert.equal(result.focusDispatch, "direct-uia-control");
+  const invalid = spawnSync(
+    process.execPath,
+    [script, "--plan", "--direct-uia", "--engine=reference"],
+    { encoding: "utf8" },
+  );
+  assert.notEqual(invalid.status, 0);
+});
+
+test("direct UIA foreground movement is recorded as an observation, not a restoration failure", () => {
+  const script = fileURLToPath(
+    new URL("./foreground-focus-comparison.mjs", import.meta.url),
+  );
+  const dir = mkdtempSync(join(tmpdir(), "pi-direct-focus-report-"));
+  try {
+    const path = join(dir, "evidence.json"),
+      prior = { nativeWindowHandle: 10, processId: 20 };
+    const before = {
+      foregroundHandle: 10,
+      foregroundPid: 20,
+      lastInputTick: 2,
+    };
+    writeFileSync(
+      path,
+      JSON.stringify({
+        prior,
+        before,
+        pre: before,
+        focus: { ok: true },
+        focusDispatch: "direct-uia-control",
+        samples: [
+          {
+            ...before,
+            foregroundHandle: 30,
+            foregroundPid: 40,
+            activeEditor: true,
+          },
+        ],
+      }),
+    );
+    const result = spawnSync(process.execPath, [script, `--report=${path}`], {
+      encoding: "utf8",
+    });
+    assert.equal(JSON.parse(result.stdout).status, "observed", result.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

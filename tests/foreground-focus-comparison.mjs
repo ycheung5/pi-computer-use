@@ -6,6 +6,7 @@ for (const arg of args)
   assert.ok(
     arg === "--plan" ||
       arg === "--provenance" ||
+      arg === "--direct-uia" ||
       /^--(engine|reference|report)=.+/.test(arg),
     `Unknown option: ${arg}`,
   );
@@ -88,7 +89,12 @@ function classifyEvidence(evidence) {
       x.foregroundPid === prior.processId,
   );
   return {
-    status: preserved ? "pass" : "fail",
+    status:
+      evidence.focusDispatch === "direct-uia-control"
+        ? "observed"
+        : preserved
+          ? "pass"
+          : "fail",
     foregroundPreserved: preserved,
   };
 }
@@ -100,10 +106,15 @@ if (reportPath) {
     JSON.parse(await readFile(reportPath, "utf8")),
   );
   console.log(JSON.stringify({ executed: false, ...outcome }));
-  process.exit(outcome.status === "pass" ? 0 : 1);
+  process.exit(["pass", "observed"].includes(outcome.status) ? 0 : 1);
 }
 const engine = option("engine") ?? "pi";
 assert.ok(["pi", "reference"].includes(engine));
+const directUia = args.includes("--direct-uia");
+assert.ok(
+  !directUia || (engine === "pi" && args.includes("--provenance")),
+  "Direct UIA control requires Pi setup and --provenance",
+);
 if (args.includes("--plan")) {
   console.log(
     JSON.stringify({
@@ -111,6 +122,7 @@ if (args.includes("--plan")) {
       engine,
       physicalInput: false,
       foregroundChangesPossible: true,
+      ...(directUia ? { focusDispatch: "direct-uia-control" } : {}),
       ...(args.includes("--provenance")
         ? { inputProvenance: "aggregate hook counts only" }
         : {}),
@@ -153,6 +165,8 @@ process.env.PI_CU_SETTINGS_FILE = join(folder, "settings.json");
 const fixtures = [];
 let client,
   observer,
+  directDispatched = false,
+  directSettled = false,
   result = {
     engine,
     physicalInput: false,
@@ -310,6 +324,7 @@ try {
   result.phase = "activation";
   const activation = await client.execute("activate_window", prior.identity);
   result.activation = activation;
+  if (observer) result.inputEventsAfterActivation = await observer.snapshot();
   if (!activation.ok || !activation.activated) {
     const e = new Error("Prior fixture activation not confirmed");
     e.details = activation;
@@ -320,6 +335,7 @@ try {
   assert.equal(before.foregroundHandle, prior.identity.nativeWindowHandle);
   assert.equal(before.foregroundPid, prior.identity.processId);
   assert.equal(await target.command("prepare-focus"), "focus-ready");
+  if (observer) result.inputEventsAfterPreparation = await observer.snapshot();
   result.phase = "find";
   const found = await client.execute("find", {
     ...target.identity,
@@ -329,6 +345,7 @@ try {
     activate: false,
   });
   result.found = found;
+  if (observer) result.inputEventsAfterFind = await observer.snapshot();
   assert.equal(found.ok, true, JSON.stringify(found));
   assert.equal(found.matches?.length, 1, "Exact single owned editor required");
   const pre = await target.observe();
@@ -346,14 +363,87 @@ try {
     e.inconclusive = true;
     throw e;
   }
+  let direct;
+  if (directUia) {
+    const hwnd = found.matches[0].nativeWindowHandle,
+      pid = target.identity.processId;
+    assert.ok(
+      Number.isSafeInteger(hwnd) &&
+        hwnd > 0 &&
+        Number.isSafeInteger(pid) &&
+        pid > 0,
+      "Owned native edit HWND and PID required",
+    );
+    const ps = `$ErrorActionPreference='Stop'; Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes; $e=[System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]${hwnd}); if($null -eq $e -or $e.Current.ProcessId -ne ${pid} -or $e.Current.NativeWindowHandle -ne ${hwnd}){throw 'UIA identity mismatch'}; [Console]::WriteLine('ready'); [Console]::Out.Flush(); if([Console]::ReadLine() -ne 'focus'){throw 'Focus gate rejected'}; $e.SetFocus(); [Console]::WriteLine('sent'); [Console]::Out.Flush()`;
+    const child = spawn(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        Buffer.from(ps, "utf16le").toString("base64"),
+      ],
+      { cwd: folder, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] },
+    );
+    fixtures.push(child);
+    child.stderr.resume();
+    const closed = once(child, "close");
+    const lines = createInterface({ input: child.stdout })[
+      Symbol.asyncIterator
+    ]();
+    const read = async () => {
+      const x = await lines.next();
+      if (x.done) throw new Error("Direct UIA control exited without response");
+      return x.value.trim();
+    };
+    assert.equal(
+      await read(),
+      "ready",
+      "Direct UIA FromHandle and identity validation must complete before sampling",
+    );
+    direct = { child, closed, read };
+    result.focusDispatch = "direct-uia-control";
+    result.inputEventsAfterDirectPreparation = await observer.snapshot();
+    result.directPre = await target.observe();
+    if (
+      result.directPre.lastInputTick !== pre.lastInputTick ||
+      result.directPre.foregroundHandle !== prior.identity.nativeWindowHandle ||
+      result.directPre.foregroundPid !== prior.identity.processId
+    ) {
+      const e = new Error(
+        "Foreground or input changed during direct UIA preparation",
+      );
+      e.inconclusive = true;
+      throw e;
+    }
+  }
   if (observer) result.inputEventsBefore = await observer.snapshot();
   result.phase = "focus";
   const dispatchedAt = performance.now();
-  const focus = await client.execute("focus", {
-    ...target.identity,
-    elementId: found.matches[0].id,
-    activate: false,
-  });
+  let focus;
+  if (direct) {
+    directDispatched = true;
+    direct.child.stdin.end("focus\n");
+    assert.equal(
+      await direct.read(),
+      "sent",
+      "Direct UIA SetFocus must return",
+    );
+    const [code] = await direct.closed;
+    directSettled = true;
+    assert.equal(code, 0, "Direct UIA process must exit successfully");
+    focus = {
+      ok: true,
+      action: "focus",
+      method: "direct-uia-control",
+      verification: "sent",
+    };
+  } else
+    focus = await client.execute("focus", {
+      ...target.identity,
+      elementId: found.matches[0].id,
+      activate: false,
+    });
   result.focus = focus;
   if (observer) result.inputEventsAfter = await observer.snapshot();
   const samples = [];
@@ -366,10 +456,11 @@ try {
       ...observation,
     });
   }
-  result.diagnostic =
-    "public focus dispatch and independent after-return observations; no internal guard-phase observation";
+  result.diagnostic = directUia
+    ? "direct managed UIA control, not a Pi focus call; aggregate input counts cannot prove event source"
+    : "public focus dispatch and independent after-return observations; no internal guard-phase observation";
   Object.assign(result, classifyEvidence(result));
-  if (result.status !== "pass") process.exitCode = 1;
+  if (!["pass", "observed"].includes(result.status)) process.exitCode = 1;
 } catch (error) {
   result.status = error.inconclusive ? "inconclusive" : "fail";
   result.error = String(error);
@@ -379,34 +470,41 @@ try {
   }
   process.exitCode = 1;
 } finally {
-  try {
-    if (client) await client.dispose();
-    for (const child of fixtures) {
-      if (child.exitCode !== null || child.signalCode !== null) continue;
-      const closed = once(child, "close");
-      child.stdin.end("stop\n");
-      let timer;
-      try {
-        await Promise.race([
-          closed,
-          new Promise((_, reject) => {
-            timer = setTimeout(
-              () => reject(new Error("Fixture cleanup unconfirmed")),
-              5000,
-            );
-          }),
-        ]);
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-    await rm(folder, { recursive: true, force: true });
-    cleanupConfirmed = true;
-  } catch (error) {
-    result.status = "fail";
-    result.cleanupError = String(error);
+  if (directDispatched && !directSettled) {
+    result.status = "inconclusive";
+    result.cleanupError =
+      "Direct UIA settlement unconfirmed; owned processes retained";
     result.retainedFolder = folder;
     process.exitCode = 1;
-  }
+  } else
+    try {
+      if (client) await client.dispose();
+      for (const child of fixtures) {
+        if (child.exitCode !== null || child.signalCode !== null) continue;
+        const closed = once(child, "close");
+        child.stdin.end("stop\n");
+        let timer;
+        try {
+          await Promise.race([
+            closed,
+            new Promise((_, reject) => {
+              timer = setTimeout(
+                () => reject(new Error("Fixture cleanup unconfirmed")),
+                5000,
+              );
+            }),
+          ]);
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      await rm(folder, { recursive: true, force: true });
+      cleanupConfirmed = true;
+    } catch (error) {
+      result.status = "fail";
+      result.cleanupError = String(error);
+      result.retainedFolder = folder;
+      process.exitCode = 1;
+    }
 }
 console.log(JSON.stringify({ ...result, cleanupConfirmed }));
