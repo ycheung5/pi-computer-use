@@ -490,3 +490,123 @@ test("uncertain dispatch retains coordinator without relying on stdin", async ()
     }
   }
 });
+
+test("owned-menu plan is opt-in and separate from dialog", () => {
+  const script = fileURLToPath(
+    new URL("./foreground-focus-comparison.mjs", import.meta.url),
+  );
+  const plan = spawnSync(
+    process.execPath,
+    [script, "--plan", "--menu", "--provenance"],
+    { encoding: "utf8" },
+  );
+  assert.equal(plan.status, 0, plan.stderr);
+  const value = JSON.parse(plan.stdout);
+  assert.equal(value.executed, false);
+  assert.equal(value.physicalInput, false);
+  assert.equal(value.fixtureExpiry, "explicit-stop-only");
+  assert.deepEqual(value.cases, ["owned-menu-foreground"]);
+  for (const args of [
+    ["--plan", "--menu"],
+    ["--plan", "--menu", "--dialog", "--provenance"],
+  ]) {
+    const bad = spawnSync(process.execPath, [script, ...args], {
+      encoding: "utf8",
+    });
+    assert.notEqual(bad.status, 0);
+  }
+});
+
+test("owned-menu outcome requires OS menu-mode and owned visible menu evidence", () => {
+  const script = fileURLToPath(
+    new URL("./foreground-focus-comparison.mjs", import.meta.url),
+  );
+  const dir = mkdtempSync(join(tmpdir(), "pi-menu-evidence-"));
+  try {
+    const path = join(dir, "evidence.json"),
+      prior = { nativeWindowHandle: 10, processId: 20 },
+      target = { nativeWindowHandle: 30, processId: 40 };
+    const before = {
+        foregroundHandle: 10,
+        foregroundPid: 20,
+        foregroundRoot: 10,
+        lastInputTick: 1,
+      },
+      sample = {
+        foregroundHandle: 30,
+        foregroundPid: 40,
+        foregroundRoot: 30,
+        lastInputTick: 1,
+        menu: {
+          handle: 50,
+          source: 30,
+          processId: 40,
+          visible: true,
+          itemCount: 1,
+          menuMode: true,
+        },
+      };
+    const base = {
+      comparison: "owned-menu",
+      prior,
+      target,
+      before,
+      pre: before,
+      action: { ok: true },
+      menu: {
+        handle: 50,
+        source: 30,
+        processId: 40,
+        visible: true,
+        itemCount: 1,
+        menuMode: true,
+      },
+      samples: [sample],
+    };
+    for (const [evidence, status] of [
+      [base, "pass"],
+      [{ ...base, menu: { ...base.menu, menuMode: false } }, "inconclusive"],
+      [{ ...base, menu: { ...base.menu, handle: undefined } }, "inconclusive"],
+      [{ ...base, menu: { ...base.menu, source: 99 } }, "inconclusive"],
+      [{ ...base, menu: { ...base.menu, visible: false } }, "fail"],
+      [
+        {
+          ...base,
+          samples: [{ ...sample, menu: { ...sample.menu, visible: false } }],
+        },
+        "fail",
+      ],
+      [
+        {
+          ...base,
+          samples: [{ ...sample, menu: { ...sample.menu, handle: 51 } }],
+        },
+        "inconclusive",
+      ],
+      [
+        {
+          ...base,
+          samples: [{ ...sample, menu: { ...sample.menu, menuMode: false } }],
+        },
+        "inconclusive",
+      ],
+      [{ ...base, samples: [{ ...sample, menu: undefined }] }, "inconclusive"],
+      [{ ...base, samples: [{ ...sample, lastInputTick: 2 }] }, "inconclusive"],
+      [
+        {
+          ...base,
+          samples: [{ ...sample, foregroundRoot: 10, foregroundPid: 20 }],
+        },
+        "inconclusive",
+      ],
+    ] as const) {
+      writeFileSync(path, JSON.stringify(evidence));
+      const out = spawnSync(process.execPath, [script, `--report=${path}`], {
+        encoding: "utf8",
+      });
+      assert.equal(JSON.parse(out.stdout).status, status, out.stderr);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
