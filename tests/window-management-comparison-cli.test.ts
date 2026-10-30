@@ -104,3 +104,42 @@ test("cross-process focus diagnostic is opt-in and plans without touching Window
   assert.notEqual(refusal.status, 0);
   assert.match(refusal.stderr, /PI_CU_WINDOW_MANAGEMENT_TEST/);
 });
+
+test("focus evidence distinguishes interference, restoration failure and changed owner", () => {
+  const script = fileURLToPath(
+    new URL("./foreground-focus-comparison.mjs", import.meta.url),
+  );
+  const dir = mkdtempSync(join(tmpdir(), "pi-focus-report-"));
+  try {
+    const path = join(dir, "evidence.json");
+    const prior = { nativeWindowHandle: 10, processId: 20 };
+    const before = {
+      foregroundHandle: 10,
+      foregroundPid: 20,
+      lastInputTick: 2,
+    };
+    const sample = { ...before, activeEditor: true };
+    const base = {
+      prior,
+      before,
+      pre: before,
+      focus: { ok: true },
+      samples: [sample],
+    };
+    for (const [evidence, status] of [
+      [base, "pass"],
+      [{ ...base, pre: { ...before, lastInputTick: 3 } }, "inconclusive"],
+      [{ ...base, samples: [{ ...sample, lastInputTick: 3 }] }, "inconclusive"],
+      [{ ...base, pre: { ...before, foregroundPid: 99 } }, "inconclusive"],
+      [{ ...base, samples: [{ ...sample, foregroundHandle: 99 }] }, "fail"],
+    ] as const) {
+      writeFileSync(path, JSON.stringify(evidence));
+      const actual = spawnSync(process.execPath, [script, `--report=${path}`], {
+        encoding: "utf8",
+      });
+      assert.equal(JSON.parse(actual.stdout).status, status, actual.stderr);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -4,11 +4,69 @@ import assert from "node:assert/strict";
 const args = process.argv.slice(2);
 for (const arg of args)
   assert.ok(
-    arg === "--plan" || /^--(engine|reference)=.+/.test(arg),
+    arg === "--plan" || /^--(engine|reference|report)=.+/.test(arg),
     `Unknown option: ${arg}`,
   );
 const option = (name) =>
   args.find((x) => x.startsWith(`--${name}=`))?.slice(name.length + 3);
+function classifyEvidence(evidence) {
+  const { prior, before, pre, focus, samples } = evidence;
+  const valid = (x) =>
+    x &&
+    Number.isFinite(x.foregroundHandle) &&
+    Number.isFinite(x.foregroundPid) &&
+    Number.isFinite(x.lastInputTick);
+  if (
+    !prior ||
+    !Number.isFinite(prior.nativeWindowHandle) ||
+    !Number.isFinite(prior.processId) ||
+    !valid(before) ||
+    !valid(pre) ||
+    !Array.isArray(samples) ||
+    samples.length === 0 ||
+    !samples.every(valid)
+  )
+    return {
+      status: "inconclusive",
+      reason: "Incomplete identity or observation",
+    };
+  if (
+    before.foregroundHandle !== prior.nativeWindowHandle ||
+    before.foregroundPid !== prior.processId ||
+    pre.foregroundHandle !== prior.nativeWindowHandle ||
+    pre.foregroundPid !== prior.processId
+  )
+    return {
+      status: "inconclusive",
+      reason: "Prior foreground identity changed before dispatch",
+    };
+  if (
+    pre.lastInputTick !== before.lastInputTick ||
+    samples.some((x) => x.lastInputTick !== pre.lastInputTick)
+  )
+    return { status: "inconclusive", reason: "Intervening input observed" };
+  if (focus?.ok !== true || !samples.some((x) => x.activeEditor === true))
+    return { status: "fail", reason: "Target focus not observed" };
+  const preserved = samples.every(
+    (x) =>
+      x.foregroundHandle === prior.nativeWindowHandle &&
+      x.foregroundPid === prior.processId,
+  );
+  return {
+    status: preserved ? "pass" : "fail",
+    foregroundPreserved: preserved,
+  };
+}
+const reportPath = option("report");
+if (reportPath) {
+  assert.equal(args.length, 1, "report cannot be combined with other options");
+  const { readFile } = await import("node:fs/promises");
+  const outcome = classifyEvidence(
+    JSON.parse(await readFile(reportPath, "utf8")),
+  );
+  console.log(JSON.stringify({ executed: false, ...outcome }));
+  process.exit(outcome.status === "pass" ? 0 : 1);
+}
 const engine = option("engine") ?? "pi";
 assert.ok(["pi", "reference"].includes(engine));
 if (args.includes("--plan")) {
@@ -168,12 +226,19 @@ try {
   assert.equal(found.matches?.length, 1, "Exact single owned editor required");
   const pre = await target.observe();
   result.pre = pre;
-  assert.equal(pre.foregroundHandle, before.foregroundHandle);
-  assert.equal(
-    pre.lastInputTick,
-    before.lastInputTick,
-    "Intervening input before action",
-  );
+  if (pre.lastInputTick !== before.lastInputTick) {
+    const e = new Error("Intervening input before action");
+    e.inconclusive = true;
+    throw e;
+  }
+  if (
+    pre.foregroundHandle !== prior.identity.nativeWindowHandle ||
+    pre.foregroundPid !== prior.identity.processId
+  ) {
+    const e = new Error("Prior foreground identity changed before dispatch");
+    e.inconclusive = true;
+    throw e;
+  }
   result.phase = "focus";
   const dispatchedAt = performance.now();
   const focus = await client.execute("focus", {
@@ -194,24 +259,10 @@ try {
   }
   result.diagnostic =
     "public focus dispatch and independent after-return observations; no internal guard-phase observation";
-  assert.equal(focus.ok, true, JSON.stringify(focus));
-  assert.ok(
-    samples.some((x) => x.activeEditor),
-    "Owned logical focus not observed",
-  );
-  assert.ok(
-    samples.every((x) => x.lastInputTick === pre.lastInputTick),
-    "Intervening input; result inconclusive",
-  );
-  result.foregroundPreserved = samples.every(
-    (x) =>
-      x.foregroundHandle === prior.identity.nativeWindowHandle &&
-      x.foregroundPid === prior.identity.processId,
-  );
-  result.status = result.foregroundPreserved ? "pass" : "fail";
-  if (!result.foregroundPreserved) process.exitCode = 1;
+  Object.assign(result, classifyEvidence(result));
+  if (result.status !== "pass") process.exitCode = 1;
 } catch (error) {
-  result.status = "fail";
+  result.status = error.inconclusive ? "inconclusive" : "fail";
   result.error = String(error);
   if (error.details) {
     result.status = "blocked";
@@ -240,8 +291,8 @@ try {
         clearTimeout(timer);
       }
     }
-    cleanupConfirmed = true;
     await rm(folder, { recursive: true, force: true });
+    cleanupConfirmed = true;
   } catch (error) {
     result.status = "fail";
     result.cleanupError = String(error);
