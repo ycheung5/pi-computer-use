@@ -41,6 +41,8 @@ try {
   const report = JSON.parse(run.stdout.trim());
   assert.equal(report.supervisorCrashed, true);
   assert.equal(report.jobDescendantsExited, true);
+  assert.equal(report.normalFinallyRan, true);
+  assert.equal(report.workerFinallyRan, false);
   assert.equal(report.brokerOutsideJob, true);
   assert.equal(report.brokerSurvivedJobClosure, true);
   assert.equal(report.brokerCleanupConfirmed, true);

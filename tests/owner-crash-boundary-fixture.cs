@@ -30,10 +30,16 @@ static class OwnerCrashBoundary {
   static Process Start(string mode,string folder){return Process.Start(new ProcessStartInfo(Exe,mode+" "+Quote(folder)){UseShellExecute=false,CreateNoWindow=true});}
   static IntPtr Open(int pid){IntPtr h=OpenProcess(0x00101001,false,pid);Require(h!=IntPtr.Zero,"OpenProcess "+pid);return h;}
   static void Stop(IntPtr h){if(h!=IntPtr.Zero && WaitForSingleObject(h,0)!=0){Require(TerminateProcess(h,1),"TerminateProcess");Require(WaitForSingleObject(h,5000)==0,"process exit");}}
+  static void ExerciseFinally(string folder,bool crashCase){
+    try {
+      if(crashCase){Publish(Path.Combine(folder,"worker-entered"),"yes");Start("--grandchild",folder);Thread.Sleep(9000);File.WriteAllText(Path.Combine(folder,"late-worker"),"late");}
+    } finally {File.WriteAllText(Path.Combine(folder,crashCase?"worker-finally":"normal-finally"),"yes");}
+  }
   static int Main(string[] args){
     if(args.Length==2){
       string mode=args[0],folder=args[1];
-      if(mode=="--worker"){Start("--grandchild",folder);Thread.Sleep(9000);File.WriteAllText(Path.Combine(folder,"late-worker"),"late");return 0;}
+      if(mode=="--worker"){ExerciseFinally(folder,true);return 0;}
+      if(mode=="--normal-finally"){ExerciseFinally(folder,false);return 0;}
       if(mode=="--grandchild"){Publish(Path.Combine(folder,"grandchild"),Process.GetCurrentProcess().Id.ToString());Thread.Sleep(9000);File.WriteAllText(Path.Combine(folder,"late-grandchild"),"late");return 0;}
       if(mode=="--broker"){Start("--broker-child",folder);Thread.Sleep(12000);return 0;}
       if(mode=="--broker-child"){Publish(Path.Combine(folder,"broker-child"),Process.GetCurrentProcess().Id.ToString());Thread.Sleep(9000);File.WriteAllText(Path.Combine(folder,"late-broker"),"late");return 0;}
@@ -63,12 +69,15 @@ static class OwnerCrashBoundary {
     if(args.Length!=1)return 2;
     Process brokerProcess=null,supervisor=null;IntPtr worker=IntPtr.Zero,grandchild=IntPtr.Zero,brokerChild=IntPtr.Zero;
     try{
-      string folder=args[0];brokerProcess=Start("--broker",folder);
+      string folder=args[0];using(var normal=Start("--normal-finally",folder)){Require(normal.WaitForExit(5000)&&normal.ExitCode==0,"normal finally process exit");}
+      Require(File.Exists(Path.Combine(folder,"normal-finally")),"normal finally must run");
+      brokerProcess=Start("--broker",folder);
       int brokerPid=Int32.Parse(ReadReady(Path.Combine(folder,"broker-child")));brokerChild=Open(brokerPid);
       supervisor=Start("--supervisor",folder);
       string[] pids=ReadReady(Path.Combine(folder,"supervisor-ready")).Split(':');
       Require(pids.Length==3 && Int32.Parse(pids[2])==brokerPid,"fixture identities");
       worker=Open(Int32.Parse(pids[0]));grandchild=Open(Int32.Parse(pids[1]));
+      Require(File.Exists(Path.Combine(folder,"worker-entered")),"worker must enter try before supervisor death");
       Require(WaitForSingleObject(worker,0)==258 && WaitForSingleObject(grandchild,0)==258,"job descendants must be alive before supervisor death");
       supervisor.Kill();Require(supervisor.WaitForExit(5000),"supervisor exit");
       Require(WaitForSingleObject(worker,5000)==0 && WaitForSingleObject(grandchild,5000)==0,"job descendant exits");
@@ -77,7 +86,8 @@ static class OwnerCrashBoundary {
       Thread.Sleep(9100);
       bool late=File.Exists(Path.Combine(folder,"late-worker"))||File.Exists(Path.Combine(folder,"late-grandchild"))||File.Exists(Path.Combine(folder,"late-broker"));
       Require(!late,"late synthetic writes");
-      Console.WriteLine("{\"supervisorCrashed\":true,\"jobDescendantsExited\":true,\"brokerOutsideJob\":true,\"brokerSurvivedJobClosure\":true,\"brokerCleanupConfirmed\":true,\"lateWrites\":false}");return 0;
+      bool workerFinallyRan=File.Exists(Path.Combine(folder,"worker-finally"));
+      Console.WriteLine("{\"supervisorCrashed\":true,\"jobDescendantsExited\":true,\"normalFinallyRan\":true,\"workerFinallyRan\":"+(workerFinallyRan?"true":"false")+",\"brokerOutsideJob\":true,\"brokerSurvivedJobClosure\":true,\"brokerCleanupConfirmed\":true,\"lateWrites\":false}");return 0;
     }catch(Exception ex){Console.Error.WriteLine(ex.Message);return 1;}
     finally{
       try{
