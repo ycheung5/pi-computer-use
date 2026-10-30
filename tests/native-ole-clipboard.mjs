@@ -56,6 +56,11 @@ const allCases = [
       "Refusal or exact paste, with indexed clipboard independently preserved",
   },
   {
+    id: "virtual-file",
+    oracle:
+      "Exact paste or safe refusal, with virtual file descriptor and indexed data preserved",
+  },
+  {
     id: "newer-copy",
     oracle: "Exact appended text and fixture newer copy preserved",
   },
@@ -328,11 +333,19 @@ try {
         "",
         "case starts from a fresh known blank editor",
       );
-      if (item.id === "indexed-refusal") {
-        assert.equal(await command("seed-indexed"), "indexed-seeded");
+      if (item.id === "indexed-refusal" || item.id === "virtual-file") {
+        const virtualFile = item.id === "virtual-file";
+        const check = virtualFile ? "check-virtual-file" : "check-indexed";
+        const expected = virtualFile
+          ? "virtual-file-preserved"
+          : "indexed-preserved";
         assert.equal(
-          await command("check-indexed"),
-          "indexed-preserved",
+          await command(virtualFile ? "seed-virtual-file" : "seed-indexed"),
+          virtualFile ? "virtual-file-seeded" : "indexed-seeded",
+        );
+        assert.equal(
+          await command(check),
+          expected,
           "indexed fixture payload must be readable before dispatch",
         );
         const result = await execute("type_text", {
@@ -348,9 +361,16 @@ try {
           "Explicitly unconfirmed cleanup blocks later cases",
         );
         assert.notEqual(result.clipboardCleanupConfirmed, false);
+        if (!result.ok && virtualFile) {
+          assert.match(
+            String(result.error ?? ""),
+            /clipboard|unsupported|format/i,
+            "refusal must report the clipboard limitation",
+          );
+        }
         assert.equal(
-          await command("check-indexed"),
-          "indexed-preserved",
+          await command(check),
+          expected,
           "indexed clipboard survives either refusal or supported paste",
         );
         assert.equal(

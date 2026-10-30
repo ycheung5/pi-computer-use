@@ -9,7 +9,12 @@ const run = (...args: string[]) =>
   });
 
 test("clipboard cases are independently selectable without importing a backend", () => {
-  for (const id of ["ole-preservation", "indexed-refusal", "newer-copy"]) {
+  for (const id of [
+    "ole-preservation",
+    "indexed-refusal",
+    "virtual-file",
+    "newer-copy",
+  ]) {
     const result = run("--plan", "--case", id, "--engine", "reference");
     assert.equal(result.status, 0, result.stderr);
     const plan = JSON.parse(result.stdout);

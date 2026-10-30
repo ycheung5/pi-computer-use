@@ -86,6 +86,19 @@ class OleClipboardFixture {
    finally{GlobalUnlock(medium.unionmember);}
   }finally{ReleaseStgMedium(ref medium);}
  }
+ static string CheckVirtualFileActual(OleDataObject data) {
+  string observed=CheckVirtualFileData(data);
+  if(observed=="virtual-file-preserved")return observed;
+  if(!observed.StartsWith("virtual-content-query:"))return observed;
+  string content=GetVirtualContent(data);
+  return content=="preserved"?"virtual-file-preserved":"virtual-content-"+content;
+ }
+ static string CheckVirtualFileBoth() {
+  if(!OwnsClipboard())return "virtual-file-owner-mismatch";
+  var direct=retained as OleDataObject;OleDataObject clipboard;Marshal.ThrowExceptionForHR(OleGetClipboard(out clipboard));
+  string observed=CheckVirtualFileActual(direct);if(observed!="virtual-file-preserved")return "direct:"+observed;
+  observed=CheckVirtualFileActual(clipboard);return observed=="virtual-file-preserved"?observed:"clipboard:"+observed;
+ }
  static string ProbeVirtualFile() {
   var direct=retained as OleDataObject;OleDataObject clipboard;Marshal.ThrowExceptionForHR(OleGetClipboard(out clipboard));
   return "{\"direct\":\""+CheckVirtualFileData(direct)+"\",\"clipboard\":\""+CheckVirtualFileData(clipboard)+"\",\"descriptorFormat\":"+RegisterClipboardFormat("FileGroupDescriptorW")+",\"contentFormat\":"+RegisterClipboardFormat("FileContents")+",\"directContentQuery\":\""+QueryVirtualContent(direct)+"\",\"directContentGet\":\""+GetVirtualContent(direct)+"\",\"clipboardContentQuery\":\""+QueryVirtualContent(clipboard)+"\",\"clipboardContentGet\":\""+GetVirtualContent(clipboard)+"\",\"directFormats\":"+IndexedFormats(direct)+",\"clipboardFormats\":"+IndexedFormats(clipboard)+"}";
@@ -138,6 +151,7 @@ class OleClipboardFixture {
     else if(next=="seed-indexed")Seed(true);
     else if(next=="seed-virtual-file")SeedVirtualFile();
     else if(next=="probe-virtual-file")Reply(ProbeVirtualFile());
+    else if(next=="check-virtual-file")Reply(CheckVirtualFileBoth());
     else if(next=="reset-editor"){editor.Text="";Reply("editor-reset");}
     else if(next=="probe-indexed")Reply(ProbeIndexed());
     else if(next=="editor-base64")Reply(Convert.ToBase64String(Encoding.UTF8.GetBytes(editor.Text)));

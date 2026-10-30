@@ -23,7 +23,7 @@ assert.equal(plan.engine, "reference");
 assert.equal(plan.execution, "not-run");
 assert.deepEqual(
   plan.cases.map((item) => item.id),
-  ["ole-preservation", "indexed-refusal", "newer-copy"],
+  ["ole-preservation", "indexed-refusal", "virtual-file", "newer-copy"],
 );
 assert.equal(plan.optIn, "PI_CU_CLIPBOARD_INPUT_TEST=1");
 const typo = spawnSync(
