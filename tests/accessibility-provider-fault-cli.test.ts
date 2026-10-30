@@ -143,3 +143,52 @@ test("platform provider probe plan needs no backend, Windows, or desktop", () =>
   assert.deepEqual(plan.cases, ["provider.platform-normalization"]);
   assert.equal(plan.fromHandleBeforeArm, true);
 });
+
+test("instrumented reference walker probe plans offline and refuses a mismatched backend", () => {
+  const script = fileURLToPath(
+    new URL("./provider-walker-probe.mjs", import.meta.url),
+  );
+  const plan = spawnSync(process.execPath, [script, "--plan"], {
+    encoding: "utf8",
+  });
+  assert.equal(plan.status, 0, plan.stderr);
+  assert.deepEqual(JSON.parse(plan.stdout).cases, [
+    "provider.reference-walker",
+  ]);
+  const folder = mkdtempSync(join(tmpdir(), "pi-walker-patch-"));
+  try {
+    const input = join(folder, "in.ps1"),
+      output = join(folder, "out.ps1");
+    writeFileSync(input, "unexpected backend version");
+    const result = spawnSync(
+      process.execPath,
+      [script, "--instrument", input, output],
+      { encoding: "utf8" },
+    );
+    assert.notEqual(result.status, 0);
+    assert.deepEqual(readdirSync(folder), ["in.ps1"]);
+    const anchor =
+      "      $child = $Traversal.walker.GetFirstChild($Element, $Traversal.cache)";
+    writeFileSync(input, `${anchor}\n${anchor}`);
+    const duplicate = spawnSync(
+      process.execPath,
+      [script, "--instrument", input, output],
+      { encoding: "utf8" },
+    );
+    assert.notEqual(duplicate.status, 0);
+    assert.deepEqual(readdirSync(folder), ["in.ps1"]);
+    writeFileSync(input, `before\n${anchor}\nafter`);
+    const valid = spawnSync(
+      process.execPath,
+      [script, "--instrument", input, output],
+      { encoding: "utf8" },
+    );
+    assert.equal(valid.status, 0, valid.stderr);
+    const patch = readFileSync(output, "utf8");
+    assert.ok(patch.indexOf("PI_CU_WALKER_READY") < patch.indexOf(anchor));
+    assert.equal(patch.split(anchor).length, 2);
+    assert.equal(readFileSync(input, "utf8"), `before\n${anchor}\nafter`);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
