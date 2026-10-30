@@ -37,6 +37,34 @@ const option = (name) =>
     .slice(2)
     .find((arg) => arg.startsWith(`--${name}=`))
     ?.slice(name.length + 3);
+// The report path is a test-runner interface for inspecting retained results;
+// it does not start a backend, create resources or dispatch input.
+function cleanupReport({ caseFailure = null, cleanupFailures, retainedTabs }) {
+  assert.ok(Array.isArray(cleanupFailures), "cleanupFailures must be an array");
+  assert.ok(
+    Number.isInteger(retainedTabs) && retainedTabs >= 0,
+    "retainedTabs must be non-negative",
+  );
+  return {
+    caseFailure,
+    cleanupFailures,
+    retainedTabs,
+    cleanupConfirmed: cleanupFailures.length === 0 && retainedTabs === 0,
+  };
+}
+const reportPath = option("report-cleanup");
+if (reportPath !== undefined) {
+  assert.equal(
+    process.argv.length,
+    3,
+    "report-cleanup cannot be combined with other options",
+  );
+  assert.ok(reportPath, "report-cleanup requires a path");
+  const report = cleanupReport(JSON.parse(await readFile(reportPath, "utf8")));
+  console.log(JSON.stringify(report));
+  if (report.caseFailure || !report.cleanupConfirmed) process.exitCode = 1;
+  process.exit();
+}
 for (const arg of process.argv.slice(2))
   assert.ok(
     arg === "--list" || /^--(engine|reference|case|diagnostic)=/.test(arg),
@@ -116,6 +144,8 @@ const folder = await mkdtemp(join(tmpdir(), "pi-cu-notepad-unicode-"));
 let client;
 let variant;
 let provenance;
+let operationError;
+const cleanupFailures = [];
 const retained = new Set();
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 async function prepareVariant() {
@@ -388,25 +418,69 @@ try {
           requestedMethod: "sendinput",
           dispatch: typed,
           dispatchMs,
-          ownedCleanupConfirmed: !retained.size,
+          ownedTabCleanupConfirmed: !retained.size,
           failure,
         }),
       );
     }
   }
+} catch (error) {
+  operationError = error;
 } finally {
-  await client?.dispose();
-  if (variant)
-    await rm(variant, {
-      recursive: true,
-      force: true,
-      maxRetries: 10,
-      retryDelay: 100,
-    });
-  await rm(stateProbe, { force: true });
-  if (retained.size === 0) await rm(folder, { recursive: true, force: true });
-  else
+  let shutdownAcknowledged = !client;
+  try {
+    await client?.dispose();
+    shutdownAcknowledged = true;
+  } catch (error) {
+    cleanupFailures.push({ stage: "client-dispose", message: error.message });
+  }
+  // Do not remove resources still potentially in use by an unconfirmed client.
+  if (shutdownAcknowledged) {
+    for (const [stage, path, recursive] of [
+      ["variant", variant, true],
+      ["state-probe", stateProbe, false],
+      ...(retained.size === 0 ? [["folder", folder, true]] : []),
+    ]) {
+      if (!path) continue;
+      try {
+        await rm(path, {
+          recursive,
+          force: true,
+          maxRetries: 10,
+          retryDelay: 100,
+        });
+      } catch (error) {
+        cleanupFailures.push({
+          stage,
+          message: error.message,
+          code: error.code,
+        });
+      }
+    }
+  }
+  if (retained.size)
     console.error(
       `Retained test files/tabs after an uncertain action: ${folder}`,
     );
+  const report = cleanupReport({
+    caseFailure: operationError
+      ? { message: operationError.message, rpcError: operationError.rpcError }
+      : null,
+    cleanupFailures,
+    retainedTabs: retained.size,
+  });
+  // Disposal acknowledgment is not independent proof of OS process retirement.
+  console.log(
+    JSON.stringify({
+      engine,
+      action: "cleanup",
+      ...report,
+      clientShutdownAcknowledged: shutdownAcknowledged,
+      processRetirementIndependentlyVerified: false,
+    }),
+  );
+}
+if (operationError) throw operationError;
+if (cleanupFailures.length || retained.size) {
+  throw new Error("Unicode test cleanup unconfirmed; see cleanup report");
 }
