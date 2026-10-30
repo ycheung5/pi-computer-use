@@ -192,6 +192,39 @@ These IDs define the planned coverage groups. Expand each group into named cases
 
 Physical cases run serially on a dedicated interactive desktop. Passive fixtures do not substitute for physical-input outcomes. Run ordinary success cases before their injected-failure variants. Both Windows and WSL2 launch paths remain required; do not multiply every desktop-only case across hosts unless host differences can affect it.
 
+### Accessibility comparison evidence
+
+The paired public-interface collector is `benchmark:accessibility`; `test:accessibility:report` checks that it retains both engines' outcomes, independent fixture values and cleanup evidence even when the product comparison exits nonzero. `test:reference:transport` checks initialization, all 25 advertised tools and raw MCP error preservation without invoking desktop actions. These commands reuse the pinned reference MCP server and Pi's normal worker request interface; no new production API is exposed.
+
+From WSL2 after building, use the existing serialized live-test discipline:
+
+```sh
+PI_CU_RELEASE_OUTPUT=/tmp/pi-cu-accessibility-evidence flock -w 120 /tmp/pi-cu-live-tests.lock npm run benchmark:accessibility -- /path/to/dsh-computer-use-win
+```
+
+The source/version/hash metadata and full JSON report are written to the selected output directory; a nonzero comparison means failures or incomplete coverage, not necessarily a transport failure. The separate report regression can pass while preserving a failing product comparison. Never turn its green result into a parity claim.
+
+The 2026-10-30 run used Windows Node 22.23.4 from WSL2, reference 0.5.3 and Pi 0.1.0. It exercised owned native controls, a stable small Edit fixture, the existing newer-control-type provider, and an isolated installed Chromium page through native UIA. No keyboard, mouse or clipboard input was sent. Value-setting and invocation explicitly prohibited physical fallback; native scroll remained blocked because its public API has no no-fallback option. Fixture state, logical active child, actual foreground HWND/PID and last-input tick were observed independently over fixture IPC. Cleanup confirmed controller disposal, owned fixture exit and temporary-directory removal.
+
+The final retained run collected **54 cases: 47 passed, five unexpected outcomes and two blocked native-scroll cases**, with controller/fixture/browser-root exit and directory cleanup confirmed. The product-comparison CLI correctly returned exit 1; the report-collection regression passed. Type checking, linting and all 42 portable tests passed. Artifacts were kept separately through collector/oracle corrections; the final target-bound report is `accessibility-comparison.json` under the chosen output directory.
+
+The four reference unexpected outcomes were ambiguous-title selection, the zero-depth truncation flag, a negative element wait ending inconclusive after a complete empty pre-observation, and removed-element inspection returning partial cached metadata. Pi's unexpected outcome was foreground restoration after logical focus: with `activate: false`, the requested root HWND and returned `inputTargetHandle` matched the independent owned fixture root, yet the foreground moved from the prior application to that fixture with the same last-input tick. Pi reported `left: another window is in front`; the exact requested element was a `uia:rt` reference. This repeated observation is a diagnosis input, not proof of the guard's internal cause. The reference restored the original foreground in the same scenario. Logical active-child focus succeeded in both engines.
+
+The current ticket remains open for deferred native-scroll and missing explicit provider-failure/hang coverage; comparison findings are triage inputs, not automatic instructions to change production behavior.
+
+| Observation | Interpretation |
+| --- | --- |
+| Unique native discovery, trees/snapshots, find/info, Unicode background value, invoke counter, read-only/disabled preservation, unsupported-pattern denial, wrong-owner/unseen references, positive waits and native Chromium reads | Compare independently observed effects and result meaning; DSH `results` and Pi `matches` are normalized by the collector, not treated as a product failure. |
+| Reference ambiguous title selection and zero-depth truncation flag differ from Pi | Retain the actual outcomes for #37; do not assume every stricter Pi behavior is necessarily preferable or blindly change it to the reference. |
+| Reference removed-element inspection returns partial cached metadata where Pi rejects the reference | Record the stale-result semantics; the observation alone does not establish how a later input action would behave. |
+| Reference negative element wait ends inconclusive after an earlier complete empty observation on an unchanged small fixture | The raw prior find and final wait are retained. A final short-budget poll is a source-level hypothesis; the test does not tune the timeout until the result turns green. Native-window absence supplies a separate deterministic negative wait case. |
+| Unsupported control type normalizes differently | Both return ten nodes and retain the known surrounding controls. Reference reports a null type with no truncation; Pi reports `Unknown`, `controlTypeUnavailable` and one unknown type. This is a metadata/completeness trade-off, not demonstrated superiority of either implementation. |
+| Logical focus versus foreground restoration | `Control.Focused` alone was an invalid oracle for a background action: it can become false when the original foreground is restored. The corrected oracle observes a changed `Form.ActiveControl` independently and records foreground/input state separately. |
+
+One later target-bound run recorded a partial `taskkill` warning as unconfirmed browser cleanup. Read-only process inspection found the owned root/children gone. The collector now waits for the actual owned browser-root exit and directory removal, retaining any termination warning instead of equating the command exit code with process lifetime; controller cleanup uncertainty also prevents a confirmed aggregate result. The earlier failed cleanup record remains preserved.
+
+Collector development failures were kept distinct from engine findings: the initial smoke emitted only a summary, then durable artifact collection was added; an unsupported `find.detailLevel` argument and an assumed identical `matches` field were corrected as test defects. An early reference-focus failure was retracted when the `Focused`-only oracle was corrected. Earlier logs/artifacts remain separate from the final baseline rather than being silently overwritten.
+
 ### Agent tasks
 
 These are outcome briefs, not step-by-step tool scripts. Supply identical goals and disposable starting states to each host. Agent tests may re-observe, scroll, refresh stale references, handle fixture dialogs and choose supported alternative methods. Explicit method-specific diagnostic tests retain their method constraint.
