@@ -1,11 +1,13 @@
 // Opt-in real input, scoped to newly created, uniquely named Notepad files.
 // Never uses the clipboard, existing tabs' contents, or background-input fallback.
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createComparisonClient } from "./comparison-client.mjs";
 
 const flatten = (node) =>
@@ -35,10 +37,45 @@ const option = (name) =>
     .slice(2)
     .find((arg) => arg.startsWith(`--${name}=`))
     ?.slice(name.length + 3);
+for (const arg of process.argv.slice(2))
+  assert.ok(
+    arg === "--list" || /^--(engine|reference|case|diagnostic)=/.test(arg),
+    `Unknown option: ${arg}`,
+  );
 const engine = option("engine") ?? "pi";
 assert.ok(
   ["pi", "reference"].includes(engine),
   "engine must be pi or reference",
+);
+const diagnosticName = option("diagnostic") ?? "baseline";
+const diagnostics = {
+  baseline: { name: "baseline", variable: null },
+  "pi-no-delay": {
+    name: "pi-no-delay",
+    variable: "inter-character-delay",
+    engine: "pi",
+    before: 50,
+    after: 0,
+  },
+  "reference-keyup-scan": {
+    name: "reference-keyup-scan",
+    variable: "unicode-keyup-scan",
+    engine: "reference",
+    before: 0,
+    after: "same-as-keydown",
+  },
+  "reference-pair-batches": {
+    name: "reference-pair-batches",
+    variable: "events-per-batch",
+    engine: "reference",
+    before: 64,
+    after: 2,
+  },
+};
+const diagnostic = diagnostics[diagnosticName];
+assert.ok(
+  diagnostic && (!diagnostic.engine || diagnostic.engine === engine),
+  "diagnostic must be known and match the selected engine",
 );
 const selectedCase = option("case");
 assert.ok(
@@ -56,6 +93,7 @@ if (process.argv.includes("--list")) {
       engine,
       executed: false,
       requestedMethod: "sendinput",
+      diagnostic,
       cases: selectedCases.map(({ seed, text, id }) => ({
         id,
         seed,
@@ -74,13 +112,105 @@ assert.equal(
 assert.equal(process.platform, "win32", "Run with Windows Node after building");
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-notepad-unicode-"));
 let client;
+let variant;
+let provenance;
 const retained = new Set();
+const hash = (value) => createHash("sha256").update(value).digest("hex");
+async function prepareVariant() {
+  if (diagnosticName === "baseline") return;
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  // Under the staged package, the private worker resolves its ancestor node_modules.
+  variant = await mkdtemp(join(root, ".pi-cu-unicode-variant-"));
+  const sourceRoot = engine === "pi" ? root : option("reference");
+  assert.ok(sourceRoot, "reference diagnostic requires --reference");
+  for (const name of engine === "pi" ? ["dist", "assets"] : ["mcp", "scripts"])
+    await cp(join(sourceRoot, name), join(variant, name), { recursive: true });
+  await cp(join(sourceRoot, "package.json"), join(variant, "package.json"));
+  const relative =
+    engine === "pi" ? "assets/text.cs" : "scripts/windows-uia.ps1";
+  const original = await readFile(join(sourceRoot, relative), "utf8");
+  const [before, after] =
+    diagnosticName === "pi-no-delay"
+      ? [
+          "const int UnicodeInputDelayMs=50;",
+          "const int UnicodeInputDelayMs=0;",
+        ]
+      : diagnosticName === "reference-keyup-scan"
+        ? ["inputs[n].U.ki.wScan = 0;", "inputs[n].U.ki.wScan = ch;"]
+        : [
+            "int chunk = Math.Min(64, n - sent);",
+            "int chunk = Math.Min(2, n - sent);",
+          ];
+  assert.equal(
+    original.split(before).length - 1,
+    1,
+    "diagnostic requires exactly one expected source location",
+  );
+  const changed = original.replace(before, after);
+  await writeFile(join(variant, relative), changed);
+  assert.equal(
+    hash(await readFile(join(sourceRoot, relative))),
+    hash(original),
+    "original source must remain unchanged",
+  );
+  provenance = {
+    diagnostic,
+    sourceFile: relative,
+    originalSha256: hash(original),
+    variantSha256: hash(changed),
+    replacement: { before, after },
+    productionSourceChanged: false,
+  };
+  console.log(JSON.stringify({ engine, diagnosticPreparation: provenance }));
+}
+const compiler = join(
+  process.env.WINDIR,
+  "Microsoft.NET",
+  "Framework64",
+  "v4.0.30319",
+  "csc.exe",
+);
+const stateProbe = join(folder, "unicode-input-state.exe");
+function inputState(target) {
+  const observed = spawnSync(
+    stateProbe,
+    [String(target.nativeWindowHandle), String(target.processId)],
+    { encoding: "utf8", windowsHide: true, cwd: folder },
+  );
+  assert.equal(observed.status, 0, observed.stdout + observed.stderr);
+  return JSON.parse(observed.stdout);
+}
 try {
-  client = await createComparisonClient({
-    engine,
-    referencePath: option("reference"),
-    cwd: folder,
-  });
+  const built = spawnSync(
+    compiler,
+    [
+      "/nologo",
+      `/out:${stateProbe}`,
+      "/r:System.Web.Extensions.dll",
+      fileURLToPath(new URL("./unicode-input-state.cs", import.meta.url)),
+    ],
+    { encoding: "utf8", windowsHide: true, cwd: folder },
+  );
+  assert.equal(built.status, 0, built.stdout + built.stderr);
+  await prepareVariant();
+  if (engine === "pi" && variant) {
+    const { WorkerClient } = await import(
+      pathToFileURL(join(variant, "dist/client.js")).href
+    );
+    client = new WorkerClient({
+      launch: async () => ({
+        executable: process.execPath,
+        args: [join(variant, "dist/worker.js")],
+        cwd: folder,
+      }),
+    });
+  } else {
+    client = await createComparisonClient({
+      engine,
+      referencePath: variant ?? option("reference"),
+      cwd: folder,
+    });
+  }
   for (const { id: caseId, seed, text } of selectedCases) {
     const started = performance.now();
     let typed;
@@ -88,6 +218,7 @@ try {
     let actual;
     let disk;
     let failure;
+    let environment;
     const expected = normalize(seed + text);
     try {
       const path = join(folder, `pi-unicode-${randomUUID()}.txt`);
@@ -137,6 +268,17 @@ try {
         });
         assert.equal(end.ok, true, JSON.stringify(end));
       }
+      environment = inputState(target);
+      assert.equal(
+        environment.foregroundHwnd,
+        target.nativeWindowHandle,
+        "independent foreground must be the owned Notepad window before typing",
+      );
+      assert.equal(
+        environment.focusProcessId,
+        target.processId,
+        "independent focused child must belong to the owned Notepad process",
+      );
       const dispatchStarted = performance.now();
       typed = await client.execute("type_text", {
         ...target,
@@ -231,6 +373,9 @@ try {
         JSON.stringify({
           engine,
           case: caseId,
+          diagnostic,
+          provenance,
+          environment,
           ok: !failure,
           seed,
           text,
@@ -249,6 +394,14 @@ try {
   }
 } finally {
   await client?.dispose();
+  if (variant)
+    await rm(variant, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    });
+  await rm(stateProbe, { force: true });
   if (retained.size === 0) await rm(folder, { recursive: true, force: true });
   else
     console.error(
