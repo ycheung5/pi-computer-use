@@ -8,8 +8,8 @@ class PointerDropFixture {
   [STAThread] static void Main(string[] args) {
     Console.OutputEncoding=new System.Text.UTF8Encoding(false);
     Form form=new Form {Text=args[0],Width=520,Height=300};
-    Panel source=new Panel {AccessibleName="Drop source",Left=40,Top=70,Width=140,Height=120,BackColor=Color.LightBlue};
-    Panel destination=new Panel {AccessibleName="Drop target",Left=300,Top=70,Width=140,Height=120,BackColor=Color.LightGreen,AllowDrop=true};
+    Button source=new Button {Text="Drop source",AccessibleName="Drop source",Left=40,Top=70,Width=140,Height=120,BackColor=Color.LightBlue};
+    Button destination=new Button {Text="Drop target",AccessibleName="Drop target",Left=300,Top=70,Width=140,Height=120,BackColor=Color.LightGreen,AllowDrop=true};
     source.MouseMove+=delegate(object sender,MouseEventArgs e) {if(e.Button==MouseButtons.Left) source.DoDragDrop("pi-drop-fixture",DragDropEffects.Copy);};
     destination.DragEnter+=delegate(object sender,DragEventArgs e) {if(e.Data.GetDataPresent(DataFormats.Text)) e.Effect=DragDropEffects.Copy;};
     destination.DragDrop+=delegate(object sender,DragEventArgs e) {if((string)e.Data.GetData(DataFormats.Text)=="pi-drop-fixture") Interlocked.Increment(ref drops);};

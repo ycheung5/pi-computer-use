@@ -62,7 +62,10 @@ if (option("report-drop")) {
 }
 const engine = option("engine") ?? "pi";
 const selectedCase = option("case");
-assert.ok(!selectedCase || selectedCase === "drag-drop", "unknown case");
+assert.ok(
+  !selectedCase || ["drag-drop", "drop-discovery"].includes(selectedCase),
+  "unknown case",
+);
 assert.ok(
   ["pi", "reference"].includes(engine),
   "engine must be pi or reference",
@@ -73,7 +76,11 @@ if (options.includes("--list")) {
       engine,
       executed: false,
       cases: selectedCase
-        ? ["successful-drag-drop"]
+        ? [
+            selectedCase === "drag-drop"
+              ? "successful-drag-drop"
+              : "passive-drop-discovery",
+          ]
         : [
             "scaled-click",
             "double-click",
@@ -94,6 +101,20 @@ if (options.includes("--list")) {
       ],
     }),
   );
+  process.exit(0);
+}
+if (selectedCase === "drop-discovery") {
+  assert.equal(
+    process.platform,
+    "win32",
+    "Run with Windows Node after building",
+  );
+  const { runDragDrop } = await import("./native-pointer-drop.mjs");
+  await runDragDrop({
+    engine,
+    referencePath: option("reference"),
+    discoveryOnly: true,
+  });
   process.exit(0);
 }
 assert.equal(

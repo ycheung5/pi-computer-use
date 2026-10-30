@@ -28,6 +28,15 @@ test("Pointer comparison plans without resources and refuses unapproved input", 
       assert.deepEqual(JSON.parse(dragPlan.stdout).cases, [
         "successful-drag-drop",
       ]);
+      const discovery = run(
+        "--list",
+        `--engine=${engine}`,
+        "--case=drop-discovery",
+      );
+      assert.equal(discovery.status, 0, discovery.stderr);
+      assert.deepEqual(JSON.parse(discovery.stdout).cases, [
+        "passive-drop-discovery",
+      ]);
       const dragRefused = run(`--engine=${engine}`, "--case=drag-drop");
       assert.notEqual(dragRefused.status, 0);
       assert.match(dragRefused.stderr, /PI_CU_DEDICATED_INPUT_DESKTOP=1/);

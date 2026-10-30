@@ -8,7 +8,11 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assessDrop } from "./pointer-drop-report.mjs";
 
-export async function runDragDrop({ engine, referencePath }) {
+export async function runDragDrop({
+  engine,
+  referencePath,
+  discoveryOnly = false,
+}) {
   const folder = await mkdtemp(join(tmpdir(), "pi-cu-drop-"));
   process.env.PI_CU_SETTINGS_FILE = join(folder, "settings.json");
   const executable = join(folder, "fixture.exe");
@@ -101,18 +105,49 @@ export async function runDragDrop({ engine, referencePath }) {
       { drops: 0, held: 0 },
       "fresh fixture and released button required",
     );
+    if (discoveryOnly) {
+      for (const viewMode of ["control", "raw"]) {
+        await call("accessibility_tree", {
+          viewMode,
+          detailLevel: "full",
+          activate: false,
+        });
+      }
+    }
     const find = async (query) => {
       const result = await call("find", {
         query,
-        controlType: "Pane",
+        controlType: "Button",
         ocrFallback: false,
+        activate: false,
       });
       assert.equal(result.ok, true);
       assert.equal(result.matches.length, 1);
-      return result.matches[0];
+      const match = result.matches[0];
+      assert.equal(match.isOffscreen, false, `${query} must be visible`);
+      assert.ok(
+        match.boundingBox &&
+          Number.isFinite(match.boundingBox.centerX) &&
+          Number.isFinite(match.boundingBox.centerY) &&
+          match.boundingBox.width > 0 &&
+          match.boundingBox.height > 0,
+        `${query} must have usable observed bounds`,
+      );
+      return match;
     };
     const source = await find("Drop source");
     const destination = await find("Drop target");
+    if (discoveryOnly) {
+      console.log(
+        JSON.stringify({
+          engine,
+          check: "passive-drop-discovery",
+          ok: true,
+          inputDispatched: false,
+        }),
+      );
+      return;
+    }
     const point = (item) => ({
       x: Math.round(item.boundingBox.centerX),
       y: Math.round(item.boundingBox.centerY),
