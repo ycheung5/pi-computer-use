@@ -11,6 +11,65 @@ assert.ok(process.argv[2], "Pass the reference checkout path");
 const profiles = process.argv.includes("--profiles");
 const advanced = process.argv.includes("--advanced");
 const filled = process.argv.includes("--filled");
+if (process.argv.includes("--verify-profile-interruptions")) {
+  const reports = [];
+  for (const kind of ["stop", "cancel", "cleanup", "abort", "cleanup-result"]) {
+    let execution;
+    try {
+      execution = await promisify(execFile)(
+        process.execPath,
+        [
+          fileURLToPath(new URL("./browser-comparison.mjs", import.meta.url)),
+          process.argv[2],
+          process.argv[3] ?? "edge",
+          "1",
+          "--profiles",
+          "--profile-interruption",
+          kind,
+        ],
+        { timeout: 240000, maxBuffer: 8 * 1024 * 1024 },
+      );
+    } catch (error) {
+      execution = error;
+    }
+    assert.equal(execution.code, 1);
+    const line = execution.stdout
+      ?.split(/\r?\n/)
+      .find((x) => x.startsWith('{"diagnosticInjection":'));
+    assert.ok(line, execution.stderr);
+    const report = JSON.parse(line);
+    assert.equal(report.diagnosticInjection, true);
+    assert.equal(report.ok, false);
+    assert.equal(report.cases[0].diagnosticInterruption.kind, kind);
+    assert.equal(
+      report.cases[0].diagnosticInterruption.postFaultControllerAttempts,
+      0,
+      JSON.stringify(report),
+    );
+    if (kind === "cleanup-result")
+      assert.equal(report.cases[0].toolResult.cleanupConfirmed, false);
+    else
+      assert.match(
+        report.cases[0].error,
+        /COMPUTER_USE_(?:STOPPED|CANCELLED)|INPUT_CLEANUP_UNCONFIRMED|AbortError/,
+      );
+    assert.equal(report.cases[0].halted, true);
+    assert.ok(report.cases[0].profile.restart.interrupted);
+    assert.equal(report.cases[0].profile.temporary, undefined);
+    assert.equal(report.cases[1].status, "blocked", JSON.stringify(report));
+    assert.equal(report.cleanup.folderRemoved, true);
+    reports.push({ kind, report });
+  }
+  console.log(
+    JSON.stringify({
+      ok: true,
+      diagnosticInjection: true,
+      check: "profile interruptions block later browser work",
+      reports,
+    }),
+  );
+  process.exit(0);
+}
 if (process.argv.includes("--verify-restart-gaps")) {
   const reportIndex = process.argv.indexOf("--report");
   assert.ok(

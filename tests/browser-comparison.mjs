@@ -71,7 +71,9 @@ if (process.argv.includes("--profiles")) {
 const root = fileURLToPath(new URL("../", import.meta.url));
 const folder = await mkdtemp(join(tmpdir(), "pi-browser-comparison-"));
 const report = {
-  diagnosticInjection: process.argv.includes("--verify-unfilled"),
+  diagnosticInjection:
+    process.argv.includes("--verify-unfilled") ||
+    process.argv.includes("--profile-interruption"),
   mode: process.argv.includes("--profiles")
     ? "profiles"
     : process.argv.includes("--advanced")
@@ -91,6 +93,13 @@ const report = {
   cases: [],
   cleanup: {},
 };
+const requiresHalt = (error) =>
+  /cancel|stop|cleanup[ _-]*(?:unconfirmed|not[ _-]*confirmed)|(?:unconfirmed|not[ _-]*confirmed)[ _-]*cleanup/i.test(
+    `${error.name ?? ""} ${String(error)} ${JSON.stringify(error.toolResult ?? {})}`,
+  ) ||
+  error.name === "AbortError" ||
+  error.toolResult?.cleanupConfirmed === false ||
+  error.toolResult?.clipboardCleanupConfirmed === false;
 const expected = {
   name: "Pi 中文 café 😀",
   notes: "First line\n第二行 café 😀",
@@ -300,6 +309,12 @@ try {
         settings.browserSignIn = report.mode === "profiles";
         await writeFile(settingsPath, JSON.stringify(settings));
         const createClient = async () => {
+          if (row.diagnosticInterruption) {
+            row.diagnosticInterruption.postFaultControllerAttempts++;
+            throw new Error(
+              "COMPUTER_USE_STOPPED: diagnostic refused post-interruption controller creation",
+            );
+          }
           if (engine === "reference") {
             const referenceClient = new ReferenceClient(reference, {
               cwd: folder,
@@ -455,6 +470,35 @@ try {
           };
           try {
             active = await createClient();
+            const interruptionIndex = process.argv.indexOf(
+              "--profile-interruption",
+            );
+            if (interruptionIndex >= 0) {
+              const kind = process.argv[interruptionIndex + 1];
+              const errors = {
+                stop: "COMPUTER_USE_STOPPED: diagnostic kept reconnect interrupted",
+                cancel:
+                  "COMPUTER_USE_CANCELLED: diagnostic kept reconnect interrupted",
+                cleanup:
+                  "INPUT_CLEANUP_UNCONFIRMED: diagnostic kept reconnect interrupted",
+                abort: "Diagnostic operation aborted",
+                "cleanup-result": "Diagnostic release status unavailable",
+              };
+              assert.ok(
+                errors[kind],
+                "Use stop, cancel or cleanup diagnostic interruption",
+              );
+              row.diagnosticInterruption = {
+                kind,
+                postFaultControllerAttempts: 0,
+                at: "kept reconnect before new-tab dispatch",
+              };
+              const interrupted = new Error(errors[kind]);
+              if (kind === "abort") interrupted.name = "AbortError";
+              if (kind === "cleanup-result")
+                interrupted.toolResult = { ok: false, cleanupConfirmed: false };
+              throw interrupted;
+            }
             const { result: resumed } = await call("set_value", {
               elementId: "new-tab",
               value: `${source.url}profile/read`,
@@ -489,6 +533,13 @@ try {
           } catch (error) {
             row.profile.cookiePersisted = false;
             row.profile.restart.verified = false;
+            if (requiresHalt(error)) {
+              row.profile.restart.interrupted = {
+                error: String(error),
+                toolResult: error.toolResult,
+              };
+              throw error;
+            }
             row.findings ??= [];
             row.findings.push({
               phase: "kept profile restart",
@@ -809,8 +860,10 @@ try {
         row.error = String(error);
         row.cause ??= "unknown";
         if (error.toolResult) row.toolResult = error.toolResult;
-        if (/cancel|stop|cleanup unconfirmed/i.test(String(error)))
+        if (requiresHalt(error)) {
           halted = true;
+          row.halted = true;
+        }
       } finally {
         if (active) {
           try {
