@@ -31,3 +31,16 @@ On a **dedicated interactive desktop**, use the opt-in physical runner/fixture f
 The original preparation validated portable CLI planning/refusal; the later dedicated session adds scoped physical results. The `--list` output distinguishes the implemented runner cases from pending coverage; listing is not a test pass. Successful drag/drop, independent foreground/restoration, user interference, menus/dialogs, same-process distractors, disappeared/replaced targets, mixed DPI/negative origins and physical stop still need dedicated-session comparison work. Existing passive guard results remain scoped Pi evidence, not a paired reference baseline. The first authorized physical session is complete; broader cases remain unrun and #30 stays open.
 
 The paired runner accepts DSH's single uniform screenshot scale and Pi's separate Y scale, retaining the raw capture metadata. Hover preparation explicitly activates the owned fixture and verifies foreground through the fixture's independent HWND observation; bounded read-only polling allows the event queue to update after the single move. These runner corrections require a new physical run and do not establish a product fix.
+
+
+## Drag failure reporting
+
+The physical runner now waits for the drag and fixture mouse-down observation to settle, then records bounded read-only release observations **before** asserting the dispatch outcome or tearing down the fixture. A timeout, unexpected success/error or missing fixture reply retains its original evidence together with button-held state, release-counter progression and any observation error. The report distinguishes cancellation confirmation from release confirmation; a released button does not turn a timeout into successful cancellation. No automatic button release, new input or replay is performed by this reporting step. A held or unconfirmed state requires the coordinator to stop dependent physical tests and arrange separately verified cleanup.
+
+An offline saved-evidence check is available through the existing runner CLI:
+
+```sh
+npm run test:native:pointer:physical -- --report-drag=/path/to/drag-evidence.json
+```
+
+It runs before Windows/desktop opt-in and starts no client, fixture or input. Save the emitted report's `evidence` object as the input. Portable regressions distinguish cancelled-and-released, timed-out-and-held, timed-out-but-released, absent mouse-down and unavailable release observation. These reporting checks do not rerun or repair DSH's recorded physical cancellation failure. Live use of the updated error path remains pending the next dedicated session.

@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,11 +10,48 @@ import { fileURLToPath } from "node:url";
 const options = process.argv.slice(2);
 for (const option of options)
   assert.ok(
-    option === "--list" || /^--(engine|reference)=.+/.test(option),
+    option === "--list" || /^--(engine|reference|report-drag)=.+/.test(option),
     `Unknown option: ${option}`,
   );
 const option = (name) =>
   options.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
+// Offline reports use the same assessment as the live runner and never dispatch input.
+function dragReport(evidence) {
+  const last = evidence.observations?.at(-1);
+  const cancellationText =
+    evidence.dispatch?.status === "rejected"
+      ? evidence.dispatch.error?.message
+      : evidence.dispatch?.value?.ok === false
+        ? evidence.dispatch.value.error
+        : "";
+  const cancellationConfirmed =
+    evidence.down?.status === "fulfilled" &&
+    /abort|STOPPED|CANCELLED/i.test(cancellationText ?? "");
+  const releaseConfirmed =
+    !evidence.observationError &&
+    last?.held === 0 &&
+    Number.isInteger(evidence.before?.releases) &&
+    Number.isInteger(last?.releases) &&
+    last.releases > evidence.before.releases;
+  return {
+    ok: cancellationConfirmed && releaseConfirmed,
+    check: "drag-cancellation-release",
+    cancellationConfirmed,
+    releaseConfirmed,
+    cleanupVerification: releaseConfirmed
+      ? "released"
+      : last?.held === 1
+        ? "held"
+        : "unconfirmed",
+    evidence,
+  };
+}
+if (option("report-drag")) {
+  const evidence = JSON.parse(await readFile(option("report-drag"), "utf8"));
+  const report = dragReport(evidence);
+  console.log(JSON.stringify({ ...report, inputDispatched: false }));
+  process.exit(report.ok ? 0 : 1);
+}
 const engine = option("engine") ?? "pi";
 assert.ok(
   ["pi", "reference"].includes(engine),
@@ -274,32 +311,42 @@ try {
     }, 15000);
   });
   const dragged = call("drag", { path }, controller.signal);
-  const result = dragged.then(
-    (value) => {
-      assert.equal(value.ok, false, "cancelled drag must not claim success");
-      assert.match(
-        value.error ?? JSON.stringify(value),
-        /abort|STOPPED|CANCELLED/i,
-      );
-    },
-    (error) => assert.match(String(error), /abort|STOPPED|CANCELLED/i),
-  );
-  await Promise.all([down, result]);
-  let afterDrag;
-  for (let attempt = 0; attempt < 50; attempt++) {
-    afterDrag = await observePointer();
-    if (afterDrag.held === 0 && afterDrag.releases > beforeDrag.releases) break;
-    await new Promise((resolve) => setTimeout(resolve, 100));
+  const [downResult, dispatchResult] = await Promise.allSettled([
+    down,
+    dragged,
+  ]);
+  const retainedResult = (result) =>
+    result.status === "fulfilled"
+      ? { status: result.status, value: result.value }
+      : {
+          status: result.status,
+          error: {
+            name: result.reason?.name,
+            message: String(result.reason?.message ?? result.reason),
+          },
+        };
+  const evidence = {
+    engine,
+    before: beforeDrag,
+    down: retainedResult(downResult),
+    dispatch: retainedResult(dispatchResult),
+    observations: [],
+  };
+  // Always observe release, including timeout/unexpected-error paths, before teardown.
+  // This is read-only: a held/unconfirmed button is reported, never automatically released.
+  try {
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const state = await observePointer();
+      evidence.observations.push(state);
+      if (state.held === 0 && state.releases > beforeDrag.releases) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  } catch (error) {
+    evidence.observationError = { name: error.name, message: error.message };
   }
-  assert.equal(
-    afterDrag.held,
-    0,
-    "OS reports left button released after cancellation",
-  );
-  assert.ok(
-    afterDrag.releases > beforeDrag.releases,
-    "fixture received release after cancelled drag",
-  );
+  const report = dragReport(evidence);
+  console.log(JSON.stringify(report));
+  assert.equal(report.ok, true, JSON.stringify(report));
   console.log(
     JSON.stringify({
       engine,
