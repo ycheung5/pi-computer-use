@@ -53,7 +53,7 @@ function cleanupReport({ caseFailure = null, cleanupFailures, retainedTabs }) {
   };
 }
 const reportPath = option("report-cleanup");
-function environmentReport({ target, observation }) {
+function environmentReport({ target, editor, observation }) {
   const checks = {
     targetIdentity:
       Number.isSafeInteger(target?.nativeWindowHandle) &&
@@ -73,6 +73,15 @@ function environmentReport({ target, observation }) {
       observation.focusHwnd > 0 &&
       observation?.focusProcessId === target?.processId &&
       observation?.focusRootHwnd === target?.nativeWindowHandle,
+    editor:
+      Number.isSafeInteger(editor?.nativeWindowHandle) &&
+      editor.nativeWindowHandle > 0 &&
+      editor.nativeWindowHandle !== target?.nativeWindowHandle &&
+      editor?.processId === target?.processId &&
+      observation?.editorHwnd === editor.nativeWindowHandle &&
+      observation?.editorProcessId === target?.processId &&
+      observation?.editorRootHwnd === target?.nativeWindowHandle &&
+      observation?.focusWithinEditor === true,
     layout:
       typeof observation?.keyboardLayoutHex === "string" &&
       /^0x[0-9a-f]+$/i.test(observation.keyboardLayoutHex) &&
@@ -282,10 +291,14 @@ const compiler = join(
   "csc.exe",
 );
 const stateProbe = join(folder, "unicode-input-state.exe");
-function inputState(target) {
+function inputState(target, editor) {
   const observed = spawnSync(
     stateProbe,
-    [String(target.nativeWindowHandle), String(target.processId)],
+    [
+      String(target.nativeWindowHandle),
+      String(target.processId),
+      String(editor.nativeWindowHandle ?? 0),
+    ],
     { encoding: "utf8", windowsHide: true, cwd: folder },
   );
   assert.equal(observed.status, 0, observed.stdout + observed.stderr);
@@ -374,23 +387,28 @@ try {
         elementId: editors[0].id,
       });
       assert.equal(focused.ok, true, JSON.stringify(focused));
+      const checkEnvironment = () => {
+        environment = inputState(target, editors[0]);
+        const evidence = environmentReport({
+          target,
+          editor: editors[0],
+          observation: environment,
+        });
+        assert.equal(
+          evidence.conclusive,
+          true,
+          `Independent target/editor/focus/layout evidence is incomplete: ${JSON.stringify(evidence.checks)}`,
+        );
+      };
+      checkEnvironment();
       if (seed) {
         const end = await client.execute("keypress", {
           ...target,
           keys: ["Ctrl", "End"],
         });
         assert.equal(end.ok, true, JSON.stringify(end));
+        checkEnvironment();
       }
-      environment = inputState(target);
-      const inputEnvironment = environmentReport({
-        target,
-        observation: environment,
-      });
-      assert.equal(
-        inputEnvironment.conclusive,
-        true,
-        `Independent target/focus/layout evidence is incomplete: ${JSON.stringify(inputEnvironment.checks)}`,
-      );
       const dispatchStarted = performance.now();
       typed = await client.execute("type_text", {
         ...target,
