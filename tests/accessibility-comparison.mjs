@@ -17,9 +17,6 @@ import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { WorkerClient } from "../dist/client.js";
-import { nativeWorkerLaunch } from "../dist/launcher.js";
-import { ReferenceClient, referenceResult } from "./reference-client.mjs";
 
 let activeCase;
 const ownedPids = new Set(),
@@ -141,19 +138,71 @@ if (process.argv.includes("--diagnostic-report")) {
   console.log(JSON.stringify(diagnostic));
   process.exit(0);
 }
+const nativeScrollOnly = process.argv.includes("--native-scroll-only");
+const scrollArguments = process.argv.slice(2);
+if (nativeScrollOnly) {
+  assert.ok(
+    scrollArguments.every(
+      (arg) =>
+        !arg.startsWith("--") ||
+        arg === "--native-scroll-only" ||
+        arg === "--plan",
+    ),
+    "Unknown native scroll option",
+  );
+  if (scrollArguments.includes("--plan")) {
+    console.log(
+      JSON.stringify({
+        executed: false,
+        physicalInput: "possible",
+        engines: ["reference", "pi"],
+        cases: ["native.scroll"],
+        optIn: "PI_CU_DEDICATED_INPUT_DESKTOP=1",
+      }),
+    );
+    process.exit(0);
+  }
+  assert.equal(
+    process.env.PI_CU_DEDICATED_INPUT_DESKTOP,
+    "1",
+    "Set PI_CU_DEDICATED_INPUT_DESKTOP=1 on an authorized idle desktop for native element scroll",
+  );
+}
+const cliReference = nativeScrollOnly
+  ? scrollArguments.find((arg) => !arg.startsWith("--"))
+  : process.argv[2];
+assert.ok(cliReference, "Pass reference checkout");
+// Planning and physical-input refusal above deliberately precede all backend imports.
+const [
+  { WorkerClient },
+  { nativeWorkerLaunch },
+  { ReferenceClient, referenceResult },
+] = await Promise.all([
+  import("../dist/client.js"),
+  import("../dist/launcher.js"),
+  import("./reference-client.mjs"),
+]);
 if (process.platform === "linux") {
   const run = promisify(execFile),
     launch = await nativeWorkerLaunch();
   const win = async (p) =>
     (await run("wslpath", ["-w", resolve(p)])).stdout.trim();
   const script = await win(fileURLToPath(import.meta.url)),
-    reference = await win(process.argv[2]);
+    reference = await win(cliReference);
   const output = process.env.PI_CU_RELEASE_OUTPUT
     ? await win(process.env.PI_CU_RELEASE_OUTPUT)
     : undefined;
-  const code = `import{pathToFileURL}from'node:url';${output ? `process.env.PI_CU_RELEASE_OUTPUT=${JSON.stringify(output)};` : "delete process.env.PI_CU_RELEASE_OUTPUT;"}process.argv=[process.execPath,${JSON.stringify(script)},${JSON.stringify(reference)},...${JSON.stringify(process.argv.slice(3))}];await import(pathToFileURL(${JSON.stringify(script)}).href);`;
+  const code = `import{pathToFileURL}from'node:url';${output ? `process.env.PI_CU_RELEASE_OUTPUT=${JSON.stringify(output)};` : "delete process.env.PI_CU_RELEASE_OUTPUT;"}process.argv=[process.execPath,${JSON.stringify(script)},${JSON.stringify(reference)},...${JSON.stringify(nativeScrollOnly ? ["--native-scroll-only"] : process.argv.slice(3))}];await import(pathToFileURL(${JSON.stringify(script)}).href);`;
   const child = run(launch.executable, ["--input-type=module", "-e", code], {
     cwd: launch.cwd,
+    ...(nativeScrollOnly
+      ? {
+          env: {
+            ...process.env,
+            WSLENV: `${process.env.WSLENV ? `${process.env.WSLENV}:` : ""}PI_CU_DEDICATED_INPUT_DESKTOP`,
+          },
+        }
+      : {}),
     timeout: 300000,
     maxBuffer: 16 * 1024 * 1024,
   });
@@ -172,15 +221,14 @@ if (process.platform === "linux") {
   process.exit(process.exitCode ?? 0);
 }
 assert.equal(process.platform, "win32");
-assert.ok(process.argv[2], "Pass reference checkout");
-const reference = resolve(process.argv[2]),
+const reference = resolve(cliReference),
   root = fileURLToPath(new URL("../", import.meta.url));
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-accessibility-compare-"));
 process.env.PI_CU_SETTINGS_FILE = join(folder, "settings.json");
 const report = {
   comparison: "accessibility",
   ok: false,
-  physicalInput: false,
+  physicalInput: nativeScrollOnly ? "possible" : false,
   clipboard: false,
   environment: {
     platform: process.platform,
@@ -382,6 +430,95 @@ function refused(result) {
 }
 const record = (name, id, expected, run) =>
   recordCase(report, name, id, expected, run);
+// Each engine owns a fresh fixture. This element action may escalate to guarded
+// physical wheel input, so it is reachable only through the dedicated gate.
+async function runNativeScroll(name) {
+  const owned = await fixture(
+    "controls-fixture",
+    `Pi paired scroll ${name} ${randomUUID()}`,
+  );
+  let client;
+  try {
+    client = await engine(name);
+    await record(
+      name,
+      "native.scroll",
+      "Fixture scroll offset increases from its reset state",
+      async () => {
+        const before = await owned.observe();
+        assert.equal(
+          before.scroll,
+          0,
+          "fresh fixture must start at scroll offset zero",
+        );
+        const found = success(
+          await client.call("find", {
+            ...owned.target,
+            query: "Background scroller",
+            controlType: "Pane",
+            ocrFallback: false,
+          }),
+        );
+        const matches = found.matches ?? found.results;
+        assert.ok(
+          Array.isArray(matches) && matches.length === 1,
+          "require one fresh owned scroll target",
+        );
+        let result;
+        try {
+          result = await client.call("scroll", {
+            ...owned.target,
+            elementId: matches[0].id,
+            deltaY: 240,
+          });
+        } catch (error) {
+          report.inputCleanupUnconfirmed = true;
+          throw new Error(
+            `Element scroll response uncertain; cleanup unconfirmed: ${String(error)}`,
+          );
+        }
+        if (result.cleanupConfirmed === false || !result.ok) {
+          report.inputCleanupUnconfirmed = true;
+          throw new Error(
+            `Element scroll failed or cleanup unconfirmed: ${JSON.stringify(result)}`,
+          );
+        }
+        let after;
+        try {
+          after = await owned.observe();
+        } catch (error) {
+          report.inputCleanupUnconfirmed = true;
+          throw new Error(
+            `Post-scroll observation unavailable; cleanup unconfirmed: ${String(error)}`,
+          );
+        }
+        try {
+          assert.ok(
+            after.scroll > before.scroll,
+            "fixture independently observed panel scrolling",
+          );
+        } catch (error) {
+          error.observation = { before, after, toolResult: result };
+          throw error;
+        }
+        return {
+          before,
+          after,
+          toolResult: result,
+          cleanupConfirmation: result.cleanupConfirmed ?? "not provided",
+        };
+      },
+    );
+    const settled = await client.settle();
+    if (settled?.cleanupConfirmed === false)
+      throw new Error(
+        `Operation cleanup unconfirmed: ${JSON.stringify(settled)}`,
+      );
+  } finally {
+    if (client) await closeClient(client);
+    await stop(owned.child);
+  }
+}
 async function runNative(name) {
   const prefix = `Pi paired ${name} ${randomUUID()}`;
   const owned = await fixture("controls-fixture", prefix);
@@ -1257,17 +1394,23 @@ async function runChromium() {
 }
 try {
   for (const name of ["reference", "pi"]) {
+    if (nativeScrollOnly) {
+      await runNativeScroll(name);
+      continue;
+    }
     if (!process.argv.includes("--provider-failures")) {
       await runNative(name);
       await runProvider(name);
     }
     await runProviderFailures(name);
   }
-  if (!process.argv.includes("--provider-failures")) await runChromium();
+  if (!nativeScrollOnly && !process.argv.includes("--provider-failures"))
+    await runChromium();
 } catch (error) {
   report.fatal = String(error);
 } finally {
-  let clean = report.controllerCleanupConfirmed;
+  let clean =
+    report.controllerCleanupConfirmed && !report.inputCleanupUnconfirmed;
   for (const child of fixtures) {
     try {
       await stop(child);
