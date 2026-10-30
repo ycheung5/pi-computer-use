@@ -47,6 +47,12 @@ test("standard virtual-file fixture probe remains separately selected and gated"
   const plan = run("--plan", "--probe-virtual-file");
   assert.equal(plan.status, 0, plan.stderr);
   assert.equal(JSON.parse(plan.stdout).probe, "virtual-file-fixture");
+  assert.deepEqual(JSON.parse(plan.stdout).observations, [
+    "directContentQuery",
+    "directContentGet",
+    "clipboardContentQuery",
+    "clipboardContentGet",
+  ]);
   const blocked = run("--probe-virtual-file");
   assert.notEqual(blocked.status, 0);
   assert.match(blocked.stderr, /PI_CU_CLIPBOARD_INPUT_TEST=1/);

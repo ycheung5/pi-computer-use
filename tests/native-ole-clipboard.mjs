@@ -88,6 +88,14 @@ if (args.includes("--plan") || args.includes("--list-cases")) {
         : virtualProbe
           ? "virtual-file-fixture"
           : undefined,
+      observations: virtualProbe
+        ? [
+            "directContentQuery",
+            "directContentGet",
+            "clipboardContentQuery",
+            "clipboardContentGet",
+          ]
+        : undefined,
       deferred: [
         "plain-only clipboard",
         "locked clipboard",

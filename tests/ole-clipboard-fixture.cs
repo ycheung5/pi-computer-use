@@ -72,9 +72,23 @@ class OleClipboardFixture {
    finally{GlobalUnlock(medium.unionmember);}
   }finally{ReleaseStgMedium(ref medium);}
  }
+ static FORMATETC VirtualContentFormat() {return new FORMATETC {cfFormat=(short)RegisterClipboardFormat("FileContents"),dwAspect=DVASPECT.DVASPECT_CONTENT,lindex=0,tymed=TYMED.TYMED_HGLOBAL};}
+ static string QueryVirtualContent(OleDataObject data) {
+  var format=VirtualContentFormat();try{int q=data.QueryGetData(ref format);return q==0?"ok":"query:"+q.ToString("X8");}catch(COMException error){return "query:"+error.ErrorCode.ToString("X8");}
+ }
+ static string GetVirtualContent(OleDataObject data) {
+  var format=VirtualContentFormat();STGMEDIUM medium;
+  // GetData is intentionally attempted even after QueryGetData reports failure.
+  try{data.GetData(ref format,out medium);}catch(COMException error){return "get:"+error.ErrorCode.ToString("X8");}
+  try {if(medium.tymed!=TYMED.TYMED_HGLOBAL || GlobalSize(medium.unionmember).ToUInt64()<4)return "get:medium-or-size";
+   IntPtr memory=GlobalLock(medium.unionmember);if(memory==IntPtr.Zero)return "get:lock";
+   try{byte[] bytes=new byte[4];Marshal.Copy(memory,bytes,0,4);return bytes[0]==1 && bytes[1]==2 && bytes[2]==3 && bytes[3]==4?"preserved":"get:bytes";}
+   finally{GlobalUnlock(medium.unionmember);}
+  }finally{ReleaseStgMedium(ref medium);}
+ }
  static string ProbeVirtualFile() {
   var direct=retained as OleDataObject;OleDataObject clipboard;Marshal.ThrowExceptionForHR(OleGetClipboard(out clipboard));
-  return "{\"direct\":\""+CheckVirtualFileData(direct)+"\",\"clipboard\":\""+CheckVirtualFileData(clipboard)+"\",\"descriptorFormat\":"+RegisterClipboardFormat("FileGroupDescriptorW")+",\"contentFormat\":"+RegisterClipboardFormat("FileContents")+",\"directFormats\":"+IndexedFormats(direct)+",\"clipboardFormats\":"+IndexedFormats(clipboard)+"}";
+  return "{\"direct\":\""+CheckVirtualFileData(direct)+"\",\"clipboard\":\""+CheckVirtualFileData(clipboard)+"\",\"descriptorFormat\":"+RegisterClipboardFormat("FileGroupDescriptorW")+",\"contentFormat\":"+RegisterClipboardFormat("FileContents")+",\"directContentQuery\":\""+QueryVirtualContent(direct)+"\",\"directContentGet\":\""+GetVirtualContent(direct)+"\",\"clipboardContentQuery\":\""+QueryVirtualContent(clipboard)+"\",\"clipboardContentGet\":\""+GetVirtualContent(clipboard)+"\",\"directFormats\":"+IndexedFormats(direct)+",\"clipboardFormats\":"+IndexedFormats(clipboard)+"}";
  }
  static bool CheckSeed() {
   var data=Clipboard.GetDataObject();if(data==null || !OwnsClipboard())return false;
