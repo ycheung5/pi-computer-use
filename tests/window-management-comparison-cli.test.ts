@@ -143,3 +143,69 @@ test("focus evidence distinguishes interference, restoration failure and changed
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("focus provenance planning stays offline and reports privacy-preserving counters", () => {
+  const source = fileURLToPath(
+    new URL("./foreground-focus-comparison.mjs", import.meta.url),
+  );
+  const result = spawnSync(
+    process.execPath,
+    [source, "--plan", "--provenance"],
+    {
+      encoding: "utf8",
+      env: { ...process.env, PI_CU_WINDOW_MANAGEMENT_TEST: "" },
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const plan = JSON.parse(result.stdout);
+  assert.equal(plan.executed, false);
+  assert.equal(plan.physicalInput, false);
+  assert.equal(plan.inputProvenance, "aggregate hook counts only");
+});
+
+test("provenance reports distinguish tagged input from unmarked or other injected events", () => {
+  const script = fileURLToPath(
+    new URL("./foreground-focus-comparison.mjs", import.meta.url),
+  );
+  const dir = mkdtempSync(join(tmpdir(), "pi-provenance-report-"));
+  try {
+    const path = join(dir, "evidence.json"),
+      prior = { nativeWindowHandle: 10, processId: 20 };
+    const obs = {
+      foregroundHandle: 10,
+      foregroundPid: 20,
+      lastInputTick: 2,
+      activeEditor: true,
+    };
+    const zero = {
+      unmarkedMouse: 0,
+      injectedMouse: 0,
+      taggedMouse: 0,
+      unmarkedKey: 0,
+      injectedKey: 0,
+      taggedKey: 0,
+    };
+    const base = {
+      prior,
+      before: obs,
+      pre: obs,
+      focus: { ok: true },
+      samples: [obs],
+      inputEventsBefore: zero,
+    };
+    for (const [end, status] of [
+      [{ ...zero, taggedMouse: 1 }, "pass"],
+      [{ ...zero, unmarkedKey: 1 }, "inconclusive"],
+      [{ ...zero, injectedMouse: 1 }, "inconclusive"],
+      [{ ...zero, unmarkedMouse: -1 }, "inconclusive"],
+    ] as const) {
+      writeFileSync(path, JSON.stringify({ ...base, inputEventsAfter: end }));
+      const result = spawnSync(process.execPath, [script, `--report=${path}`], {
+        encoding: "utf8",
+      });
+      assert.equal(JSON.parse(result.stdout).status, status, result.stderr);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
