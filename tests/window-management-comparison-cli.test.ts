@@ -537,6 +537,14 @@ test("owned-menu outcome requires OS menu-mode and owned visible menu evidence",
         foregroundPid: 40,
         foregroundRoot: 30,
         lastInputTick: 1,
+        menu: {
+          handle: 50,
+          source: 30,
+          processId: 40,
+          visible: true,
+          itemCount: 1,
+          menuMode: true,
+        },
       };
     const base = {
       comparison: "owned-menu",
@@ -561,6 +569,28 @@ test("owned-menu outcome requires OS menu-mode and owned visible menu evidence",
       [{ ...base, menu: { ...base.menu, handle: undefined } }, "inconclusive"],
       [{ ...base, menu: { ...base.menu, source: 99 } }, "inconclusive"],
       [{ ...base, menu: { ...base.menu, visible: false } }, "fail"],
+      [
+        {
+          ...base,
+          samples: [{ ...sample, menu: { ...sample.menu, visible: false } }],
+        },
+        "fail",
+      ],
+      [
+        {
+          ...base,
+          samples: [{ ...sample, menu: { ...sample.menu, handle: 51 } }],
+        },
+        "inconclusive",
+      ],
+      [
+        {
+          ...base,
+          samples: [{ ...sample, menu: { ...sample.menu, menuMode: false } }],
+        },
+        "inconclusive",
+      ],
+      [{ ...base, samples: [{ ...sample, menu: undefined }] }, "inconclusive"],
       [{ ...base, samples: [{ ...sample, lastInputTick: 2 }] }, "inconclusive"],
       [
         {

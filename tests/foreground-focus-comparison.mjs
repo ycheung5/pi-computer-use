@@ -213,6 +213,27 @@ function classifyMenu(e) {
       status: "inconclusive",
       reason: "Menu ownership or OS menu mode not established",
     };
+  if (samples.some((x) => !x.menu || typeof x.menu.visible !== "boolean"))
+    return { status: "inconclusive", reason: "A menu sample is unavailable" };
+  if (samples.some((x) => x.menu.visible === false))
+    return {
+      status: "fail",
+      reason: "Owned menu closed during post-action sampling",
+    };
+  if (
+    samples.some(
+      (x) =>
+        x.menu.handle !== menu.handle ||
+        x.menu.source !== target.nativeWindowHandle ||
+        x.menu.processId !== target.processId ||
+        x.menu.itemCount !== 1 ||
+        x.menu.menuMode !== true,
+    )
+  )
+    return {
+      status: "inconclusive",
+      reason: "Menu identity or OS menu mode changed during sampling",
+    };
   if (
     !samples.every(
       (x) =>
@@ -598,6 +619,19 @@ try {
   if (popupMode) result.comparison = menuMode ? "owned-menu" : "owned-dialog";
   const prior = await fixture("Pi CU prior foreground");
   const target = await fixture("Pi CU focus target");
+  async function readMenuState() {
+    const x = (await target.command("menu-state")).split(":");
+    assert.equal(x[0], "menu-state");
+    assert.equal(x.length, 7);
+    return {
+      handle: Number(x[1]),
+      source: Number(x[2]),
+      processId: Number(x[3]),
+      visible: x[4] === "True",
+      itemCount: Number(x[5]),
+      menuMode: x[6] === "True" ? true : x[6] === "False" ? false : null,
+    };
+  }
   result.prior = prior.identity;
   result.target = target.identity;
   assert.notEqual(prior.identity.processId, target.identity.processId);
@@ -825,28 +859,18 @@ try {
       visible: x[4] === "True",
     };
   }
-  if (menuMode) {
-    const x = (await target.command("menu-state")).split(":");
-    assert.equal(x[0], "menu-state");
-    assert.equal(x.length, 7);
-    result.menu = {
-      handle: Number(x[1]),
-      source: Number(x[2]),
-      processId: Number(x[3]),
-      visible: x[4] === "True",
-      itemCount: Number(x[5]),
-      menuMode: x[6] === "True" ? true : x[6] === "False" ? false : null,
-    };
-  }
+  if (menuMode) result.menu = await readMenuState();
   if (observer) result.inputEventsAfter = await observer.snapshot();
   const samples = [];
   result.samples = samples;
   for (const wait of [0, 50, 200, 500]) {
     if (wait) await delay(wait);
     const observation = await target.observe();
+    const menu = menuMode ? await readMenuState() : undefined;
     samples.push({
       afterDispatchMs: Math.round(performance.now() - dispatchedAt),
       ...observation,
+      ...(menuMode ? { menu } : {}),
     });
   }
   if (popupMode && observer)
