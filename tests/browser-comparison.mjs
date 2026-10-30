@@ -373,7 +373,7 @@ try {
         row.restrictedInspection = {
           disabled: d.disabled ?? disabledNode.disabled,
           readonly: r.readonly ?? readonlyNode.readonly ?? null,
-          valuesPreserved: true,
+          initialValues: { disabled: d.value, readonly: r.value },
           edited: false,
         };
         row.steps.push({ phase, status: "pass" });
@@ -446,6 +446,27 @@ try {
           width: png.readUInt32BE(16),
           height: png.readUInt32BE(20),
         };
+        row.steps.push({ phase, status: "pass" });
+        phase = "restricted values after actions";
+        const postDisabled = (
+          await call("element_info", {
+            elementId: await find("Disabled field", "textbox"),
+          })
+        ).result;
+        const postReadonly = (
+          await call("element_info", {
+            elementId: await find("Read-only field", "textbox"),
+          })
+        ).result;
+        row.restrictedInspection.postActionValues = {
+          disabled: (postDisabled.element ?? postDisabled).value,
+          readonly: (postReadonly.element ?? postReadonly).value,
+        };
+        assert.deepEqual(row.restrictedInspection.postActionValues, {
+          disabled: "Disabled value",
+          readonly: "Read-only value",
+        });
+        row.restrictedInspection.valuesPreserved = true;
         row.steps.push({ phase, status: "pass" });
         phase = "document identity";
         await call("set_value", {
