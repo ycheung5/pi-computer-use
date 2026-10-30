@@ -42,8 +42,9 @@ export class ReferenceClient {
         try {
           message = JSON.parse(line);
         } catch (error) {
+          // A malformed response does not establish that the backend stopped.
+          // Leave its owner alive for the caller to retain until settlement.
           this.fail(error);
-          this.child.kill();
           return;
         }
         const waiter = this.pending.get(message.id);
