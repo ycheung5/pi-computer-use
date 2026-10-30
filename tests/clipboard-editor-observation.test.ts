@@ -53,6 +53,7 @@ test("only a recognized pre-input snapshot refusal qualifies as safe", () => {
 test("clipboard input retains its owner until both cleanup acknowledgments or a pre-input refusal", () => {
   assert.equal(
     inputCleanupConfirmed({
+      action: "type_text",
       ok: true,
       cleanupConfirmed: true,
       clipboardCleanupConfirmed: true,
@@ -61,6 +62,7 @@ test("clipboard input retains its owner until both cleanup acknowledgments or a 
   );
   assert.equal(
     inputCleanupConfirmed({
+      action: "type_text",
       ok: false,
       error: "CLIPBOARD_SNAPSHOT_UNSUPPORTED: unchanged",
       cleanupConfirmed: true,
@@ -69,6 +71,24 @@ test("clipboard input retains its owner until both cleanup acknowledgments or a 
   );
   for (const result of [
     undefined,
+    {
+      action: "type_text",
+      cleanupConfirmed: true,
+      clipboardCleanupConfirmed: true,
+    },
+    {
+      action: "other",
+      ok: true,
+      cleanupConfirmed: true,
+      clipboardCleanupConfirmed: true,
+    },
+    { ok: true, cleanupConfirmed: true, clipboardCleanupConfirmed: true },
+    {
+      action: "other",
+      ok: false,
+      error: "CLIPBOARD_SNAPSHOT_UNSUPPORTED: unchanged",
+      cleanupConfirmed: true,
+    },
     { ok: true },
     { ok: true, cleanupConfirmed: true },
     { ok: true, cleanupConfirmed: false, clipboardCleanupConfirmed: true },

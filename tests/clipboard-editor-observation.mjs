@@ -31,6 +31,8 @@ export function isSafeClipboardRefusal(result) {
 // An absent cleanup acknowledgment does not establish that physical input has stopped.
 export function inputCleanupConfirmed(result) {
   if (
+    result?.action !== "type_text" ||
+    typeof result?.ok !== "boolean" ||
     result?.cleanupConfirmed !== true ||
     result?.clipboardCleanupConfirmed === false
   )

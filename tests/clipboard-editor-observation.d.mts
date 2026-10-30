@@ -10,6 +10,7 @@ export function isSafeClipboardRefusal(result: {
 export function inputCleanupConfirmed(
   result:
     | {
+        action?: unknown;
         ok?: unknown;
         error?: unknown;
         cleanupConfirmed?: unknown;
