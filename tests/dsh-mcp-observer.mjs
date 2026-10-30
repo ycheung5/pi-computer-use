@@ -24,6 +24,8 @@ function stopChild(failed = false) {
   if (failed) process.exitCode = 1;
   if (closing) return;
   closing = true;
+  input.close();
+  process.stdin.destroy();
   child.stdin.end();
   escalation = setTimeout(() => {
     process.exitCode = 1;
@@ -38,14 +40,22 @@ child.on("error", (error) => {
     trace,
     `${JSON.stringify({ referenceError: error.code ?? "spawn-failed", observer: process.pid })}\n`,
   );
-  process.exitCode = 1;
+  stopChild(true);
 });
-createInterface({ input: process.stdin }).on("line", (line) => {
+for (const stream of [
+  child.stdin,
+  child.stdout,
+  process.stdin,
+  process.stdout,
+]) {
+  stream.on("error", () => stopChild(true));
+}
+const input = createInterface({ input: process.stdin });
+input.on("line", (line) => {
   const message = JSON.parse(line);
   appendFileSync(trace, `${JSON.stringify({ request: message.method })}\n`);
   if (!allowed.has(message.method)) {
     stopChild(true);
-    process.stdin.destroy();
     return;
   }
   if (message.id != null) requests.set(message.id, message.method);
@@ -63,6 +73,7 @@ createInterface({ input: child.stdout }).on("line", (line) => {
 });
 process.stdin.on("end", () => stopChild());
 child.on("close", (code, signal) => {
+  if (!closing) stopChild(true);
   clearTimeout(escalation);
   clearTimeout(deadline);
   appendFileSync(

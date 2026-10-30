@@ -62,3 +62,45 @@ test("DSH discovery observer forwards discovery, blocks tool calls, and stops a 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("DSH discovery observer closes open input and stops its child on SIGTERM", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-cu-observer-signal-"));
+  const server = join(dir, "server.mjs");
+  const trace = join(dir, "trace");
+  try {
+    await writeFile(
+      server,
+      `process.on('SIGTERM',()=>{}); console.log(JSON.stringify({jsonrpc:'2.0',method:'ready'})); setInterval(()=>{},1000);`,
+    );
+    const child = spawn(
+      process.execPath,
+      ["tests/dsh-mcp-observer.mjs", server, trace],
+      { stdio: ["pipe", "pipe", "pipe"] },
+    );
+    child.stderr.resume();
+    child.stdout.once("data", () => child.kill("SIGTERM"));
+    const result = await new Promise<number | null>((resolveExit, reject) => {
+      const timeout = setTimeout(() => {
+        child.kill("SIGKILL");
+        reject(Error("observer did not stop with input open"));
+      }, 8000);
+      child.on("error", reject);
+      child.on("close", (code) => {
+        clearTimeout(timeout);
+        resolveExit(code);
+      });
+    });
+    assert.notEqual(result, 0);
+    const events = (await readFile(trace, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.ok(
+      events.some(
+        (event) => event.referenceExit === null && event.signal === "SIGKILL",
+      ),
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
