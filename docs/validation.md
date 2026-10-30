@@ -28,6 +28,31 @@ flock -w 120 /tmp/pi-cu-live-tests.lock npm run test:pi
 
 This runner uses the installed development Pi 1.4.0 distribution as the test host, not a fresh OS/Windows Pi install. Its scripted provider is a test fixture, never a production dependency. Real provider quality, interactive terminal workflows, and dedicated input/user acceptance remain separate checks.
 
+### Current host acceptance evidence
+
+Ticket #34 was rechecked on 2026-10-30 from WSL2, using Pi **1.4.0**, Linux Node **22.20.0**, the private Windows Node **22.23.4**, and Windows build **26200.9711**. The validation worktree started at `a905fde`; production code remained unchanged from `7a7c0c5`. Windows fixture commands ran outside the subprocess-restricted development sandbox, serialized with the shared live-test lock. No physical input, clipboard mutation, live model request, daily settings change or normal browser-profile access was performed.
+
+| Check | Observed result and scope |
+| --- | --- |
+| `npm run check` and build | Type checking, linting, all 42 portable tests and build passed. Existing public host/worker tests cover lazy startup, shutdown rejection, failed launch/recovery, runtime checksum rejection, preset transitions, invalid settings, disabled execution and queued saves; these are not clean-OS installation evidence. |
+| `test:pi` | Production-only tarball installed with development/peer dependencies omitted. Real Pi CLI health/list turns passed from WSL2 and a native Windows process, reached `agent_settled`, produced empty stderr and left no worker process. The provider was the public scripted offline fixture, not GPT or OpenRouter. |
+| `test:wsl` | Both WSL-filesystem and Windows-filesystem disposable copies passed with spaces, Unicode and quotes in their paths; worker reuse, shutdown, parent-exit cleanup, active cancellation and timeout cleanup were observed. See the fixture correction below. |
+| `test:settings` | Native-write/WSL-read and WSL-write/native-read round trips passed with isolated settings; lazy startup, disabled execution, unrelated-tool preservation and visible malformed-file error passed. First environment lookup took 42 ms on this run. |
+| `test:indicators` | Offscreen rendering/protocol checks passed: quiet startup, two reported monitors, configured shortcut, invalid-target quietness and stopping while indicators were disabled. Visible preview was not enabled. Actual shortcut presses and visual/display behavior remain pending. |
+| Native capture fixture | Public Pi tool results contained correctly sized PNG image blocks and coordinate metadata. Snapshot-with-image, no-image and UIA-failure-with-image cases retained their correct error distinctions; native PrintWindow/WGC, covered/minimized fallback, pixels and wrong-owner checks passed. |
+
+The native capture fixture initially failed before execution because Windows Node could not resolve `typebox` through this worktree's absolute Linux dependency symlink. It was rerun from the main checkout's Windows-readable dependency tree after verifying the capture runner, production source and assets were identical. This was a test-environment correction, not a package or production-code fix.
+
+The first `test:wsl` run failed because its stale assertion expected `COMPUTER_USE_CANCELLED`, while the public client's abortable call surfaces the signal's `AbortError`. The fixture now checks that public result **and** independently reads the cooperating Windows peer's count of cancelled active requests; exactly one must have received cancellation. The corrected fixture passed both filesystem locations. The original failure is retained here; merely accepting any rejected promise would not establish active cancellation.
+
+Remaining host acceptance is grouped into three sessions rather than another sequence of individual prompts:
+
+1. **Clean installation:** native Windows and WSL2 environments without the development tree; install/update/removal and missing/corrupt runtime or network diagnostics. Current-host package and portable failure tests do not close this gate (#2, #21).
+2. **Interactive Pi presentation:** actual terminal settings editor and reload, rendered images/errors and user-visible lifecycle. Automated CLI/provider and tool-result checks do not prove the full interactive experience (#34 follow-up acceptance, #21).
+3. **Dedicated desktop presentation/interference:** the [indicator checklist](indicators.md#manual-acceptance-checklist), physical shortcuts, pointer/key cleanup, mixed DPI/display changes and screen-sharing/recording behavior. The user deferred physical-input tests; all such checks remain **not run**, not passing (#20, #21, #31).
+
+This establishes the automated/passive host-validation baseline and records its gaps. It does not establish clean-machine readiness, physical-input acceptance, real-model reasoning quality or overall release acceptance. Real-agent tasks remain in #35/#36; DSH setup prerequisites are recorded in the [baseline identity audit](#baseline-identity-and-schema-evidence).
+
 ## Capability coverage
 
 All tool rows share schema comparison above and portable public tool/worker tests. Live runners use disposable windows/profiles and must finish cleanup before another starts. Paths below are commands or fixture names, not claims that a manual case passed.
