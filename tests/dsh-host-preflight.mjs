@@ -1,15 +1,21 @@
 // Offline SDK preflight: isolated profile, no prompt, model request or desktop use.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
 
 const argv = process.argv.slice(2);
 const values = {};
 for (let i = 0; i < argv.length; i++) {
   const flag = argv[i];
+  if (flag === "--discover") {
+    assert.equal(values[flag], undefined, "--discover supplied twice");
+    values[flag] = true;
+    continue;
+  }
   assert.ok(["--host", "--reference"].includes(flag), `Unknown option ${flag}`);
   assert.ok(
     argv[i + 1] && !argv[i + 1].startsWith("--"),
@@ -20,6 +26,10 @@ for (let i = 0; i < argv.length; i++) {
 }
 assert.ok(values["--host"], "Pass --host <installed-dsh/lib/bin.js>");
 const host = values["--host"];
+assert.ok(
+  !values["--discover"] || values["--reference"],
+  "--discover requires --reference",
+);
 const pkg = JSON.parse(
   await readFile(join(dirname(dirname(host)), "package.json"), "utf8"),
 );
@@ -71,7 +81,41 @@ try {
   // Windows process startup requires these OS paths; no provider credentials are copied.
   for (const key of ["SystemRoot", "WINDIR", "TEMP", "TMP", "PATHEXT"])
     if (process.env[key]) env[key] = process.env[key];
-  child = spawn(process.execPath, [host, "--profile", "sdk"], {
+  const launchArgs = [host, "--profile", "sdk"];
+  const trace = join(dir, "trace.jsonl");
+  if (values["--discover"]) {
+    const overlay = join(dir, "discovery.json");
+    const observer = fileURLToPath(
+      new URL("./dsh-mcp-observer.mjs", import.meta.url),
+    );
+    await writeFile(
+      overlay,
+      JSON.stringify([
+        {
+          insert: [
+            {
+              id: "pi-cu-reference-discovery",
+              name: "@deepseek-ai/dsh-mcp-client",
+              config: {
+                serverName: "wincu",
+                transport: "stdio",
+                command: process.execPath,
+                args: [
+                  observer,
+                  join(values["--reference"], "mcp/server.mjs"),
+                  trace,
+                ],
+                failOnStartupError: true,
+                reconnect: { enabled: false },
+              },
+            },
+          ],
+        },
+      ]),
+    );
+    launchArgs.push("--patch", overlay);
+  }
+  child = spawn(process.execPath, launchArgs, {
     cwd: dir,
     env,
     stdio: ["pipe", "pipe", "pipe"],
@@ -135,18 +179,25 @@ try {
   };
   const init = await request(1, "initialize", {
     cwd: dir,
-    provider: "pi-cu-nonexistent",
-    model: "pi-cu-nonexistent",
+    provider: values["--discover"] ? "deepseek-official" : "pi-cu-nonexistent",
+    model: values["--discover"] ? "deepseek-flash" : "pi-cu-nonexistent",
   });
-  assert.equal(
-    init.error?.code,
-    -32603,
-    "Invalid local provider must be refused",
-  );
-  assert.match(
-    init.error?.message ?? "",
-    /no adapter registered for provider/i,
-  );
+  if (values["--discover"]) {
+    assert.ok(
+      init.result?.serverInfo && !init.error,
+      "SDK initialize must succeed",
+    );
+  } else {
+    assert.equal(
+      init.error?.code,
+      -32603,
+      "Invalid local provider must be refused",
+    );
+    assert.match(
+      init.error?.message ?? "",
+      /no adapter registered for provider/i,
+    );
+  }
   const shutdown = await request(2, "shutdown", {});
   assert.ok(
     shutdown.result && !shutdown.error,
@@ -162,14 +213,46 @@ try {
   ]).finally(() => clearTimeout(timer));
   assert.equal(code, 0, "SDK must exit cleanly");
   lines.close();
+  let discovery = "not-tested";
+  if (values["--discover"]) {
+    const events = (await readFile(trace, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const observations = events.filter(
+      (event) => event.response === "tools/list",
+    );
+    assert.ok(
+      observations.some((event) =>
+        event.names?.includes("windows_computer_use_health"),
+      ),
+      "Reference health must be discovered through MCP",
+    );
+    assert.ok(
+      !events.some((event) => event.request === "tools/call"),
+      "No tool call is permitted",
+    );
+    assert.ok(
+      events.some((event) => event.referenceExit === 0),
+      "Serving reference process must exit cleanly",
+    );
+    discovery = {
+      bridge: "generic-mcp",
+      toolCount: observations.at(-1).names.length,
+      modelVisibleRoster: "not-verified",
+      windowsBackend: "not-tested",
+    };
+  }
   result = {
     ok: true,
     hostVersion: pkg.version,
-    sdkHandshake: "invalid-provider-refused",
+    sdkHandshake: values["--discover"]
+      ? "initialized"
+      : "invalid-provider-refused",
     shutdown: "acknowledged-parent-exited",
     descendantCleanup: "not-verified",
     modelCalls: false,
-    toolDiscovery: "not-tested",
+    toolDiscovery: discovery,
     reference,
     wslAdapter: "not-verified",
   };
