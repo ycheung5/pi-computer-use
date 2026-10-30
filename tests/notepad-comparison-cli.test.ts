@@ -42,3 +42,40 @@ test("Unicode comparison selects original case IDs and rejects invalid selection
     assert.match(invalid.stderr, /case must be an integer from 1 to 6/);
   }
 });
+
+test("Unicode diagnostics select one labelled mechanism without starting a backend", () => {
+  const variants = [
+    ["pi", "pi-no-delay", "inter-character-delay"],
+    ["reference", "reference-keyup-scan", "unicode-keyup-scan"],
+    ["reference", "reference-pair-batches", "events-per-batch"],
+  ];
+  for (const [engine, diagnostic, variable] of variants) {
+    const result = run(
+      "--list",
+      `--engine=${engine}`,
+      `--diagnostic=${diagnostic}`,
+      "--case=4",
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const plan = JSON.parse(result.stdout);
+    assert.equal(plan.executed, false);
+    assert.equal(plan.diagnostic.name, diagnostic);
+    assert.equal(plan.diagnostic.variable, variable);
+    assert.equal(plan.cases[0].id, 4);
+    const refused = run(`--engine=${engine}`, `--diagnostic=${diagnostic}`);
+    assert.notEqual(refused.status, 0);
+    assert.match(refused.stderr, /PI_CU_NOTEPAD_INPUT_TEST=1/);
+  }
+  for (const args of [
+    ["--diagnostic=unknown"],
+    ["--diagnostic=constructor"],
+    ["--diagnostic=toString"],
+    ["--engine=pi", "--diagnostic=reference-keyup-scan"],
+    ["--engine=reference", "--diagnostic=pi-no-delay"],
+    ["--unexpected=true"],
+  ]) {
+    const result = run("--list", ...args);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Unknown option|diagnostic/);
+  }
+});
