@@ -96,3 +96,43 @@ test("input owner with acknowledged cleanup permits replacement after exit", asy
     await worker.dispose();
   }
 });
+
+test("input preparation is acknowledged before a worker may dispatch", async () => {
+  const peer = `const i=require('node:readline').createInterface({input:process.stdin});let pending;i.on('line',line=>{const r=JSON.parse(line);if(r.action==='click'){pending=r;console.log(JSON.stringify({event:'input_prepare',requestId:r.id,operationId:r.operationId,token:'owned-token'}));return;}if(r.inputAck==='owned-token'&&pending){console.log(JSON.stringify({event:'input_state',active:false}));console.log(JSON.stringify({id:pending.id,result:{ok:true,action:'click',acknowledged:true}}));}});`;
+  const worker = new WorkerClient({
+    timeoutMs: 300,
+    launch: async () => ({ executable: process.execPath, args: ["-e", peer] }),
+  });
+  try {
+    const result = await worker.execute(
+      "click",
+      {},
+      undefined,
+      "owned-operation",
+    );
+    assert.equal(result.acknowledged, true);
+  } finally {
+    await worker.dispose().catch(() => undefined);
+  }
+});
+
+test("an acknowledged preparation remains held if the input owner exits", async () => {
+  let launches = 0;
+  const peer = `const i=require('node:readline').createInterface({input:process.stdin});i.on('line',line=>{const r=JSON.parse(line);if(r.action==='click')console.log(JSON.stringify({event:'input_prepare',requestId:r.id,operationId:r.operationId,token:'owned-token'}));if(r.inputAck==='owned-token')setTimeout(()=>process.exit(1),20);});`;
+  const worker = new WorkerClient({
+    launch: async () => {
+      launches++;
+      return { executable: process.execPath, args: ["-e", peer] };
+    },
+  });
+  await assert.rejects(
+    worker.execute("click", {}, undefined, "owned-operation"),
+    /WORKER_EXITED/,
+  );
+  await assert.rejects(
+    worker.execute("health", {}),
+    /INPUT_CLEANUP_UNCONFIRMED/,
+  );
+  assert.equal(launches, 1);
+  await assert.rejects(worker.dispose(), /INPUT_CLEANUP_UNCONFIRMED/);
+});
