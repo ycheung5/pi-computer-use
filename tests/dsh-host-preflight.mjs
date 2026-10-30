@@ -7,6 +7,10 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
+import {
+  validateDiscoveryTrace,
+  validateModelRoster,
+} from "./dsh-preflight-evidence.mjs";
 
 const argv = process.argv.slice(2);
 const values = {};
@@ -191,6 +195,7 @@ try {
     cwd: dir,
     env,
     stdio: ["pipe", "pipe", "pipe"],
+    detached: process.platform !== "win32",
   });
   ended = new Promise((resolveExit) =>
     child.once("close", (...args) => {
@@ -322,10 +327,7 @@ try {
       ),
       "Reference health must be discovered through MCP",
     );
-    assert.ok(
-      !events.some((event) => event.request === "tools/call"),
-      "No tool call is permitted",
-    );
+    validateDiscoveryTrace(events);
     const starts = events
       .filter((event) => event.observerStart)
       .map((event) => event.observerStart);
@@ -356,17 +358,7 @@ try {
         1,
         "Exactly one synthetic-provider request must be observed",
       );
-      const discoveredNames = observations.at(-1).names;
-      assert.ok(
-        discoveredNames.length > 0,
-        "Reference roster must not be empty",
-      );
-      assert.ok(
-        discoveredNames.every((name) =>
-          modelNames.includes(`mcp__wincu__${name}`),
-        ),
-        "Every discovered reference tool must be model-visible",
-      );
+      validateModelRoster(observations.at(-1).names, modelNames);
     }
     discovery = {
       bridge: "generic-mcp",
@@ -384,7 +376,8 @@ try {
       ? "initialized"
       : "invalid-provider-refused",
     shutdown: "acknowledged-parent-exited",
-    descendantCleanup: "not-verified",
+    descendantCleanup:
+      process.platform === "win32" ? "not-verified" : "pending",
     modelCalls: values["--model-roster"]
       ? "one-local-synthetic-request"
       : false,
@@ -397,8 +390,30 @@ try {
 } finally {
   try {
     if (fixtureServer) {
-      fixtureServer.closeAllConnections();
-      await new Promise((resolveClose) => fixtureServer.close(resolveClose));
+      let closeTimer;
+      try {
+        await Promise.race([
+          new Promise((resolveClose, rejectClose) => {
+            fixtureServer.close((error) =>
+              error ? rejectClose(error) : resolveClose(),
+            );
+            fixtureServer.closeAllConnections();
+          }),
+          new Promise((_, rejectClose) => {
+            closeTimer = setTimeout(
+              () => rejectClose(Error("Synthetic provider close timed out")),
+              3000,
+            );
+          }),
+        ]);
+      } catch (error) {
+        console.error(
+          `Synthetic provider cleanup unconfirmed: ${String(error)}`,
+        );
+        failure ??= error;
+      } finally {
+        clearTimeout(closeTimer);
+      }
     }
     const waitForExit = async () => {
       let timer;
@@ -421,9 +436,22 @@ try {
         await waitForExit();
       }
     }
-    if ((child?.pid && !processClosed) || !observerCleanupConfirmed) {
+    let groupGone = !child?.pid;
+    if (child?.pid && process.platform !== "win32") {
+      try {
+        process.kill(-child.pid, 0);
+      } catch (error) {
+        if (error.code === "ESRCH") groupGone = true;
+      }
+    }
+    if (result && groupGone) result.descendantCleanup = "process-group-empty";
+    if (
+      (child?.pid && !processClosed) ||
+      !observerCleanupConfirmed ||
+      !groupGone
+    ) {
       console.error(`DSH exit unconfirmed; isolated home retained: ${dir}`);
-      failure ??= Error("DSH or reference process exit unconfirmed");
+      failure ??= Error("DSH or descendant process exit unconfirmed");
     } else {
       await rm(dir, {
         recursive: true,

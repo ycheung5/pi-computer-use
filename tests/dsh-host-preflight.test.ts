@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -121,4 +128,89 @@ test("synthetic provider sees every discovered reference tool", {
   );
   assert.equal(report.toolDiscovery.windowsBackend, "not-tested");
   assert.equal(report.isolatedHomeRemoved, true);
+});
+
+test("model roster rejects missing, duplicate, and unexpected reference tools", async () => {
+  const { validateModelRoster } = await import("./dsh-preflight-evidence.mjs");
+  const discovered = ["one", "two"];
+  validateModelRoster(discovered, [
+    "other",
+    "mcp__wincu__one",
+    "mcp__wincu__two",
+  ]);
+  assert.throws(
+    () => validateModelRoster(discovered, ["mcp__wincu__one"]),
+    /match/,
+  );
+  assert.throws(
+    () =>
+      validateModelRoster(discovered, [
+        "mcp__wincu__one",
+        "mcp__wincu__one",
+        "mcp__wincu__two",
+      ]),
+    /duplicate/,
+  );
+  assert.throws(
+    () =>
+      validateModelRoster(discovered, [
+        "mcp__wincu__one",
+        "mcp__wincu__two",
+        "mcp__wincu__three",
+      ]),
+    /match/,
+  );
+});
+
+test("discovery trace rejects a forbidden tool call", async () => {
+  const { validateDiscoveryTrace } = await import(
+    "./dsh-preflight-evidence.mjs"
+  );
+  assert.throws(
+    () => validateDiscoveryTrace([{ request: "tools/call" }]),
+    /No tool call is permitted/,
+  );
+});
+
+test("preflight retains isolated home when an owned descendant survives shutdown", () => {
+  if (process.platform === "win32") return;
+  const dir = mkdtempSync(join(tmpdir(), "pi-cu-dsh-linger-"));
+  let retained: string | undefined;
+  let descendant: number | undefined;
+  try {
+    const lib = join(dir, "host", "lib");
+    mkdirSync(lib, { recursive: true });
+    writeFileSync(
+      join(dir, "host", "package.json"),
+      JSON.stringify({
+        name: "@deepseek-ai/dsh",
+        version: "fixture",
+        type: "module",
+      }),
+    );
+    const host = join(lib, "bin.js");
+    const pidFile = join(dir, "pid");
+    writeFileSync(
+      host,
+      `import {spawn} from 'node:child_process'; import {writeFileSync} from 'node:fs'; import {createInterface} from 'node:readline'; const child=spawn(process.execPath,['-e','setTimeout(()=>{},30000)'],{stdio:'ignore'}); child.unref(); writeFileSync(${JSON.stringify(pidFile)},String(child.pid)); for await (const line of createInterface({input:process.stdin})) {const q=JSON.parse(line); if(q.method==='initialize') console.log(JSON.stringify({jsonrpc:'2.0',id:q.id,error:{code:-32603,message:'no adapter registered for provider fixture'}}));else if(q.method==='shutdown'){console.log(JSON.stringify({jsonrpc:'2.0',id:q.id,result:{}}));process.exit(0)}}`,
+    );
+    const r = spawnSync(process.execPath, [preflight, "--host", host], {
+      encoding: "utf8",
+      timeout: 20000,
+    });
+    descendant = Number(readFileSync(pidFile, "utf8"));
+    retained = r.stderr.match(/isolated home retained: (.+)/)?.[1];
+    assert.notEqual(r.status, 0);
+    assert.ok(retained, r.stderr);
+    assert.ok(existsSync(retained));
+    assert.match(r.stderr, /descendant process exit unconfirmed/);
+  } finally {
+    if (descendant) {
+      try {
+        process.kill(descendant, "SIGKILL");
+      } catch {}
+    }
+    if (retained) rmSync(retained, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
