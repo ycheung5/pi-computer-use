@@ -2,6 +2,8 @@
 
 Release status: **not accepted**. Automated and passive fixture results are evidence for their stated paths, not proof that all applications, physical input, displays or user acceptance work. The [spec](spec.md) defines requirements; this page maps them to runnable checks and pending evidence.
 
+The next validation cycle follows the [current implementation phases](implementation-plan.md#detailed-milestones). The [alignment scenario catalog](#alignment-scenario-catalog) below is planned coverage, not additional passing evidence.
+
 ## Reproduce automated checks
 
 From a clean checkout with Node 22.19+ and npm:
@@ -61,6 +63,96 @@ All tool rows share schema comparison above and portable public tool/worker test
 Portable file names above refer to the corresponding `.test.ts` suites. Tests assert public behavior, not private code structure. The schema inventory supplements rather than replaces action-specific success/failure tests.
 
 Cross-cutting live runners: `test:ownership` (two-host ownership and crash recovery), `test:stop` (independent explicit stopping and worker cleanup), `test:settings` (personal-file consistency and management), `test:indicators` (native presentation protocol/offscreen checks), `test:browser:profiles` (cookie/profile lifecycle and locks), and `test:browser:firefox:endpoint` (experimental external Firefox ownership). Follow their relevant indexed guide for browser executable selection, headless flags and limits. Stock Firefox forks/ESR and arbitrary UIA providers are not universally validated.
+
+
+## Reference difference register
+
+Phase 1 must complete this register; these are starting findings, not exhaustive conclusions. Each completed entry needs reference/Pi source locations, reason/history, scenario IDs, evidence, classification and disposition.
+
+| ID | Starting difference | Initial disposition | Scenarios |
+| --- | --- | --- | --- |
+| D01 | Direct Pi integration and Windows/WSL2 worker instead of DSH host/MCP integration | Required adaptation; verify equivalent operation boundaries and stopping | C01, C09, C10 |
+| D02 | Shared generic Pi tool descriptions versus detailed DSH action descriptions and routing guidance | Suspected alignment gap; compare model-visible schemas, descriptions, defaults and instructions | C00, A01–A06 |
+| D03 | Pi 50 ms Unicode pacing, separate event calls and Enter/Tab conversion versus reference batching | Demonstrated workaround; necessity and underlying cause unverified | C05 |
+| D04 | Clipboard snapshot/ownership handling changed after live failures | Audit supported formats, restoration and refusal semantics against reference | C06 |
+| D05 | Foreground activation paths differ, including reference Alt-key fallback | Compare mechanism and actual foreground evidence before attributing failures to Windows | C03, C07 |
+| D06 | Pi guidance to reuse existing apps/tabs | Compare reference guidance and ordinary task behavior; preserve unrelated work | A01, A03 |
+
+Separate restrictions embedded in the extension from restrictions supplied by diagnostic prompts. Earlier “stop on uncertainty; no alternatives” prompts cannot establish that the extension lacks recovery.
+
+### Unicode mechanism investigation
+
+The reference Unicode sender (`scripts/windows-uia.ps1`, lines 192–225 in the pinned checkout) batches up to 64 events without per-character sleeps. Pi's [text helper](../assets/text.cs) sends key events separately and waits 50 ms per UTF-16 unit/key pair; it also maps line endings and tabs to functional keys. The reference checkout is an external test prerequisite, not a packaged documentation dependency.
+
+The existing Notepad regression (`tests/native-notepad-unicode.mjs` in the source checkout) and [text notes](text.md) provide useful success/failure evidence, but combined pacing and control-character changes do not isolate causation. The current delay assertion identifies an implementation, not the required outcome.
+
+Use the same Notepad version, seed text, keyboard/IME state and focus conditions for DSH and Pi. Include blank insertion, seeded append with a leading newline, ASCII, Chinese, accented characters, emoji, CR/LF/CRLF, tabs and a longer mixed string. Independently compare exact accessible text and disposable saved-file bytes where supported, normalizing only documented line endings. Record elapsed time and actual dispatch method. During later diagnosis, vary batching, pacing and control-character handling independently; do not remove the workaround solely because DSH lacks it. The acceptance assertion is correct text and cleanup, not `inputDelayMs === 50`.
+
+## Alignment scenario catalog
+
+These IDs define the planned coverage groups. Expand each group into named cases in the existing test infrastructure; do not create a new test framework or a folder per scenario. Existing runner names below are starting points, not claims of completed paired coverage. The [release matrix](#capability-coverage) supplies tool-by-tool mapping.
+
+| ID | Setup and cases | Independent expected outcome | Reuse |
+| --- | --- | --- | --- |
+| C00 | Enumerate all tools in matching presets; valid/invalid parameters, descriptions/defaults and disabled execution | Equivalent advertised capability and informative semantics; explicit denial for unavailable tools | `tests/parity-host.mjs`, extension/settings tests |
+| C01 | Clean package, native Windows and WSL2 hosts; startup, reload, exit, missing assets | Tools load with default Pi; correct worker lifecycle and cleanup; useful startup errors | Package, Pi-host, runtime and WSL runners |
+| C02 | Native and Chromium accessibility fixtures; complete/sparse/truncated/provider-error reads, stale IDs, positive and negative waits | Accurate identities and observed values; partial evidence is not conclusive absence; no wrong-target fallback | Accessibility, nullable-UIA, Chromium and wait runners |
+| C03 | Owned windows, same-process distractor, moved/closed targets; launch, activate, move, close and veto dialog | Observe actual window identity, foreground and bounds independently; preserve distractor; accurate activation/refusal result | Window-management and activation runners |
+| C04 | Native controls supporting focus, invoke, value, selection, expansion and scroll; unsupported patterns and disabled/read-only controls | Intended state transition once; correct fallback where supported; restrictions remain respected | Controls fixture and native-controls runner |
+| C05 | Disposable Notepad documents and native Edit fixture, Unicode cases described above; chords and cancellation | Exact intended text and preserved prefix; released keys; no uncertain-input replay | Notepad-Unicode, native-text and text-physical runners |
+| C06 | Seeded disposable clipboard: plain text, supported rich/OLE formats, unsupported/locked content and user-copy interference | Exact pasted text; pre-test clipboard restored where promised; newer user copy preserved; truthful failure/cleanup | OLE fixture, native-clipboard and text-physical runners |
+| C07 | Pointer bench with visible counters, hover, drag/drop and inner scroll; occlusion, focus changes, stale targets | Exact counter changes, dropped state and released buttons; intended panel scroll; correct pointer/foreground restoration | Pointer physical/guard fixtures and activation runner |
+| C08 | Capture/OCR fixture with known labels, cropped text, occlusion and mixed DPI/negative origins | Image-to-screen mapping correct; OCR limitations reported; capture fallback evidence accurate | Capture/OCR fixtures; manual display checks |
+| C09 | Busy input/UIA, wait, competing host, cancellation, timeout and owner crash | Stop prevents further operation input; bounded cleanup; no replay; correct ownership recovery and new-operation behavior | Stop, ownership and wait runners; physical Esc check |
+| C10 | Settings/presets, indicator options, Pi rendering, images and errors | Settings persist; tools denied correctly; presentation matches actual operation; no false verification claims | Settings, indicators and Pi-host runners; visual checks |
+| C11 | Local browser form: fields, checkbox/select, delayed results, disabled/read-only controls, screenshot | Exact submitted values and independently observed page state; restrictions intact | Browser-actions server/host |
+| C12 | Browser navigation, new/closed tabs, stale IDs, dialogs, uploads/downloads, disconnect and reconnect | Intended tab/document and files; no duplicate uncertain action; reference-supported recovery and truthful limitations | Browser actions/host and profile runners |
+| C13 | Temporary and kept profiles, browser closure, external Firefox endpoint and native-dialog boundary | Isolation, ownership and cleanup preserved; no daily profile attachment; experimental scope retained | Browser profiles, Firefox endpoint and foreground runners |
+
+Physical cases run serially on a dedicated interactive desktop. Passive fixtures do not substitute for physical-input outcomes. Run ordinary success cases before their injected-failure variants. Both Windows and WSL2 launch paths remain required; do not multiply every desktop-only case across hosts unless host differences can affect it.
+
+### Agent tasks
+
+These are outcome briefs, not step-by-step tool scripts. Supply identical goals and disposable starting states to each host. Agent tests may re-observe, scroll, refresh stale references, handle fixture dialogs and choose supported alternative methods. Explicit method-specific diagnostic tests retain their method constraint.
+
+| ID | Ordinary task brief | Controlled variant and pass criteria |
+| --- | --- | --- |
+| A01 | Use an existing Notepad window to create a separate test document, enter two multilingual lines, append a third and verify the result | Existing unrelated tabs and a distractor window; exact three-line result, existing content unchanged, no unnecessary new app instance |
+| A02 | Complete the local form with supplied values, submit it and report the delayed confirmation | Control initially offscreen and delayed content; correct payload and confirmation, no unnecessary user help |
+| A03 | Navigate between fixture pages and complete a second form in the intended browser context | Navigation invalidates IDs and opens a fixture dialog; fresh identification and correct dialog handling, no duplicate submission |
+| A04 | Read a known label and operate its associated fixture control | Incomplete accessibility with supported visual/OCR alternative; correct intended result, or accurate limitation if evidence is insufficient; no unrelated target |
+| A05 | Upload the disposable sample and download the resulting fixture file, verifying its expected content | Reference-supported file/native-dialog boundary; correct owned files and preserved unrelated windows/profile |
+| A06 | Complete a disposable input task while cancellation or user focus interference is introduced | Cancellation variant must stop and clean up, not finish the task; interference variant follows reference behavior and preserves user changes |
+
+A01–A05 require outcome success unless a limitation is explicitly accepted; an accurate blocker is useful evidence but not a completed task. A06 has intentionally different success criteria. Each required task/recovery scenario needs three consecutive successful reset runs on the accepted candidate; retain earlier failures in the record.
+
+## Comparison and diagnosis
+
+Two comparisons answer different questions:
+
+1. **Tool comparison:** equivalent public calls, identical fixture state, independently observed effects. Compare meaning, not literal JSON, generated IDs or identical internal call sequences. Extend the existing paired benchmark (`tests/benchmark-reference.mjs` in the source checkout), which currently covers background native Edit behavior only. Reset between engines and alternate run order where practical.
+2. **Agent comparison:** ordinary goals through real host/model sessions. Pi uses the user's GPT-6.1 Sol low-reasoning setup; DSH uses the available OpenRouter model because OpenAI access there is geographically restricted. Record the exact DSH model and both hosts' effective settings. These compare host/model combinations, not isolated model or extension superiority. Existing Pi faux-provider tests do not supply this evidence.
+
+If an agent fails, retain its tool trace and reproduce the relevant calls against a reset fixture. A direct call failure points toward a tool, target or environment issue; a successful direct call does not alone prove a reasoning failure because timing and state may differ. Check tool descriptions, returned evidence, fixture state and model decisions before assigning cause. Mark unresolved attribution as unknown.
+
+Do not build an elaborate new recovery controller. Investigate how the reference makes recovery possible through guidance, actionable results and supported internal fallbacks. Runner watchdogs bound hung tests; they do not impose a new production recovery policy.
+
+## Execution and evidence
+
+Automate preparation, reset, tool calls, independent assertions and reporting wherever possible. Investigate supported DSH/Pi host interfaces before promising unattended model runs. Human participation remains for genuine interference, physical stopping and visual/display checks; group these into short sessions instead of asking the user to paste every test prompt.
+
+Every expanded case records:
+
+- Scenario/case ID, purpose, reference contract and involved tools.
+- Owned fixture setup/reset, expected outcome, allowed recovery, stop conditions and scoped cleanup.
+- DSH/Pi source and installed versions, host, model/reasoning settings where relevant, enabled tools/instructions, OS/app/browser versions, display/input state and run order.
+- Exact expected/actual state, tool outcomes, independent observations, timings, interventions, cleanup and relevant sanitized evidence.
+- Result: pass, fail, blocked or not run; cause: implementation, agent decision/guidance, environment, test defect, shared limitation or unknown. Cause attribution requires supporting evidence.
+- Fix/deviation decision, targeted rerun and affected regression results. Do not discard failed attempts to report only a final pass.
+
+Continue independent cases after ordinary assertion failures once cleanup and reset are confirmed. If a stop occurs or cleanup/desktop ownership is uncertain, halt that physical run and report dependent cases blocked; never auto-resume stopped input merely to complete a batch. Preserve unrelated work. Do not reuse the reference Notepad E2E script's process-wide kill cleanup: target only owned disposable fixtures.
+
+Reconcile historical manual reports with [validation evidence](#review-trace-and-evidence). Reuse unchanged, adequately identified evidence; rerun when changed code, missing environment details or an unresolved failure makes it insufficient. Three consecutive passes are a practical initial gate, not a statistical reliability guarantee.
 
 ## Reference benchmark
 

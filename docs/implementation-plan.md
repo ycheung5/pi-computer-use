@@ -6,11 +6,11 @@ Requirements and behavioral contracts are authoritative in the [specification](s
 
 ## Structure
 
-Start with flat, responsibility-named TypeScript modules in `src/`, tests in `tests/`, and packaged assets in `assets/` when needed. Keep host-specific launcher and Windows interop logic separate from reusable orchestration through modules, without pre-creating nested directories. The [repository layout](README.md#repository-layout) is the navigation guide.
+Keep flat, responsibility-named TypeScript modules in `src/`, tests in `tests/`, and packaged assets in `assets/`. Keep host-specific launcher and Windows interop logic separate from reusable orchestration through modules, without pre-creating nested directories. The [repository layout](README.md#repository-layout) is the navigation guide.
 
 ## Feasibility gates
 
-Complete these early in milestone 1, before investing in the full implementation:
+These original feasibility gates remain regression obligations. Reuse recorded evidence; repeat checks when changes or missing evidence warrant it:
 
 1. Prove a packaged Windows worker launches from native Pi and WSL2 Pi with clean stdio framing, spaces/Unicode paths, Windows-drive and WSL-filesystem checkouts, cancellation, parent exit and no orphan processes. Users must not install Windows Node separately.
 2. Compare a small native helper with TypeScript-accessible native interop for UIA, screenshots, OCR, input and global stopping. Prefer TypeScript, but choose the smallest maintainable implementation that satisfies failure isolation and Windows threading requirements. Do not infer that the Pi SDK itself supplies desktop access.
@@ -43,12 +43,21 @@ Exercise the integrated extension through both native Windows Pi and WSL2 Pi; wo
 
 ## Detailed milestones
 
-1. **Foundation and feasibility:** package/toolchain/lockfile; worker protocol and launcher; runtime packaging and native-interop experiments; ownership proof; initial contract tests; reference capability/parameter inventory and benchmark harness.
-2. **Pi and desktop integration:** native tool registration, personal settings command, tool loading modes, lifecycle/operation tracking, worker queue and cancellation; Windows observation, capture/OCR, guarded input/window actions, independent stopping and indicators.
-3. **Browser and presentation parity:** Chrome/Edge and experimental Firefox paths; isolated/kept profiles; browser page-change results; Pi rendering and settings; integration tests for browser actions and failures.
-4. **Release validation:** complete coverage matrix on both hosts; clean-install checks, performance comparison and documented limitations; user acceptance testing; resolve failures before declaring release readiness.
+The initial foundation, desktop and browser implementation exists; release acceptance is incomplete. The current work is the following investigation and repair cycle, tracked by [issue #23](https://github.com/ycheung5/pi-computer-use/issues/23), not a restart of initial implementation. Requirements remain in the [spec](spec.md); named cases and evidence live in [validation](validation.md#alignment-scenario-catalog).
 
-Each milestone must be runnable and testable. Full feature parity remains the first-release criterion; incremental milestones are not a reduced-scope release.
+| Phase | Work and tests | Exit evidence |
+| --- | --- | --- |
+| 1. Audit differences | Map all 25 declarations, descriptions, defaults, routing, fallback, results and lifecycle behavior to DSH. Trace previous fixes to symptoms and tests. Diagnose the latest schema-runner failure. | Each material difference is classified and linked to a test or required investigation; the schema runner produces a valid result. No behavioral-parity claim from schema equality. |
+| 2. Collect tool baseline | Run existing deterministic suites and paired native/browser scenarios on reset fixtures. Cover every capability's supported success and relevant failure paths. Collect the whole runnable suite, not just the first failure. | Versioned outcome report, missing coverage and blocked environments explicitly listed; sufficient reproductions to distinguish implementation problems from fixture/environment problems. Failures remain open. |
+| 3. Collect agent baseline | Run ordinary outcome-based tasks and controlled recovery scenarios in Pi and DSH. Permit supported recovery within disposable test data. | Outcome and trace report for each host/model combination; observed recovery, unnecessary stops, interventions and misleading success claims recorded. No presumed model causation. |
+| 4. Diagnose and align | Reproduce failures with direct tool calls where possible. Compare mechanisms and change one suspected cause at a time. Implement reference behavior unless a demonstrated gap requires improvement. | Failed cases and affected regressions rerun; required task/recovery scenarios pass three consecutive reset runs on the final candidate. Unresolved outcomes remain failed, blocked or explicitly accepted limitations. |
+| 5. Optimize | Retain the accepted cases and measure justified changes against them and DSH. | Correctness and preservation first, fewer unnecessary interventions second, latency and token use third. No improvement claim from speed alone. |
+
+Phases 2 and 3 gather evidence before broad repair work; a scenario that cannot run has a blocked result, not a fabricated failure or pass. An unsafe fixture prevents its dependent cases from running, but independent cases can continue. Phase 4 loops through diagnosis, targeted changes and reruns until required outcomes are reasonably correct. No fixed production retry count or five-minute agent policy is introduced.
+
+Every investigation or implementation change must reconcile the affected documentation before its phase closes: requirements in the spec, sequencing here, cases/results in validation, current behavior in topic guides, and deliberate-deviation rationale in an ADR. Replace stale guidance and remove duplicate instructions; preserve concise historical evidence without presenting it as current acceptance. Update the index and check links after moves.
+
+First complete the [difference register](validation.md#reference-difference-register), diagnose the schema-runner failure and identify the installed DSH revision. Extend existing harnesses only as needed to gather comparable evidence. Implement production fixes after diagnosis. No new public test-only seam is planned.
 
 ## Completion criteria
 
