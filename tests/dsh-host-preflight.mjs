@@ -8,6 +8,8 @@ import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import {
+  canRemoveHome,
+  closeProvider,
   validateDiscoveryTrace,
   validateModelRoster,
 } from "./dsh-preflight-evidence.mjs";
@@ -389,31 +391,15 @@ try {
   failure = error;
 } finally {
   try {
+    let providerCloseConfirmed = !fixtureServer;
     if (fixtureServer) {
-      let closeTimer;
-      try {
-        await Promise.race([
-          new Promise((resolveClose, rejectClose) => {
-            fixtureServer.close((error) =>
-              error ? rejectClose(error) : resolveClose(),
-            );
-            fixtureServer.closeAllConnections();
-          }),
-          new Promise((_, rejectClose) => {
-            closeTimer = setTimeout(
-              () => rejectClose(Error("Synthetic provider close timed out")),
-              3000,
-            );
-          }),
-        ]);
-      } catch (error) {
+      const cleanup = await closeProvider(fixtureServer, failure, 3000);
+      providerCloseConfirmed = cleanup.confirmed;
+      failure = cleanup.failure;
+      if (!cleanup.confirmed)
         console.error(
-          `Synthetic provider cleanup unconfirmed: ${String(error)}`,
+          `Synthetic provider cleanup unconfirmed: ${String(cleanup.cleanupError)}`,
         );
-        failure ??= error;
-      } finally {
-        clearTimeout(closeTimer);
-      }
     }
     const waitForExit = async () => {
       let timer;
@@ -446,11 +432,14 @@ try {
     }
     if (result && groupGone) result.descendantCleanup = "process-group-empty";
     if (
-      (child?.pid && !processClosed) ||
-      !observerCleanupConfirmed ||
-      !groupGone
+      !canRemoveHome({
+        processClosed: !child?.pid || processClosed,
+        observerCleanupConfirmed,
+        groupGone,
+        providerCloseConfirmed,
+      })
     ) {
-      console.error(`DSH exit unconfirmed; isolated home retained: ${dir}`);
+      console.error(`Cleanup unconfirmed; isolated home retained: ${dir}`);
       failure ??= Error("DSH or descendant process exit unconfirmed");
     } else {
       await rm(dir, {

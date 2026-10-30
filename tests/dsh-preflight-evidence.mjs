@@ -31,3 +31,40 @@ export function validateModelRoster(discovered, modelNames) {
     "Model roster must match the discovered reference roster exactly",
   );
 }
+
+export async function closeProvider(server, failure, timeoutMs) {
+  let timer;
+  try {
+    await Promise.race([
+      new Promise((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+        server.closeAllConnections();
+      }),
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(Error("Synthetic provider close timed out")),
+          timeoutMs,
+        );
+      }),
+    ]);
+    return { confirmed: true, failure };
+  } catch (error) {
+    return { confirmed: false, failure: failure ?? error, cleanupError: error };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function canRemoveHome({
+  processClosed,
+  observerCleanupConfirmed,
+  groupGone,
+  providerCloseConfirmed,
+}) {
+  return (
+    processClosed &&
+    observerCleanupConfirmed &&
+    groupGone &&
+    providerCloseConfirmed
+  );
+}

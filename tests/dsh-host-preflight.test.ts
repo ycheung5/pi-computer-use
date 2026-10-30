@@ -214,3 +214,31 @@ test("preflight retains isolated home when an owned descendant survives shutdown
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("provider cleanup failure or timeout retains home and preserves the original failure", async () => {
+  const { closeProvider, canRemoveHome } = await import(
+    "./dsh-preflight-evidence.mjs"
+  );
+  const original = Error("original failure");
+  for (const close of [
+    (_callback: (error?: Error) => void) => {},
+    (callback: (error?: Error) => void) => callback(Error("close failed")),
+  ]) {
+    const result = await closeProvider(
+      { close, closeAllConnections() {} },
+      original,
+      10,
+    );
+    assert.equal(result.confirmed, false);
+    assert.equal(result.failure, original);
+    assert.equal(
+      canRemoveHome({
+        processClosed: true,
+        observerCleanupConfirmed: true,
+        groupGone: true,
+        providerCloseConfirmed: result.confirmed,
+      }),
+      false,
+    );
+  }
+});
