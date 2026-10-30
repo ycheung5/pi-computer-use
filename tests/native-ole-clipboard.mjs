@@ -103,6 +103,9 @@ assert.equal(
 if (engine === "reference" && !probe)
   assert.ok(referencePath, "--reference requires the pinned DSH checkout path");
 // No backend import, directory, compiler, client or fixture precedes the opt-in.
+const { detachFixture, waitForFixtureClose } = await import(
+  "./clipboard-fixture-close.mjs"
+);
 const { createComparisonClient } = await import("./comparison-client.mjs");
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-ole-clipboard-"));
 const executable = join(folder, "fixture.exe");
@@ -185,6 +188,7 @@ const command = async (text) => {
   return reply;
 };
 let fixtureReady = false;
+let fixtureCloseUnconfirmed = false;
 let failure;
 
 let client;
@@ -385,8 +389,9 @@ try {
         restoration,
         /original-restored|original-unchanged|newer-copy-preserved/,
       );
-      console.log(JSON.stringify({ fixtureCleanup: restoration }));
-      await closed;
+      console.log(JSON.stringify({ fixtureClipboardOutcome: restoration }));
+      await waitForFixtureClose(fixture, closed);
+      console.log(JSON.stringify({ fixtureCleanup: "confirmed" }));
     } else {
       console.log(
         JSON.stringify({
@@ -399,6 +404,10 @@ try {
       );
     }
   } catch (cleanupError) {
+    if (fixtureReady && !fixtureExit) {
+      fixtureCloseUnconfirmed = true;
+      detachFixture(fixture);
+    }
     console.error(
       JSON.stringify({
         fixtureCleanup: "unconfirmed",
@@ -448,12 +457,20 @@ try {
     }
   }
   try {
-    await rm(folder, {
-      recursive: true,
-      force: true,
-      maxRetries: 5,
-      retryDelay: 100,
-    });
+    if (fixtureCloseUnconfirmed) {
+      console.error(
+        JSON.stringify({
+          fixtureFilesCleanup: "retained: owner exit unconfirmed",
+          folder,
+        }),
+      );
+    } else
+      await rm(folder, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
   } catch (cleanupError) {
     console.error(
       JSON.stringify({
