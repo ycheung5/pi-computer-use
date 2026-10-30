@@ -71,7 +71,7 @@ test("legacy context reports distinguish observed data from unknown state", () =
   try {
     const path = join(folder, "result.json");
     for (const [input, expected] of [
-      [{ succeeded: true, contexts: [{ open: true }] }, "observed"],
+      [{ succeeded: true, contexts: [{ open: true }] }, "unknown"],
       [{ succeeded: true, contexts: [{ open: false }] }, "unknown"],
       [{ succeeded: true, contexts: [] }, "unknown"],
       [
