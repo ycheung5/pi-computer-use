@@ -115,12 +115,8 @@ function legacyContextReport(observation) {
   assert.ok(Array.isArray(observation.contexts));
   return {
     observation,
-    classification:
-      observation.succeeded &&
-      observation.contexts.length === 1 &&
-      observation.contexts[0].open === true
-        ? "observed"
-        : "unknown",
+    classification: "unknown",
+    enumerationSucceeded: observation.succeeded,
     focusedContextIdentified: false,
     legacyOpenState: "unknown",
     tsfState: "unknown",
