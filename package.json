@@ -49,6 +49,8 @@
     "test:stop:busy:check": "node tests/stop-busy-check.mjs",
     "test:stop:pi-host": "node tests/pi-host-stop.mjs",
     "test:stop:pi-host:check": "node tests/pi-host-stop-outcome-check.mjs",
+    "test:stop:pi-host:job": "node tests/pi-host-job.mjs",
+    "test:stop:pi-host:job:check": "node tests/pi-host-job-check.mjs",
     "test:browser": "node tests/browser-host.mjs",
     "test:native:controls": "node tests/native-controls.mjs",
     "test:native:waits": "node tests/native-waits.mjs",
