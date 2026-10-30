@@ -20,7 +20,9 @@ for (const arg of args)
       arg === "--menu" ||
       arg === "--native-menu" ||
       arg === "--direct-mta" ||
-      /^--(engine|reference|report|direct-report)=.+/.test(arg),
+      /^--(engine|reference|report|direct-report|menu-settlement-report)=.+/.test(
+        arg,
+      ),
     `Unknown option: ${arg}`,
   );
 const option = (name) =>
@@ -380,6 +382,22 @@ if (directReportPath) {
   );
   console.log(JSON.stringify({ executed: false, ...outcome }));
   process.exit(outcome.outcome === "returned" ? 0 : 1);
+}
+function nativeMenuSettlementConfirmed(reply) {
+  return reply === "native-menu-settlement:True:True:True";
+}
+const settlementReportPath = option("menu-settlement-report");
+if (settlementReportPath) {
+  assert.equal(
+    args.length,
+    1,
+    "menu settlement report cannot be combined with other options",
+  );
+  const { readFile } = await import("node:fs/promises");
+  const evidence = JSON.parse(await readFile(settlementReportPath, "utf8"));
+  const confirmed = nativeMenuSettlementConfirmed(evidence.reply);
+  console.log(JSON.stringify({ executed: false, confirmed }));
+  process.exit(confirmed ? 0 : 1);
 }
 const reportPath = option("report");
 if (reportPath) {
@@ -914,7 +932,16 @@ try {
         ? "direct managed UIA control, not a Pi focus call; aggregate input counts cannot prove event source"
         : "public focus dispatch and independent after-return observations; no internal guard-phase observation";
   Object.assign(result, classifyEvidence(result));
-  if (popupMode && result.status === "pass") popupSettled = true;
+  if (popupMode && result.status === "pass") {
+    if (nativeMenu) {
+      result.nativeMenuSettlement = await target.command("dismiss-native-menu");
+      if (!nativeMenuSettlementConfirmed(result.nativeMenuSettlement)) {
+        result.status = "inconclusive";
+        result.reason = "Native menu handler settlement was not confirmed";
+      }
+    }
+    if (result.status === "pass") popupSettled = true;
+  }
   if (!["pass", "observed"].includes(result.status)) process.exitCode = 1;
 } catch (error) {
   result.status = error.inconclusive ? "inconclusive" : "fail";

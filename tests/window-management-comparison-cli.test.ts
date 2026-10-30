@@ -651,3 +651,31 @@ test("native menu plan identifies the Win32 fixture explicitly", () => {
   assert.deepEqual(value.cases, ["native-menu-foreground"]);
   assert.equal(value.physicalInput, false);
 });
+
+test("native menu settlement requires dismissal, handler return and closed menu", () => {
+  const script = fileURLToPath(
+    new URL("./foreground-focus-comparison.mjs", import.meta.url),
+  );
+  const folder = mkdtempSync(join(tmpdir(), "native-menu-settlement-"));
+  try {
+    const path = join(folder, "result.json");
+    for (const [reply, expected] of [
+      ["native-menu-settlement:True:True:True", true],
+      ["native-menu-settlement:False:True:True", false],
+      ["native-menu-settlement:True:False:True", false],
+      ["native-menu-settlement:True:True:False", false],
+      ["", false],
+    ] as const) {
+      writeFileSync(path, JSON.stringify({ reply }));
+      const result = spawnSync(
+        process.execPath,
+        [script, `--menu-settlement-report=${path}`],
+        { encoding: "utf8" },
+      );
+      assert.equal(JSON.parse(result.stdout).confirmed, expected);
+      assert.equal(result.status, expected ? 0 : 1);
+    }
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
