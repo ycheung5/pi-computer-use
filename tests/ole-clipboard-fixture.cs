@@ -58,18 +58,36 @@ class OleClipboardFixture {
  }
  static string CheckIndexed() {
   if(!OwnsClipboard())return "indexed-mismatch:owner";
-  OleDataObject data;Marshal.ThrowExceptionForHR(OleGetClipboard(out data));
+  OleDataObject data;Marshal.ThrowExceptionForHR(OleGetClipboard(out data));return CheckIndexedData(data);
+ }
+ static string CheckIndexedData(OleDataObject data) {
   var format=new FORMATETC {cfFormat=(short)RegisterClipboardFormat("PiCUIndexedPayload"),dwAspect=DVASPECT.DVASPECT_CONTENT,lindex=0,tymed=TYMED.TYMED_HGLOBAL};
   int query=data.QueryGetData(ref format);if(query!=0)return "indexed-mismatch:query:"+query.ToString("X8");
-  STGMEDIUM medium;data.GetData(ref format,out medium);
+  STGMEDIUM medium;try{data.GetData(ref format,out medium);}catch(COMException error){return "indexed-mismatch:get:"+error.ErrorCode.ToString("X8");}
   try {if(medium.tymed!=TYMED.TYMED_HGLOBAL)return "indexed-mismatch:tymed";if(GlobalSize(medium.unionmember).ToUInt64()<4)return "indexed-mismatch:size";
    IntPtr memory=GlobalLock(medium.unionmember);if(memory==IntPtr.Zero)return "indexed-mismatch:lock";
    try {byte[] actual=new byte[4];Marshal.Copy(memory,actual,0,4);return actual[0]==1 && actual[1]==2 && actual[2]==3 && actual[3]==4?"indexed-preserved":"indexed-mismatch:bytes";}
    finally {GlobalUnlock(medium.unionmember);}
   }finally {ReleaseStgMedium(ref medium);}
  }
+ static string IndexedFormats(OleDataObject data) {
+  var values=new List<string>();var iterator=data.EnumFormatEtc(DATADIR.DATADIR_GET);var next=new FORMATETC[1];var fetched=new int[1];
+  for(int count=0;count<32 && iterator.Next(1,next,fetched)==0;count++) {
+   var value=next[0];values.Add("{\"format\":"+((ushort)value.cfFormat)+",\"index\":"+value.lindex+",\"aspect\":"+(int)value.dwAspect+",\"medium\":"+(int)value.tymed+"}");
+  }
+  return "["+string.Join(",",values.ToArray())+"]";
+ }
+ static string ProbeIndexed() {
+  var direct=retained as OleDataObject;OleDataObject clipboard;Marshal.ThrowExceptionForHR(OleGetClipboard(out clipboard));
+  return "{\"direct\":\""+CheckIndexedData(direct)+"\",\"clipboard\":\""+CheckIndexedData(clipboard)+"\",\"expectedFormat\":"+RegisterClipboardFormat("PiCUIndexedPayload")+",\"directFormats\":"+IndexedFormats(direct)+",\"clipboardFormats\":"+IndexedFormats(clipboard)+"}";
+ }
  [STAThread]static void Main(){
-  Console.OutputEncoding=new UTF8Encoding(false);original=PreserveOriginal();
+  Console.OutputEncoding=new UTF8Encoding(false);
+  try{original=PreserveOriginal();}
+  catch(Exception error){
+   string reason=error.Message=="unsupported original clipboard format; fixture did not replace it"?"unsupported-original-format":error.Message=="fixture requires text/stream clipboard data; original unchanged"?"unsupported-original-value":error.Message=="clipboard changed before fixture setup"?"clipboard-changed-during-setup":"clipboard-unavailable";
+   Console.Error.WriteLine("fixture-startup:"+reason+";hresult="+error.HResult.ToString("X8")+";clipboard-unchanged");Console.Error.Flush();Environment.ExitCode=2;return;
+  }
   var form=new OleFixtureForm {Text="Pi OLE clipboard disposable fixture",Width=500,Height=220};
   var editor=new TextBox {AccessibleName="OLE clipboard editor",Left=10,Top=10,Width=400};form.Controls.Add(editor);
   bool copyOnPaste=false;
@@ -78,6 +96,8 @@ class OleClipboardFixture {
   ThreadPool.QueueUserWorkItem(delegate{string command;while((command=Console.ReadLine())!=null){string next=command;form.BeginInvoke((Action)delegate{
     if(next=="seed-ole")Seed(false);
     else if(next=="seed-indexed")Seed(true);
+    else if(next=="reset-editor"){editor.Text="";Reply("editor-reset");}
+    else if(next=="probe-indexed")Reply(ProbeIndexed());
     else if(next=="editor-base64")Reply(Convert.ToBase64String(Encoding.UTF8.GetBytes(editor.Text)));
     else if(next=="check-seed")Reply(CheckSeed()?"seed-preserved":"seed-mismatch");
     else if(next=="copy-on-paste"){copyOnPaste=true;Reply("copy-armed");}
