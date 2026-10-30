@@ -138,7 +138,92 @@ if (process.argv.includes("--diagnostic-report")) {
   console.log(JSON.stringify(diagnostic));
   process.exit(0);
 }
+// A real fixture entry is required before interpreting its public tool response.
+function classifyUnavailable(entered, returned) {
+  if (entered !== "provider:entered:unavailable")
+    return {
+      status: "blocked",
+      message: "Owned provider fault entry not confirmed",
+    };
+  const result = returned?.result;
+  const explicit = Boolean(
+    ((result?.ok === true || result?.ok === false) && result?.providerError) ||
+      (result?.ok === false &&
+        /UIA_PROVIDER_ERROR|element.*unavailable|STALE_ELEMENT/i.test(
+          String(result.error ?? ""),
+        )) ||
+      /UIA_PROVIDER_ERROR|element.*unavailable|STALE_ELEMENT/i.test(
+        returned?.error ?? "",
+      ),
+  );
+  if (!explicit)
+    return {
+      status: "blocked",
+      message:
+        "Provider unavailable fault was entered but explicit error propagation was not observed",
+    };
+  if (
+    result?.ok === true &&
+    (result.truncated !== true || result.conclusive !== false)
+  )
+    return {
+      status: "fail",
+      message: "Provider failure must be incomplete and inconclusive",
+    };
+  return { status: "pass", message: "Provider failure reported honestly" };
+}
+const providerReport = process.argv
+  .slice(2)
+  .find((arg) => arg.startsWith("--provider-unavailable-report="));
+if (providerReport) {
+  const evidence = JSON.parse(
+    await readFile(
+      providerReport.slice("--provider-unavailable-report=".length),
+      "utf8",
+    ),
+  );
+  const result = classifyUnavailable(evidence.entered, evidence.returned);
+  console.log(
+    JSON.stringify({
+      ...result,
+      executed: false,
+      physicalInput: false,
+      evidence,
+    }),
+  );
+  process.exit(result.status === "pass" ? 0 : 1);
+}
 const nativeScrollOnly = process.argv.includes("--native-scroll-only");
+const providerUnavailableOnly = process.argv.includes(
+  "--provider-unavailable-only",
+);
+assert.ok(
+  !(nativeScrollOnly && providerUnavailableOnly),
+  "Choose only one isolated comparison",
+);
+if (providerUnavailableOnly) {
+  const args = process.argv.slice(2);
+  assert.ok(
+    args.every(
+      (arg) =>
+        !arg.startsWith("--") ||
+        arg === "--provider-unavailable-only" ||
+        arg === "--plan",
+    ),
+    "Unknown provider probe option",
+  );
+  if (args.includes("--plan")) {
+    console.log(
+      JSON.stringify({
+        executed: false,
+        physicalInput: false,
+        engines: ["reference", "pi"],
+        cases: ["provider.unavailable"],
+      }),
+    );
+    process.exit(0);
+  }
+}
 const scrollArguments = process.argv.slice(2);
 if (nativeScrollOnly) {
   assert.ok(
@@ -168,9 +253,10 @@ if (nativeScrollOnly) {
     "Set PI_CU_DEDICATED_INPUT_DESKTOP=1 on an authorized idle desktop for native element scroll",
   );
 }
-const cliReference = nativeScrollOnly
-  ? scrollArguments.find((arg) => !arg.startsWith("--"))
-  : process.argv[2];
+const cliReference =
+  nativeScrollOnly || providerUnavailableOnly
+    ? scrollArguments.find((arg) => !arg.startsWith("--"))
+    : process.argv[2];
 assert.ok(cliReference, "Pass reference checkout");
 // Planning and physical-input refusal above deliberately precede all backend imports.
 const [
@@ -192,7 +278,7 @@ if (process.platform === "linux") {
   const output = process.env.PI_CU_RELEASE_OUTPUT
     ? await win(process.env.PI_CU_RELEASE_OUTPUT)
     : undefined;
-  const code = `import{pathToFileURL}from'node:url';${output ? `process.env.PI_CU_RELEASE_OUTPUT=${JSON.stringify(output)};` : "delete process.env.PI_CU_RELEASE_OUTPUT;"}process.argv=[process.execPath,${JSON.stringify(script)},${JSON.stringify(reference)},...${JSON.stringify(nativeScrollOnly ? ["--native-scroll-only"] : process.argv.slice(3))}];await import(pathToFileURL(${JSON.stringify(script)}).href);`;
+  const code = `import{pathToFileURL}from'node:url';${output ? `process.env.PI_CU_RELEASE_OUTPUT=${JSON.stringify(output)};` : "delete process.env.PI_CU_RELEASE_OUTPUT;"}process.argv=[process.execPath,${JSON.stringify(script)},${JSON.stringify(reference)},...${JSON.stringify(nativeScrollOnly ? ["--native-scroll-only"] : providerUnavailableOnly ? ["--provider-unavailable-only"] : process.argv.slice(3))}];await import(pathToFileURL(${JSON.stringify(script)}).href);`;
   const child = run(launch.executable, ["--input-type=module", "-e", code], {
     cwd: launch.cwd,
     ...(nativeScrollOnly
@@ -1065,16 +1151,20 @@ async function runProviderFailures(name) {
     "UIAutomationTypes.dll",
     "WindowsBase.dll",
   ].map((n) => `/r:${join(framework, "WPF", n)}`);
-  for (const mode of ["fault", "hang"]) {
+  for (const mode of providerUnavailableOnly
+    ? ["unavailable"]
+    : ["fault", "hang"]) {
     const owned = await fixture("nullable-uia-fixture", "", refs);
     const client = await engine(name);
     try {
       await record(
         name,
         `provider.${mode}`,
-        mode === "fault"
-          ? "Owned fault trigger and honest returned metadata"
-          : "Bound caller cancellation of an entered provider, then release fixture",
+        mode === "unavailable"
+          ? "Owned UIA unavailable fault triggers explicit provider-error evidence or records normalization as blocked"
+          : mode === "fault"
+            ? "Owned fault trigger and honest returned metadata"
+            : "Bound caller cancellation of an entered provider, then release fixture",
         async () => {
           const controllerPid =
             mode === "hang" ? await client.controllerPid() : undefined;
@@ -1190,6 +1280,15 @@ async function runProviderFailures(name) {
               controller.abort(new Error("Owned provider cancellation"));
             }
             await pending;
+            if (mode === "unavailable") {
+              const classification = classifyUnavailable(entered, returned);
+              if (classification.status !== "pass") {
+                const error = new Error(classification.message);
+                if (classification.status === "blocked")
+                  error.prerequisiteBlocked = true;
+                throw error;
+              }
+            }
             if (mode === "hang") {
               assert.equal(
                 settledBeforeAbort,
@@ -1398,13 +1497,21 @@ try {
       await runNativeScroll(name);
       continue;
     }
+    if (providerUnavailableOnly) {
+      await runProviderFailures(name);
+      continue;
+    }
     if (!process.argv.includes("--provider-failures")) {
       await runNative(name);
       await runProvider(name);
     }
     await runProviderFailures(name);
   }
-  if (!nativeScrollOnly && !process.argv.includes("--provider-failures"))
+  if (
+    !nativeScrollOnly &&
+    !providerUnavailableOnly &&
+    !process.argv.includes("--provider-failures")
+  )
     await runChromium();
 } catch (error) {
   report.fatal = String(error);
