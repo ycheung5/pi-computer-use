@@ -31,12 +31,30 @@ export function isSafeClipboardRefusal(result) {
 // An absent cleanup acknowledgment does not establish that physical input has stopped.
 export function inputCleanupConfirmed(result) {
   if (
+    result?.action !== "type_text" ||
+    typeof result?.ok !== "boolean" ||
     result?.cleanupConfirmed !== true ||
-    result?.clipboardCleanupConfirmed === false
+    result?.clipboardCleanupConfirmed === false ||
+    result?.inputCleanupConfirmed === false ||
+    result?.keyboardCleanupConfirmed === false ||
+    ["unconfirmed", "held", "failed"].includes(result?.cleanupVerification)
   )
     return false;
   return (
     result.clipboardCleanupConfirmed === true || isSafeClipboardRefusal(result)
+  );
+}
+
+// Reference window activation can synthesize Alt input, so missing or wrong-action
+// acknowledgment cannot establish that its keys were released.
+export function referenceActivationCleanupConfirmed(result) {
+  return (
+    result?.action === "activate_window" &&
+    typeof result.ok === "boolean" &&
+    result.cleanupConfirmed === true &&
+    result.inputCleanupConfirmed !== false &&
+    result.keyboardCleanupConfirmed !== false &&
+    !["unconfirmed", "held", "failed"].includes(result.cleanupVerification)
   );
 }
 

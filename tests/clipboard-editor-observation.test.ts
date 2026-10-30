@@ -5,6 +5,7 @@ import {
   compareEditorObservation,
   inputCleanupConfirmed,
   isSafeClipboardRefusal,
+  referenceActivationCleanupConfirmed,
 } from "./clipboard-editor-observation.mjs";
 
 test("blank fixture evidence remains usable when UIA omits its value", () => {
@@ -53,6 +54,7 @@ test("only a recognized pre-input snapshot refusal qualifies as safe", () => {
 test("clipboard input retains its owner until both cleanup acknowledgments or a pre-input refusal", () => {
   assert.equal(
     inputCleanupConfirmed({
+      action: "type_text",
       ok: true,
       cleanupConfirmed: true,
       clipboardCleanupConfirmed: true,
@@ -61,6 +63,7 @@ test("clipboard input retains its owner until both cleanup acknowledgments or a 
   );
   assert.equal(
     inputCleanupConfirmed({
+      action: "type_text",
       ok: false,
       error: "CLIPBOARD_SNAPSHOT_UNSUPPORTED: unchanged",
       cleanupConfirmed: true,
@@ -69,6 +72,52 @@ test("clipboard input retains its owner until both cleanup acknowledgments or a 
   );
   for (const result of [
     undefined,
+    {
+      action: "type_text",
+      ok: true,
+      cleanupConfirmed: true,
+      clipboardCleanupConfirmed: true,
+      inputCleanupConfirmed: false,
+    },
+    {
+      action: "type_text",
+      ok: true,
+      cleanupConfirmed: true,
+      clipboardCleanupConfirmed: true,
+      keyboardCleanupConfirmed: false,
+    },
+    ...["unconfirmed", "held", "failed"].map((cleanupVerification) => ({
+      action: "type_text",
+      ok: true,
+      cleanupConfirmed: true,
+      clipboardCleanupConfirmed: true,
+      cleanupVerification,
+    })),
+    {
+      action: "type_text",
+      ok: false,
+      error: "CLIPBOARD_SNAPSHOT_UNSUPPORTED: unchanged",
+      cleanupConfirmed: true,
+      keyboardCleanupConfirmed: false,
+    },
+    {
+      action: "type_text",
+      cleanupConfirmed: true,
+      clipboardCleanupConfirmed: true,
+    },
+    {
+      action: "other",
+      ok: true,
+      cleanupConfirmed: true,
+      clipboardCleanupConfirmed: true,
+    },
+    { ok: true, cleanupConfirmed: true, clipboardCleanupConfirmed: true },
+    {
+      action: "other",
+      ok: false,
+      error: "CLIPBOARD_SNAPSHOT_UNSUPPORTED: unchanged",
+      cleanupConfirmed: true,
+    },
     { ok: true },
     { ok: true, cleanupConfirmed: true },
     { ok: true, cleanupConfirmed: false, clipboardCleanupConfirmed: true },
@@ -93,4 +142,40 @@ test("retained owner remains alive without any other active handles", async () =
     child.kill();
     await closed;
   }
+});
+
+test("reference activation requires its own explicit input cleanup acknowledgment", () => {
+  assert.equal(
+    referenceActivationCleanupConfirmed({
+      action: "activate_window",
+      ok: true,
+      cleanupConfirmed: true,
+    }),
+    true,
+  );
+  for (const result of [
+    undefined,
+    { action: "activate_window", ok: true },
+    { action: "type_text", ok: true, cleanupConfirmed: true },
+    { action: "activate_window", cleanupConfirmed: true },
+    {
+      action: "activate_window",
+      ok: true,
+      cleanupConfirmed: true,
+      inputCleanupConfirmed: false,
+    },
+    {
+      action: "activate_window",
+      ok: true,
+      cleanupConfirmed: true,
+      keyboardCleanupConfirmed: false,
+    },
+    {
+      action: "activate_window",
+      ok: true,
+      cleanupConfirmed: true,
+      cleanupVerification: "unconfirmed",
+    },
+  ])
+    assert.equal(referenceActivationCleanupConfirmed(result), false);
 });

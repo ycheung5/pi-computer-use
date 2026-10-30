@@ -10,12 +10,28 @@ export function isSafeClipboardRefusal(result: {
 export function inputCleanupConfirmed(
   result:
     | {
+        action?: unknown;
         ok?: unknown;
         error?: unknown;
         cleanupConfirmed?: unknown;
         clipboardCleanupConfirmed?: unknown;
+        inputCleanupConfirmed?: unknown;
+        keyboardCleanupConfirmed?: unknown;
+        cleanupVerification?: unknown;
       }
     | undefined,
 ): boolean;
 
+export function referenceActivationCleanupConfirmed(
+  result:
+    | {
+        action?: unknown;
+        ok?: unknown;
+        cleanupConfirmed?: unknown;
+        inputCleanupConfirmed?: unknown;
+        keyboardCleanupConfirmed?: unknown;
+        cleanupVerification?: unknown;
+      }
+    | undefined,
+): boolean;
 export function retainUnconfirmedOwner(): Promise<never>;
