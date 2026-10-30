@@ -67,11 +67,6 @@ if (process.argv.includes("--profiles")) {
     1,
     "Use one complete paired profile lifecycle per run; repeat the command for a fresh fixture root",
   );
-  assert.notEqual(
-    app,
-    "firefox",
-    "Paired Firefox profile collection is unimplemented; this is not a product support result",
-  );
 }
 const root = fileURLToPath(new URL("../", import.meta.url));
 const folder = await mkdtemp(join(tmpdir(), "pi-browser-comparison-"));
@@ -430,6 +425,27 @@ try {
           } finally {
             await competitor.close();
           }
+          const { result: afterDetachTree } = await call("accessibility_tree", {
+            browserTab: tab,
+          });
+          assert.match(afterDetachTree.text, /Cookie: remembered/);
+          const { result: afterDetachListing } = await call("list_windows", {
+            maxWindows: 1,
+          });
+          const afterDetachRoot = afterDetachListing.browserLane.browsers.find(
+            (x) => x.tabs.some((t) => t.id === tab),
+          );
+          assert.equal(
+            afterDetachRoot?.processId,
+            ownedBrowser.processId,
+            "Detaching the contender must preserve the original tab in the same browser root",
+          );
+          assert.equal(await processAlive(ownedBrowser.processId), true);
+          row.profile.ownershipAfterDetach = {
+            originalTabReadable: true,
+            rootAlive: true,
+            processId: afterDetachRoot.processId,
+          };
           await active.close();
           row.profile.restart = {
             oldProcessId: ownedBrowser.processId,
@@ -437,25 +453,51 @@ try {
               ownedBrowser.processId,
             ),
           };
-          active = await createClient();
-          const { result: resumed } = await call("set_value", {
-            elementId: "new-tab",
-            value: `${source.url}profile/read`,
-          });
-          assert.match(resumed.text, /Cookie: remembered/);
-          const { result: restartedListing } = await call("list_windows", {
-            maxWindows: 1,
-          });
-          const restartedTab = (resumed.tab ?? resumed.opened).id;
-          const restartedBrowser = restartedListing.browserLane.browsers.find(
-            (x) => x.tabs.some((t) => t.id === restartedTab),
-          );
-          row.ownedProcessIds.push(restartedBrowser.processId);
-          row.profile.restart.newProcessId = restartedBrowser.processId;
-          row.profile.restart.differentRoot =
-            restartedBrowser.processId !== ownedBrowser.processId;
-          row.profile.cookiePersisted = true;
-          await active.close();
+          try {
+            active = await createClient();
+            const { result: resumed } = await call("set_value", {
+              elementId: "new-tab",
+              value: `${source.url}profile/read`,
+            });
+            const { result: restartedListing } = await call("list_windows", {
+              maxWindows: 1,
+            });
+            const restartedTab = (resumed.tab ?? resumed.opened).id;
+            const restartedBrowser = restartedListing.browserLane.browsers.find(
+              (x) => x.tabs.some((t) => t.id === restartedTab),
+            );
+            row.ownedProcessIds.push(restartedBrowser.processId);
+            row.profile.restart.newProcessId = restartedBrowser.processId;
+            row.profile.restart.differentRoot =
+              restartedBrowser.processId !== ownedBrowser.processId;
+            assert.match(resumed.text, /Cookie: remembered/);
+            row.profile.cookieObservedAfterControllerRestart = true;
+            row.profile.restart.verified =
+              row.profile.restart.oldRootExitedBeforeReconnect === true &&
+              row.profile.restart.differentRoot === true &&
+              row.profile.restart.newProcessId !==
+                row.profile.restart.oldProcessId;
+            row.profile.cookiePersisted = row.profile.restart.verified;
+            if (!row.profile.restart.verified) {
+              row.findings ??= [];
+              row.findings.push({
+                phase: "kept profile restart",
+                error:
+                  "Cookie observed after controller reconnect, but old-root exit and a different browser root were not both established",
+              });
+            }
+          } catch (error) {
+            row.profile.cookiePersisted = false;
+            row.profile.restart.verified = false;
+            row.findings ??= [];
+            row.findings.push({
+              phase: "kept profile restart",
+              error: String(error),
+              toolResult: error.toolResult,
+            });
+          } finally {
+            await active.close();
+          }
           settings.browserSignIn = false;
           await writeFile(settingsPath, JSON.stringify(settings));
           active = await createClient();
@@ -531,14 +573,14 @@ try {
             allKnownControllersClosed: true,
             controllerExit,
           };
-          if (present)
-            row.findings = [
-              {
-                phase: "temporary cleanup",
-                error:
-                  "Temporary profile remains after controller exit; runner has not removed it",
-              },
-            ];
+          if (present) {
+            row.findings ??= [];
+            row.findings.push({
+              phase: "temporary cleanup",
+              error:
+                "Temporary profile remains after controller exit; runner has not removed it",
+            });
+          }
           active = await createClient();
           const { result: isolated } = await call("set_value", {
             elementId: "new-tab",
@@ -564,7 +606,7 @@ try {
 
           row.steps.push({
             phase: "kept synthetic cookie restart and live ownership",
-            status: "pass",
+            status: row.profile.restart.verified ? "pass" : "fail",
           });
           row.desktop = { before, after: await desktop() };
           row.desktop.preservation =
