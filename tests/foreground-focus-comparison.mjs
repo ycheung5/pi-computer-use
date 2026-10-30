@@ -7,6 +7,7 @@ for (const arg of args)
     arg === "--plan" ||
       arg === "--provenance" ||
       arg === "--direct-uia" ||
+      arg === "--direct-mta" ||
       /^--(engine|reference|report|direct-report)=.+/.test(arg),
     `Unknown option: ${arg}`,
   );
@@ -140,6 +141,8 @@ if (reportPath) {
 const engine = option("engine") ?? "pi";
 assert.ok(["pi", "reference"].includes(engine));
 const directUia = args.includes("--direct-uia");
+const directMta = args.includes("--direct-mta");
+assert.ok(!directMta || directUia, "--direct-mta requires --direct-uia");
 assert.ok(
   !directUia || (engine === "pi" && args.includes("--provenance")),
   "Direct UIA control requires Pi setup and --provenance",
@@ -151,7 +154,12 @@ if (args.includes("--plan")) {
       engine,
       physicalInput: false,
       foregroundChangesPossible: true,
-      ...(directUia ? { focusDispatch: "direct-uia-control" } : {}),
+      ...(directUia
+        ? {
+            focusDispatch: "direct-uia-control",
+            directApartmentRequested: directMta ? "MTA" : "default",
+          }
+        : {}),
       ...(args.includes("--provenance")
         ? { inputProvenance: "aggregate hook counts only" }
         : {}),
@@ -403,12 +411,13 @@ try {
         pid > 0,
       "Owned native edit HWND and PID required",
     );
-    const ps = `$ErrorActionPreference='Stop'; Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes; $e=[System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]${hwnd}); if($null -eq $e -or $e.Current.ProcessId -ne ${pid} -or $e.Current.NativeWindowHandle -ne ${hwnd}){throw 'UIA identity mismatch'}; [Console]::WriteLine('ready'); [Console]::Out.Flush(); if([Console]::ReadLine() -ne 'focus'){throw 'Focus gate rejected'}; $e.SetFocus(); [Console]::WriteLine('sent'); [Console]::Out.Flush()`;
+    const ps = `$ErrorActionPreference='Stop'; Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes; $e=[System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]${hwnd}); if($null -eq $e -or $e.Current.ProcessId -ne ${pid} -or $e.Current.NativeWindowHandle -ne ${hwnd}){throw 'UIA identity mismatch'}; [Console]::WriteLine('ready:' + [Threading.Thread]::CurrentThread.GetApartmentState().ToString()); [Console]::Out.Flush(); if([Console]::ReadLine() -ne 'focus'){throw 'Focus gate rejected'}; $e.SetFocus(); [Console]::WriteLine('sent'); [Console]::Out.Flush()`;
     const child = spawn(
       "powershell.exe",
       [
         "-NoProfile",
         "-NonInteractive",
+        ...(directMta ? ["-Mta"] : []),
         "-EncodedCommand",
         Buffer.from(ps, "utf16le").toString("base64"),
       ],
@@ -450,10 +459,16 @@ try {
       if (x.done) throw new Error("Direct UIA control exited without response");
       return x.value.trim();
     };
-    assert.equal(
-      await read(),
-      "ready",
-      "Direct UIA FromHandle and identity validation must complete before sampling",
+    const ready = (await read()).match(/^ready:(STA|MTA)$/);
+    assert.ok(
+      ready,
+      "Direct UIA FromHandle, identity and apartment must be reported before sampling",
+    );
+    directEvidence.apartment = ready[1];
+    directEvidence.apartmentRequested = directMta ? "MTA" : "default";
+    assert.ok(
+      !directMta || ready[1] === "MTA",
+      "Requested MTA was not observed; no focus sent",
     );
     directEvidence.phase = "ready";
     direct = { child, closed, read, evidence: directEvidence };

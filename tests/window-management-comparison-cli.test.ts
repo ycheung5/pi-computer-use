@@ -355,3 +355,22 @@ test("direct focus outcome requires explicit method-return marker and clean proc
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("MTA direct focus control is explicitly scoped and requires the diagnostic prerequisites", () => {
+  const script = fileURLToPath(
+    new URL("./foreground-focus-comparison.mjs", import.meta.url),
+  );
+  const plan = spawnSync(
+    process.execPath,
+    [script, "--plan", "--provenance", "--direct-uia", "--direct-mta"],
+    { encoding: "utf8" },
+  );
+  assert.equal(plan.status, 0, plan.stderr);
+  assert.equal(JSON.parse(plan.stdout).directApartmentRequested, "MTA");
+  const invalid = spawnSync(
+    process.execPath,
+    [script, "--plan", "--direct-mta"],
+    { encoding: "utf8" },
+  );
+  assert.notEqual(invalid.status, 0);
+});
