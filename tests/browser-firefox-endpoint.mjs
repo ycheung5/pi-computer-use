@@ -7,6 +7,7 @@ import { join } from "node:path";
 import puppeteer from "puppeteer-core";
 import { registerComputerUse } from "../dist/extension.js";
 import { computerUseHost } from "./native-host.mjs";
+import { ReferenceClient, referenceResult } from "./reference-client.mjs";
 
 assert.equal(process.platform, "win32", "run with Windows Node");
 assert.ok(
@@ -22,7 +23,7 @@ const server = createServer((request, response) => {
     );
   response.setHeader("Content-Type", "text/html; charset=utf-8");
   response.end(
-    `<title>${request.url === "/set" ? "Pre-existing external fixture" : "New external fixture"}</title><h1>External Firefox fixture</h1><p>Cookie: ${request.headers.cookie?.includes("pi_external_fixture=remembered") ? "remembered" : "missing"}</p>`,
+    `<title>${request.url === "/set" ? "Pre-existing external fixture" : request.url === "/reference" ? "Reference external fixture" : "New external fixture"}</title><h1>External Firefox fixture</h1><p>Cookie: ${request.headers.cookie?.includes("pi_external_fixture=remembered") ? "remembered" : "missing"}</p>`,
   );
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -118,9 +119,82 @@ try {
     { code: "ENOENT" },
     "external endpoint must not create or acquire an owned profile",
   );
+  let referenceEvidence;
+  if (process.argv[2]) {
+    const referenceClient = new ReferenceClient(process.argv[2], {
+      cwd: directory,
+      env: {
+        WCU_BROWSER_APP: "firefox",
+        WCU_BROWSER_EXE: process.env.PI_CU_BROWSER_EXECUTABLE,
+        WCU_BROWSER_HEADLESS: "1",
+        WCU_BROWSER_SIGNIN: "0",
+        WCU_BROWSER_BIDI_URL: endpoint,
+        WCU_BROWSER_PROFILE: join(directory, "reference-profiles"),
+      },
+    });
+    try {
+      await referenceClient.init();
+      const listing = referenceResult(
+        await referenceClient.call("list_windows", { maxWindows: 1 }),
+      );
+      assert.equal(listing.ok, true, JSON.stringify(listing));
+      assert.ok(
+        listing.browserLane.browsers
+          .flatMap((x) => x.tabs)
+          .some((x) => x.url === `${origin}/set`),
+        JSON.stringify(listing.browserLane),
+      );
+      const opened = referenceResult(
+        await referenceClient.call("set_value", {
+          elementId: "new-tab",
+          value: `${origin}/reference`,
+        }),
+      );
+      assert.equal(opened.ok, true, JSON.stringify(opened));
+      const outlinedRaw = await referenceClient.call("accessibility_tree", {
+        browserTab: (opened.tab ?? opened.opened).id,
+      });
+      assert.match(
+        outlinedRaw.content
+          .filter((x) => x.type === "text")
+          .map((x) => x.text)
+          .join("\n"),
+        /Cookie: remembered/,
+      );
+      referenceEvidence = {
+        existingTabDiscovered: true,
+        cookieShared: true,
+        listedTabs: listing.browserLane.browsers.flatMap((x) => x.tabs),
+      };
+    } finally {
+      await referenceClient.close();
+    }
+    process.kill(child.pid, 0);
+    browser = await puppeteer.connect({
+      browserWSEndpoint: endpoint,
+      protocol: "webDriverBiDi",
+    });
+    const preserved = await Promise.all(
+      (await browser.pages()).map((page) => page.title()),
+    );
+    for (const expected of [
+      "Pre-existing external fixture",
+      "New external fixture",
+      "Reference external fixture",
+    ])
+      assert.ok(preserved.includes(expected), JSON.stringify(preserved));
+    referenceEvidence.tabsPreserved = preserved;
+    referenceEvidence.externalProcessAlive = true;
+    await browser.disconnect();
+    await assert.rejects(access(join(directory, "reference-profiles")), {
+      code: "ENOENT",
+    });
+    referenceEvidence.noOwnedProfileCreated = true;
+  }
   console.log(
     JSON.stringify({
       ok: true,
+      reference: referenceEvidence,
       check:
         "explicit loopback Firefox endpoint; existing/new tabs, cookies and process preserved",
     }),

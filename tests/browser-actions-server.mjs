@@ -1,5 +1,6 @@
 // Disposable local pages/files only; no external network or daily profiles.
 
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -47,8 +48,53 @@ const formHtml = `<!doctype html><meta charset="utf-8"><title>Paired browser for
 const payload={name:document.getElementById('name').value,notes:notes.value,accepted:accepted.checked,choice:choice.value};
 const response=await fetch('/form/submit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
 result.textContent=JSON.stringify(await response.json());});</script>`;
+const downloadName = `pi-advanced-${randomUUID()}.txt`;
+let advancedState = { upload: null, uploadRequests: 0, downloads: 0 };
+const advancedHtml = `<!doctype html><meta charset="utf-8"><title>Advanced browser fixture</title>
+<h1>Advanced browser fixture</h1><label>Document marker<input value="original document"></label>
+<a href="/child" target="_blank">Open child</a>
+<button onclick="answer.textContent='Prompt: '+prompt('Fixture prompt','default')">Prompt action</button>
+<button onclick="answer.textContent='Confirm: '+confirm('Fixture confirm')">Confirm action</button>
+<button onclick="alert('Fixture alert')">Alert action</button><p id="answer">No dialog yet</p>
+<input type="file" aria-label="Direct upload"><input id="file" type="file" hidden onchange="receive(this.files[0])"><button onclick="file.click()">Upload fixture</button><p id="uploaded">No file</p>
+<a href="/advanced/download" download="${downloadName}">Download fixture</a>
+<script>async function receive(file){await fetch('/advanced/upload',{method:'POST',body:JSON.stringify({name:file.name,content:await file.text()})});uploaded.textContent='Uploaded: '+file.name;}</script>`;
 const server = createServer((request, response) => {
-  if (request.url === "/form/state") {
+  if (request.url === "/profile/set" || request.url === "/profile/read") {
+    if (request.url === "/profile/set")
+      response.setHeader(
+        "Set-Cookie",
+        "pi_advanced_profile=remembered; Path=/; Max-Age=3600; HttpOnly; SameSite=Lax",
+      );
+    response.setHeader("Content-Type", "text/html; charset=utf-8");
+    response.end(
+      `<title>Owned synthetic profile fixture</title><h1>Profile fixture</h1><p>Cookie: ${request.headers.cookie?.includes("pi_advanced_profile=remembered") ? "remembered" : "missing"}</p>`,
+    );
+  } else if (request.url === "/advanced/state") {
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify(advancedState));
+  } else if (request.url === "/advanced/upload" && request.method === "POST") {
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      advancedState.upload = JSON.parse(body);
+      advancedState.uploadRequests++;
+      response.end("ok");
+    });
+  } else if (request.url === "/advanced/download") {
+    advancedState.downloads++;
+    response.writeHead(200, {
+      "content-type": "text/plain",
+      "content-disposition": `attachment; filename=${downloadName}`,
+    });
+    response.end("download fixture only");
+  } else if (request.url === "/advanced") {
+    advancedState = { upload: null, uploadRequests: 0, downloads: 0 };
+    response.setHeader("content-type", "text/html; charset=utf-8");
+    response.end(advancedHtml);
+  } else if (request.url === "/form/state") {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify(formSubmission));
   } else if (request.url === "/form/submit" && request.method === "POST") {
@@ -85,6 +131,7 @@ server.listen(0, "127.0.0.1", () =>
     JSON.stringify({
       url: `http://127.0.0.1:${server.address().port}/`,
       upload,
+      downloadName,
       settings,
     }),
   ),
