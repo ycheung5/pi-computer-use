@@ -141,11 +141,15 @@ const built = spawnSync(
   { encoding: "utf8", cwd: folder, windowsHide: true },
 );
 assert.equal(built.status, 0, built.stdout + built.stderr);
-const fixture = spawn(executable, [`Pi CU Controls ${Date.now()}`], {
-  stdio: ["pipe", "pipe", "pipe"],
-  cwd: folder,
-  windowsHide: true,
-});
+const fixture = spawn(
+  executable,
+  [`Pi CU Controls ${Date.now()}`, "--no-expiry"],
+  {
+    stdio: ["pipe", "pipe", "pipe"],
+    cwd: folder,
+    windowsHide: true,
+  },
+);
 const [ready] = await once(fixture.stdout, "data");
 const target = {
   nativeWindowHandle: Number(ready.toString().trim()),
@@ -155,6 +159,17 @@ let host;
 let client;
 let execute;
 let watchdog;
+const { runPointerInput, retainPointerOwner } = await import(
+  "./pointer-input-safety.mjs"
+);
+const pointerState = { unconfirmed: false };
+const physicalActions = new Set([
+  "click",
+  "double_click",
+  "move",
+  "scroll",
+  "drag",
+]);
 try {
   if (engine === "pi") {
     const [{ default: computerUse }, { computerUseHost }] = await Promise.all([
@@ -179,8 +194,13 @@ try {
   }
   const call = async (action, args = {}, signal) => {
     try {
-      const result = await execute(action, { ...target, ...args }, signal);
+      const dispatch = () => execute(action, { ...target, ...args }, signal);
+      const result = physicalActions.has(action)
+        ? await runPointerInput(pointerState, dispatch)
+        : await dispatch();
       console.log(JSON.stringify({ engine, action, result }));
+      if (physicalActions.has(action) && pointerState.unconfirmed)
+        throw Error("Pointer input cleanup unconfirmed; owner retained");
       return result;
     } catch (error) {
       console.log(
@@ -373,6 +393,7 @@ try {
     evidence.observationError = { name: error.name, message: error.message };
   }
   const report = dragReport(evidence);
+  if (!report.releaseConfirmed) pointerState.unconfirmed = true;
   console.log(JSON.stringify(report));
   assert.equal(report.ok, true, JSON.stringify(report));
   console.log(
@@ -393,6 +414,16 @@ try {
   );
 } finally {
   clearTimeout(watchdog);
+  if (pointerState.unconfirmed) {
+    console.error(
+      JSON.stringify({
+        engine,
+        cleanup: "retained: pointer input or release unconfirmed",
+        folder,
+      }),
+    );
+    await retainPointerOwner();
+  }
   for (const handler of host?.shutdown ?? []) await handler();
   await client?.dispose();
   if (fixture.exitCode === null) {

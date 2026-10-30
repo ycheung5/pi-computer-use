@@ -256,8 +256,32 @@ test("Drop report retains an input owner when cleanup is explicitly unconfirmed"
         env: { ...process.env, PI_CU_DEDICATED_INPUT_DESKTOP: "" },
       },
     );
-    assert.equal(passed.status, 0, passed.stderr);
-    assert.equal(JSON.parse(passed.stdout).cleanupVerification, "released");
+    assert.equal(passed.status, 1, passed.stderr);
+    assert.equal(JSON.parse(passed.stdout).cleanupVerification, "unconfirmed");
+    await writeFile(
+      report,
+      JSON.stringify({
+        dispatch: {
+          status: "fulfilled",
+          value: { ok: true, cleanupConfirmed: true },
+        },
+        state: { drops: 1, held: 0 },
+      }),
+    );
+    const acknowledged = spawnSync(
+      process.execPath,
+      [runner, `--report-drop=${report}`],
+      {
+        cwd: folder,
+        encoding: "utf8",
+        env: { ...process.env, PI_CU_DEDICATED_INPUT_DESKTOP: "" },
+      },
+    );
+    assert.equal(acknowledged.status, 0, acknowledged.stderr);
+    assert.equal(
+      JSON.parse(acknowledged.stdout).cleanupVerification,
+      "released",
+    );
   } finally {
     await rm(folder, { recursive: true, force: true });
   }

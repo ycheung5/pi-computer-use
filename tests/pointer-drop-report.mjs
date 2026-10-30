@@ -10,6 +10,7 @@ export function assessDrop({ dispatch, state, observationError }) {
     !observationError &&
     dispatch?.status === "fulfilled" &&
     value?.ok === true &&
+    value?.cleanupConfirmed === true &&
     !explicitlyUnconfirmed &&
     state?.held === 0;
   return {
