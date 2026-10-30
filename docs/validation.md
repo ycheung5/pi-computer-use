@@ -271,6 +271,38 @@ This uses `--verify-stop-collection`, labels the failed case as injected/test-de
 
 On 2026-10-30 this regression failed against the old collector (`ok: true` concealed the requested diagnostic expectation) and passed after the reporting/reset extension. A normal three-repetition run against reference 0.5.3 and Pi 0.1.0 passed all six measured cases and both warmups on Windows Node 22.23.4 via WSL2. The independently observed values and resets matched, and controller/editor plus final fixture cleanup were confirmed. These are background native Edit results only; physical, browser and real-agent workflows remain separate tickets.
 
+### Paired capture and OCR comparison
+
+Run from WSL2 after building, under the same serialized live-test discipline:
+
+```sh
+PI_CU_RELEASE_OUTPUT=/tmp/pi-cu-capture-evidence flock -w 120 /tmp/pi-cu-live-tests.lock npm run test:reference:capture -- /path/to/dsh-computer-use-win
+npm run test:reference:capture:report -- /path/to/dsh-computer-use-win
+```
+
+Serialize the report-contract command too when other live checks are active. `test:reference:capture` relays to the package-managed Windows Node and compares the public reference MCP and Pi worker interfaces. It creates only owned, non-activating capture/OCR fixtures; no physical input or clipboard actions are sent. The fixtures independently report geometry and minimized state. A separate offscreen rendering of the known painted label supplies ink coordinates without using either engine's screenshot/OCR implementation. PNG dimensions, center pixels, origins/scales, literal queries, word bounds, clipped text and unavailable-target results are retained. Screenshots remain in memory; the optional JSON artifact contains sanitized metadata, source hashes and observations rather than image payloads. A minimized-target fallback can capture desktop pixels internally, but those pixels are not persisted.
+
+The public CLI contract was exercised red → green as scaled capture, native-resolution capture, fallback and OCR evidence were added. Its pass means the collector faithfully reports both engines and propagates the comparison exit status; it does **not** require every product observation to pass. Ordinary case failures remain recorded while independent cases continue. Cancellation/stopped evidence blocks later tool calls and fixture scenarios; uncertain fixture cleanup halts collection. Report cleanup confirms owned fixture exit and temporary-directory removal, not universal product cleanup. For a focused rerun, append `--scenario minimized --engine reference`; a partial rerun does not replace full coverage.
+
+On 2026-10-30, reference **0.5.3** and Pi **0.1.0** ran from WSL2 through private Windows Node **22.23.4**, Windows build series **26200**. The final 24-case report recorded **23 passing checks and one retained reference minimized-capture failure**, with cleanup confirmed:
+
+| Observation | Reference | Pi | Disposition |
+| --- | --- | --- | --- |
+| Normal native/scaled and covered green fixture | Correct green center pixels, PrintWindow, physical mapping within independent fixture bounds | Same known content and valid mapping | Scoped fixture pass, not every display/capture path |
+| Black target behind magenta cover | Flagged `screen-region`, `occludedPossible: true`; target content was not established | WGC with independently verified black center | Both uncertainty reporting and actual method are retained; no general performance/superiority claim |
+| Independently minimized green target | `ok: true`, unflagged PrintWindow caption at offscreen bounds near (-31993,-32000), no known green client content | Desktop fallback explicitly marked `windowCaptureFailed` | Reference outcome fails the fixture's “known target content or explicit unavailable/inconclusive” oracle; retain for #37 disposition rather than copy it into Pi |
+| Wrong owner and closed target | Explicit failure, no image | Explicit failure, no image | Expected negative outcomes |
+| OCR native/scaled and literal metacharacter miss | Recognized expected text; no regex interpretation or invented IDs | Same semantic checks | Known-label fixture pass |
+| Painted-ink localization diagnostic | Native first-word X offset **+7 px**, scaled **+6 px** relative to independently rendered ink; Y offset 0 | Native offset 0; scaled approximately (+0.13,-0.36) px | Diagnostic difference, not a pixel-perfect OCR assertion; investigate before generalizing coordinate accuracy |
+| Clipped fourth row | Three expected labels plus garbled extra recognized text | Three expected labels | Actual text retained; no assumption that clipped OCR must agree |
+| Minimized OCR | Empty caption OCR with no query match and no conclusive-absence claim | Explicit `OCR_CAPTURE_FAILED` refusal | Different observable outcomes, not silently normalized to identical results |
+
+The existing Pi native capture and OCR regressions also passed against the extended non-activating fixtures. Type checking, linting, all 42 portable tests, build and package/documentation checks passed. The live Pi regressions used a temporary Windows-readable copy of the runtime test dependency because Windows Node cannot resolve the worktree's absolute Linux dependency symlink; production source was unchanged.
+
+The original overly specific minimized assertion required Pi's fallback flag from both engines. It was replaced with the semantic oracle above and a fixture-reported minimized-state check. The retained reference caption result still fails that broader oracle; the test adjustment did not erase the observation. No production capture/OCR code was changed.
+
+Remaining capture/OCR acceptance is grouped into: (1) 100/150/200% mixed-DPI layouts, negative-origin monitors and changed primary/display layout, checking known fixture points before any input; (2) missing-language/WinRT availability and protected/elevated surfaces on suitable test installations; and (3) physical visual-targeting acceptance after the user enables the dedicated desktop runs. These are not inferred from the single tested display layout. The user currently deferred physical-input runs; #6/#7/#21 retain the broader release obligations.
+
 ## Dedicated physical-input runners
 
 These runners require **Windows Node on a dedicated interactive test desktop**. A WSL `npm` command normally runs Linux Node and is not the right entry point. Build the checkout and call the health tool once to provision the verified private runtime. Then open Windows PowerShell on the dedicated desktop, change to the built checkout, read the runner sources, and use the tested Windows x64 runtime:
