@@ -43,8 +43,8 @@ partial class StopBridge {
       ReleaseFrame();FrameError="";
       if(Width<2 || Height<2){FrameError="Indicator frame has invalid dimensions";return;}
       try {
-      using(Bitmap image=new Bitmap(Width,Height,System.Drawing.Imaging.PixelFormat.Format32bppPArgb))
-      using(Graphics graphics=Graphics.FromImage(image)) {
+      using(Bitmap image=new Bitmap(Width,Height,System.Drawing.Imaging.PixelFormat.Format32bppPArgb)) {
+        using(Graphics graphics=Graphics.FromImage(image)) {
         graphics.Clear(Color.Transparent);
         graphics.CompositingMode=System.Drawing.Drawing2D.CompositingMode.SourceCopy;
         float scale=Math.Max(1f,Math.Min(2f,Width/1920f));
@@ -52,6 +52,7 @@ partial class StopBridge {
         for(int inset=0;inset<glow && Width-2*inset>1 && Height-2*inset>1;inset++) {
           Color color=inset<core?Color.FromArgb(235,150,184,255):Color.FromArgb((int)(175*Math.Pow(1-(inset-core)/(double)(glow-core),2.2)),77,124,254);
           using(Pen pen=new Pen(color,1))graphics.DrawRectangle(pen,inset,inset,Width-2*inset-1,Height-2*inset-1);
+        }
         }
         frameBitmap=image.GetHbitmap(Color.FromArgb(0));
       }
@@ -179,6 +180,9 @@ partial class StopBridge {
     }
     void Apply(IndicatorWindow form,bool visible) {
       if(!visible) { form.Hide();return; }
+      // A failed frame stays hidden until layout/configuration rebuilds it.
+      // Do not repeatedly show and hide a failing layered window on each tick.
+      if(form.IsFrame && form.FrameError.Length>0)return;
       if(!form.Visible) {
         form.Show();EnableWindow(form.Handle,false);
         if(form.IsFrame) {if(!form.PresentFrame()){form.Hide();return;}}
