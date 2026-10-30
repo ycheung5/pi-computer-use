@@ -419,6 +419,12 @@ Run `test:browser:comparison:oracle -- /path/to/reference edge --verify-profile-
 
 The live runs use a private Windows-readable copy of the worktree's tests, built worker, native assets and locked runtime dependencies. Windows Node cannot follow the worktree's absolute Linux dependency symlink. Source/copy hashes are recorded with the local evidence; the copy is removed afterward. No production code, daily profile, live-model request, physical input or clipboard mutation is part of this baseline.
 
+## Pointer comparison preparation
+
+Ticket #30 preparation adds a safe WSL `npm run test:native:pointer:physical -- --list` plan and an optional pinned-reference backend to the existing runner. Portable subprocess tests copy the runner alone into a fresh directory: Pi/reference listing succeeds without build/resources, both execution modes refuse without desktop opt-in before backend import or fixture creation, invalid options fail, and no extra files appear. The original test failed on the static missing-backend import, then passed after moving startup behind the gate.
+
+Only that CLI boundary was run. No opt-in was set, no fixture compiled/launched and no native action dispatched. The fixture's new counter/hover/button-release oracle and both physical branches remain **unvalidated**. Five prepared pointer cases do not cover successful drop, independent foreground restoration, interference/menu/dialog cases or the paired window-management requirements; those remain explicitly pending in the plan and #30 stays open. See [pointer validation](pointer.md#validation) and [window management](windows.md#launching-and-managing-windows).
+
 ## Dedicated physical-input runners
 
 These runners require **Windows Node on a dedicated interactive test desktop**. A WSL `npm` command normally runs Linux Node and is not the right entry point. Build the checkout and call the health tool once to provision the verified private runtime. Then open Windows PowerShell on the dedicated desktop, change to the built checkout, read the runner sources, and use the tested Windows x64 runtime:

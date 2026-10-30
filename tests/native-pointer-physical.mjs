@@ -6,15 +6,53 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import computerUse from "../dist/extension.js";
-import { computerUseHost } from "./native-host.mjs";
 
-assert.equal(process.platform, "win32");
+const options = process.argv.slice(2);
+for (const option of options)
+  assert.ok(
+    option === "--list" || /^--(engine|reference)=.+/.test(option),
+    `Unknown option: ${option}`,
+  );
+const option = (name) =>
+  options.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
+const engine = option("engine") ?? "pi";
+assert.ok(
+  ["pi", "reference"].includes(engine),
+  "engine must be pi or reference",
+);
+if (options.includes("--list")) {
+  console.log(
+    JSON.stringify({
+      engine,
+      executed: false,
+      cases: [
+        "scaled-click",
+        "double-click",
+        "hover",
+        "coordinate-scroll",
+        "drag-cancellation-release",
+      ],
+      pending: [
+        "successful-drag-drop",
+        "foreground-restoration",
+        "user-interference",
+        "menus-dialogs",
+        "window-launch-close-veto",
+        "same-process-distractors",
+        "replaced-targets",
+        "mixed-dpi-negative-origin",
+        "physical-stop",
+      ],
+    }),
+  );
+  process.exit(0);
+}
 assert.equal(
   process.env.PI_CU_DEDICATED_INPUT_DESKTOP,
   "1",
-  "Run only on a dedicated interactive test desktop; read docs/pointer.md first.",
+  "Opt in with PI_CU_DEDICATED_INPUT_DESKTOP=1 only on a dedicated interactive test desktop; physical runs are deferred.",
 );
+assert.equal(process.platform, "win32", "Run with Windows Node after building");
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-controls-"));
 const executable = join(folder, "fixture.exe");
 process.env.PI_CU_SETTINGS_FILE = join(folder, "settings.json");
@@ -48,21 +86,91 @@ const target = {
   nativeWindowHandle: Number(ready.toString().trim()),
   processId: fixture.pid,
 };
-const host = computerUseHost();
-computerUse(host.api);
-const call = async (action, args = {}) => {
-  const tool = host.tools.get(`windows_computer_use_${action}`);
-  assert.ok(tool, `Pi registers ${action}`);
-  return (
-    await tool.execute(action, { ...target, ...args }, undefined, undefined, {})
-  ).details;
-};
-const find = async (query, controlType) => {
-  const result = await call("find", { query, controlType, ocrFallback: false });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  return result.matches;
-};
+let host;
+let client;
+let execute;
+let watchdog;
 try {
+  if (engine === "pi") {
+    const [{ default: computerUse }, { computerUseHost }] = await Promise.all([
+      import("../dist/extension.js"),
+      import("./native-host.mjs"),
+    ]);
+    host = computerUseHost();
+    computerUse(host.api);
+    execute = async (action, args, signal) => {
+      const tool = host.tools.get(`windows_computer_use_${action}`);
+      assert.ok(tool, `Pi registers ${action}`);
+      return (await tool.execute(action, args, signal, undefined, {})).details;
+    };
+  } else {
+    const { createComparisonClient } = await import("./comparison-client.mjs");
+    client = await createComparisonClient({
+      engine,
+      referencePath: option("reference"),
+      cwd: folder,
+    });
+    execute = (action, args, signal) => client.execute(action, args, signal);
+  }
+  const call = async (action, args = {}, signal) => {
+    try {
+      const result = await execute(action, { ...target, ...args }, signal);
+      console.log(JSON.stringify({ engine, action, result }));
+      return result;
+    } catch (error) {
+      console.log(
+        JSON.stringify({
+          engine,
+          action,
+          error: { message: error.message, rpcError: error.rpcError },
+        }),
+      );
+      throw error;
+    }
+  };
+  // Fixture-owned state is independent of both engines' targeting/remembered foreground.
+  const observePointer = () =>
+    new Promise((resolve, reject) => {
+      let buffered = "";
+      const timeout = setTimeout(
+        () => finish(new Error("pointer oracle timed out")),
+        5000,
+      );
+      const receive = (chunk) => {
+        buffered += chunk.toString();
+        const lines = buffered.split(/\r?\n/);
+        buffered = lines.pop();
+        for (const line of lines) {
+          if (line.startsWith("pointer-state:")) {
+            const [clicks, doubles, hover, scroll, held, releases] = line
+              .slice(14)
+              .split(":")
+              .map(Number);
+            finish(null, { clicks, doubles, hover, scroll, held, releases });
+            return;
+          }
+        }
+      };
+      function finish(error, state) {
+        clearTimeout(timeout);
+        fixture.stdout.off("data", receive);
+        if (error) reject(error);
+        else resolve(state);
+      }
+      fixture.stdout.on("data", receive);
+      fixture.stdin.write("observe-pointer\n");
+    });
+  const find = async (query, controlType) => {
+    const result = await call("find", {
+      query,
+      controlType,
+      ocrFallback: false,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    return result.matches;
+  };
+  const initial = await observePointer();
+  assert.equal(initial.clicks, 0);
   const button = (await find("Background action", "Button"))[0];
   const screenPoint = {
     x: Math.round(button.boundingBox.centerX),
@@ -85,14 +193,25 @@ try {
     (await find("Clicked 1", "Text")).length,
     "physical click reached the intended scaled point",
   );
+  assert.equal((await observePointer()).clicks, 1);
+  const surface = (await find("Pointer fixture surface", "Pane"))[0];
   const doubled = await call("double_click", {
-    elementId: button.id,
+    elementId: surface.id,
     dispatch: "foreground",
   });
   assert.equal(doubled.ok, true, JSON.stringify(doubled));
+  assert.equal(
+    (await observePointer()).doubles,
+    1,
+    "fixture received exactly one double click",
+  );
   const moved = await call("move", { elementId: button.id });
   assert.equal(moved.ok, true, JSON.stringify(moved));
-  assert.match(moved.pointer, /requested hover/);
+  assert.equal(
+    (await observePointer()).hover,
+    1,
+    "fixture independently observed hover",
+  );
   const panel = (await find("Background scroller", "Pane"))[0];
   const scrolled = await call("scroll", {
     x: Math.round(panel.boundingBox.centerX),
@@ -100,7 +219,11 @@ try {
     deltaY: 240,
   });
   assert.equal(scrolled.ok, true, JSON.stringify(scrolled));
-  const surface = (await find("Pointer fixture surface", "Pane"))[0];
+  assert.ok(
+    (await observePointer()).scroll > initial.scroll,
+    "inner panel actually scrolled",
+  );
+  const beforeDrag = await observePointer();
   const start = {
     x: Math.round(surface.boundingBox.centerX),
     y: Math.round(surface.boundingBox.centerY),
@@ -110,10 +233,14 @@ try {
     y: start.y,
   }));
   const controller = new AbortController();
-  let watchdog;
   const down = new Promise((resolve, reject) => {
+    let buffered = "";
     const receive = (chunk) => {
-      if (chunk.toString().includes("pointer-down")) {
+      buffered += chunk.toString();
+      if (
+        buffered.includes("pointer-down\n") ||
+        buffered.includes("pointer-down\r\n")
+      ) {
         fixture.stdout.off("data", receive);
         clearTimeout(watchdog);
         controller.abort();
@@ -127,30 +254,36 @@ try {
       reject(new Error("fixture did not receive mouse down"));
     }, 15000);
   });
-  const dragged = host.tools
-    .get("windows_computer_use_drag")
-    .execute(
-      "cancel-drag",
-      { ...target, path },
-      controller.signal,
-      undefined,
-      {},
-    );
+  const dragged = call("drag", { path }, controller.signal);
   const result = dragged.then(
-    () => {
-      throw new Error("cancelled drag should reject");
+    (value) => {
+      assert.equal(value.ok, false, "cancelled drag must not claim success");
+      assert.match(
+        value.error ?? JSON.stringify(value),
+        /abort|STOPPED|CANCELLED/i,
+      );
     },
     (error) => assert.match(String(error), /abort|STOPPED|CANCELLED/i),
   );
-  await down;
-  await result;
-  await host.emit("before_agent_start", { messageType: "user" });
+  await Promise.all([down, result]);
+  let afterDrag;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    afterDrag = await observePointer();
+    if (afterDrag.held === 0 && afterDrag.releases > beforeDrag.releases) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.equal(
+    afterDrag.held,
+    0,
+    "OS reports left button released after cancellation",
+  );
   assert.ok(
-    (await find("Released 1", "Text")).length,
-    "button was released on cancellation",
+    afterDrag.releases > beforeDrag.releases,
+    "fixture received release after cancelled drag",
   );
   console.log(
     JSON.stringify({
+      engine,
       ok: true,
       physicalInput: true,
       scaledPoint: true,
@@ -165,7 +298,9 @@ try {
     }),
   );
 } finally {
-  for (const handler of host.shutdown) await handler();
+  clearTimeout(watchdog);
+  for (const handler of host?.shutdown ?? []) await handler();
+  await client?.dispose();
   if (fixture.exitCode === null) {
     const closed = once(fixture, "close");
     fixture.stdin.end("stop\n");
