@@ -45,6 +45,8 @@
     "test:reference:capture:report": "node tests/reference-capture-report.mjs",
     "test:native:ocr": "node tests/native-ocr.mjs",
     "test:stop": "node tests/stop-host.mjs",
+    "test:stop:busy": "node tests/native-stop-busy.mjs",
+    "test:stop:busy:check": "node tests/stop-busy-check.mjs",
     "test:browser": "node tests/browser-host.mjs",
     "test:native:controls": "node tests/native-controls.mjs",
     "test:native:waits": "node tests/native-waits.mjs",
