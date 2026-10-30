@@ -55,6 +55,10 @@ export class WorkerClient {
     signal?.throwIfAborted();
     if (this.retirement) await this.retirement;
     if (this.retirementFailure) throw this.retirementFailure;
+    if (this.inputActive && !this.child)
+      throw new Error(
+        "INPUT_CLEANUP_UNCONFIRMED: input owner exited without cleanup acknowledgment",
+      );
     if (this.child && this.failure) await this.retire(this.failure.message);
     if (this.child) return this.child;
     const launchSignal = signal

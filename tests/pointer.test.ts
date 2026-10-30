@@ -60,3 +60,39 @@ test("worker input cleanup notices prevent outer retirement until cleanup acknow
     await worker.dispose();
   }
 });
+
+test("input-owner exit without cleanup acknowledgment prevents replacement work", async () => {
+  let launches = 0;
+  const peer = `require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.action==='click'){console.log(JSON.stringify({event:'input_state',active:true}));setTimeout(()=>process.exit(1),30);return;}console.log(JSON.stringify({id:r.id,result:{ok:true,action:r.action}}));});`;
+  const worker = new WorkerClient({
+    launch: async () => {
+      launches++;
+      return { executable: process.execPath, args: ["-e", peer] };
+    },
+  });
+  await assert.rejects(worker.execute("click", {}), /WORKER_EXITED/);
+  await assert.rejects(
+    worker.execute("health", {}),
+    /INPUT_CLEANUP_UNCONFIRMED/,
+  );
+  assert.equal(launches, 1, "no replacement worker is launched");
+  await assert.rejects(worker.dispose(), /INPUT_CLEANUP_UNCONFIRMED/);
+});
+
+test("input owner with acknowledged cleanup permits replacement after exit", async () => {
+  let launches = 0;
+  const peer = `require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.action==='click'){console.log(JSON.stringify({event:'input_state',active:true}));console.log(JSON.stringify({event:'input_state',active:false}));setTimeout(()=>process.exit(1),30);return;}console.log(JSON.stringify({id:r.id,result:{ok:true,action:r.action}}));});`;
+  const worker = new WorkerClient({
+    launch: async () => {
+      launches++;
+      return { executable: process.execPath, args: ["-e", peer] };
+    },
+  });
+  try {
+    await assert.rejects(worker.execute("click", {}), /WORKER_EXITED/);
+    assert.equal((await worker.execute("health", {})).ok, true);
+    assert.equal(launches, 2);
+  } finally {
+    await worker.dispose();
+  }
+});
