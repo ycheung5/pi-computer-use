@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import test from "node:test";
 import {
   compareEditorObservation,
@@ -74,4 +75,22 @@ test("clipboard input retains its owner until both cleanup acknowledgments or a 
     { ok: false, error: "CLIPBOARD_HELPER_TIMEOUT", cleanupConfirmed: true },
   ])
     assert.equal(inputCleanupConfirmed(result), false);
+});
+
+test("retained owner remains alive without any other active handles", async () => {
+  const { spawn } = await import("node:child_process");
+  const script = `import { retainUnconfirmedOwner } from ${JSON.stringify(new URL("./clipboard-editor-observation.mjs", import.meta.url).href)}; console.log("ready"); await retainUnconfirmedOwner();`;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const closed = once(child, "close");
+  try {
+    const [chunk] = await once(child.stdout, "data");
+    assert.match(String(chunk), /ready/);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(child.exitCode, null, "retained process must stay alive");
+  } finally {
+    child.kill();
+    await closed;
+  }
 });

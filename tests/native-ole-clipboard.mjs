@@ -142,6 +142,7 @@ const {
   compareEditorObservation,
   isSafeClipboardRefusal,
   inputCleanupConfirmed,
+  retainUnconfirmedOwner,
 } = await import("./clipboard-editor-observation.mjs");
 const { createComparisonClient } = await import("./comparison-client.mjs");
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-ole-clipboard-"));
@@ -526,7 +527,7 @@ try {
         folder,
       }),
     );
-    await new Promise(() => {});
+    await retainUnconfirmedOwner();
   }
   try {
     if (fixtureReady && !fixtureExit) {

@@ -39,3 +39,13 @@ export function inputCleanupConfirmed(result) {
     result.clipboardCleanupConfirmed === true || isSafeClipboardRefusal(result)
   );
 }
+
+// An unresolved promise alone does not keep Node alive once child pipes close.
+export async function retainUnconfirmedOwner() {
+  const keepAlive = setInterval(() => {}, 1000);
+  try {
+    await new Promise(() => {});
+  } finally {
+    clearInterval(keepAlive);
+  }
+}

@@ -17,3 +17,5 @@ export function inputCleanupConfirmed(
       }
     | undefined,
 ): boolean;
+
+export function retainUnconfirmedOwner(): Promise<never>;
