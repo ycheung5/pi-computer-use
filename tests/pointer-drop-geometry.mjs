@@ -2,8 +2,14 @@ import assert from "node:assert/strict";
 
 export function validateGeometry(target, root, geometry) {
   assert.equal(root.ok, true, "window observation failed");
-  assert.equal(root.nativeWindowHandle, target.nativeWindowHandle);
-  assert.equal(root.processId, target.processId);
+  for (const key of ["nativeWindowHandle", "processId"]) {
+    const claims = [root[key], root.tree?.[key]].filter(
+      (value) => value !== undefined,
+    );
+    assert.ok(claims.length > 0, `missing observed ${key}`);
+    for (const claim of claims)
+      assert.equal(claim, target[key], `contradictory observed ${key}`);
+  }
   assert.equal(geometry.nativeWindowHandle, target.nativeWindowHandle);
   assert.equal(geometry.processId, target.processId);
   assert.equal(geometry.visible, true);

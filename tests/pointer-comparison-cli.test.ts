@@ -136,6 +136,45 @@ test("Drop fixture geometry requires finite visible points within the observed o
     start: { x: -40, y: 40 },
     end: { x: 210, y: 210 },
   });
+  const dshRoot = {
+    ok: true,
+    tree: {
+      nativeWindowHandle: 40,
+      processId: 77,
+      boundingBox: root.tree.boundingBox,
+    },
+  };
+  assert.deepEqual(validateGeometry(target, dshRoot, geometry), {
+    start: { x: -40, y: 40 },
+    end: { x: 210, y: 210 },
+  });
+  assert.throws(() =>
+    validateGeometry(
+      target,
+      {
+        ...root,
+        tree: { ...root.tree, nativeWindowHandle: 41, processId: 77 },
+      },
+      geometry,
+    ),
+  );
+  assert.throws(() =>
+    validateGeometry(
+      target,
+      {
+        ...root,
+        tree: { ...root.tree, nativeWindowHandle: 40, processId: 78 },
+      },
+      geometry,
+    ),
+  );
+  assert.throws(() =>
+    validateGeometry(
+      target,
+      { ok: true, tree: { boundingBox: root.tree.boundingBox } },
+      geometry,
+    ),
+  );
   assert.throws(() =>
     validateGeometry(target, root, { ...geometry, visible: false }),
   );
