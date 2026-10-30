@@ -6,12 +6,25 @@ using System.Windows.Automation.Provider;
 using System.Windows.Forms;
 
 class UnknownTypeControl : Control, IRawElementProviderSimple {
+  public static int Mode;
+  public static readonly ManualResetEvent Release = new ManualResetEvent(false);
+  public static int Entries;
   public ProviderOptions ProviderOptions { get { return ProviderOptions.ServerSideProvider; } }
   public IRawElementProviderSimple HostRawElementProvider { get { return AutomationInteropProvider.HostProviderFromHandle(Handle); } }
   public object GetPatternProvider(int id) { return null; }
   public object GetPropertyValue(int id) {
     if (id == AutomationElementIdentifiers.ControlTypeProperty.Id) return 50040;
-    if (id == AutomationElementIdentifiers.NameProperty.Id) return "Newer UIA control";
+    if (id == AutomationElementIdentifiers.NameProperty.Id) {
+      int mode = Interlocked.Exchange(ref Mode, 0);
+      if (mode != 0) {
+        Interlocked.Increment(ref Entries);
+        Console.WriteLine("provider:entered:" + (mode == 1 ? "fault" : "hang")); Console.Out.Flush();
+        if (mode == 1) throw new COMException("Owned provider intentional failure", unchecked((int)0x80004005));
+        Release.WaitOne(12000);
+        Console.WriteLine("provider:released"); Console.Out.Flush();
+      }
+      return "Newer UIA control";
+    }
     if (id == AutomationElementIdentifiers.IsControlElementProperty.Id || id == AutomationElementIdentifiers.IsContentElementProperty.Id) return true;
     return null;
   }
@@ -32,7 +45,23 @@ class NullProviderFixture {
     form.Controls.Add(new UnknownTypeControl { Top = 45, Width = 250, Height = 25 });
     form.Controls.Add(new Button { Text = "After custom provider", AccessibleName = "After custom provider", Top = 85, Width = 250 });
     form.Shown += delegate { Console.WriteLine(form.Handle.ToInt64()); Console.Out.Flush(); };
-    ThreadPool.QueueUserWorkItem(delegate { Console.ReadLine(); form.BeginInvoke((Action)delegate { form.Close(); }); });
+    ThreadPool.QueueUserWorkItem(delegate {
+      string line;
+      while ((line = Console.ReadLine()) != null) {
+        if (line == "arm:fault" || line == "arm:hang") {
+          UnknownTypeControl.Release.Reset();
+          Interlocked.Exchange(ref UnknownTypeControl.Mode, line == "arm:fault" ? 1 : 2);
+          Console.WriteLine("armed"); Console.Out.Flush();
+        } else if (line == "release") {
+          UnknownTypeControl.Release.Set();
+          Console.WriteLine("release:ack"); Console.Out.Flush();
+        } else if (line == "state") {
+          Console.WriteLine("entries:" + UnknownTypeControl.Entries); Console.Out.Flush();
+        } else break;
+      }
+      UnknownTypeControl.Release.Set();
+      form.BeginInvoke((Action)delegate { form.Close(); });
+    });
     Application.Run(form);
   }
 }

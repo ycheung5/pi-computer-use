@@ -22,12 +22,47 @@ import { nativeWorkerLaunch } from "../dist/launcher.js";
 import { ReferenceClient, referenceResult } from "./reference-client.mjs";
 
 let activeCase;
+const ownedPids = new Set(),
+  ownedTitles = new Set();
+function relevantEvidence(action, result) {
+  if (action !== "list_windows" || !result || typeof result !== "object")
+    return result;
+  const retained = { ...result };
+  if (Array.isArray(result.windows)) {
+    retained.windows = result.windows.filter(
+      (window) =>
+        ownedPids.has(window.processId) ||
+        [...ownedTitles].some((title) => window.name?.includes(title)),
+    );
+    retained.observedWindowCount = result.windows.length;
+    retained.omittedUnrelatedWindowCount =
+      result.windows.length - retained.windows.length;
+  }
+  if (result.mcpResult?.content)
+    retained.mcpResult = {
+      ...result.mcpResult,
+      content: result.mcpResult.content.map((block) => {
+        if (block.type !== "text") return block;
+        try {
+          return {
+            ...block,
+            text: JSON.stringify(
+              relevantEvidence(action, JSON.parse(block.text)),
+            ),
+          };
+        } catch {
+          return block;
+        }
+      }),
+    };
+  return retained;
+}
 async function retainCall(action, args, invoke) {
   const observation = { action, args };
   activeCase?.observations.push(observation);
   try {
     const result = await invoke();
-    observation.response = result;
+    observation.response = relevantEvidence(action, result);
     return result;
   } catch (error) {
     observation.error = String(error);
@@ -67,12 +102,19 @@ async function recordCase(report, name, id, expected, run) {
 }
 if (process.argv.includes("--diagnostic-report")) {
   const diagnostic = { cases: [] };
+  ownedPids.add(42);
   await recordCase(
     diagnostic,
     "synthetic",
     "depth",
     "Retain raw response",
     async () => {
+      await retainCall("list_windows", {}, async () => ({
+        windows: [
+          { processId: 42, name: "owned" },
+          { processId: 99, name: "private title" },
+        ],
+      }));
       const r = await retainCall(
         "accessibility_tree",
         { maxDepth: 0 },
@@ -109,7 +151,7 @@ if (process.platform === "linux") {
   const output = process.env.PI_CU_RELEASE_OUTPUT
     ? await win(process.env.PI_CU_RELEASE_OUTPUT)
     : undefined;
-  const code = `import{pathToFileURL}from'node:url';${output ? `process.env.PI_CU_RELEASE_OUTPUT=${JSON.stringify(output)};` : "delete process.env.PI_CU_RELEASE_OUTPUT;"}process.argv=[process.execPath,${JSON.stringify(script)},${JSON.stringify(reference)}];await import(pathToFileURL(${JSON.stringify(script)}).href);`;
+  const code = `import{pathToFileURL}from'node:url';${output ? `process.env.PI_CU_RELEASE_OUTPUT=${JSON.stringify(output)};` : "delete process.env.PI_CU_RELEASE_OUTPUT;"}process.argv=[process.execPath,${JSON.stringify(script)},${JSON.stringify(reference)},...${JSON.stringify(process.argv.slice(3))}];await import(pathToFileURL(${JSON.stringify(script)}).href);`;
   const child = run(launch.executable, ["--input-type=module", "-e", code], {
     cwd: launch.cwd,
     timeout: 300000,
@@ -118,11 +160,13 @@ if (process.platform === "linux") {
   child.child.stdin.end();
   try {
     const r = await child;
-    process.stdout.write(r.stdout);
-    process.stderr.write(r.stderr);
+    await new Promise((done) => process.stdout.write(r.stdout, done));
+    await new Promise((done) => process.stderr.write(r.stderr, done));
   } catch (error) {
-    process.stdout.write(error.stdout ?? "");
-    process.stderr.write(error.stderr ?? String(error));
+    await new Promise((done) => process.stdout.write(error.stdout ?? "", done));
+    await new Promise((done) =>
+      process.stderr.write(error.stderr ?? String(error), done),
+    );
     process.exitCode = Number.isInteger(error.code) ? error.code : 1;
   }
   process.exit(process.exitCode ?? 0);
@@ -158,6 +202,7 @@ for (const [name, path] of Object.entries({
   piWorker: join(root, "dist", "worker.js"),
   piControls: join(root, "assets", "controls.cs"),
   fixture: join(root, "tests", "controls-fixture.cs"),
+  providerFixture: join(root, "tests", "nullable-uia-fixture.cs"),
 })) {
   report.artifacts[name] = createHash("sha256")
     .update(await readFile(path))
@@ -233,6 +278,7 @@ async function fixture(source, title, extra = []) {
           });
         });
   fixtures.push(child);
+  ownedPids.add(child.pid);
   const first = await next();
   const target = {
     nativeWindowHandle: Number(first),
@@ -242,6 +288,7 @@ async function fixture(source, title, extra = []) {
   assert.ok(target.nativeWindowHandle > 0, `Invalid fixture identity ${first}`);
   return {
     child,
+    next,
     target,
     title,
     command: async (command) => {
@@ -284,9 +331,9 @@ async function engine(name) {
       throw error;
     }
     return {
-      call: async (action, args) =>
+      call: async (action, args, signal) =>
         retainCall(action, args, async () =>
-          referenceResult(await client.call(action, args)),
+          referenceResult(await client.call(action, args, signal)),
         ),
       close: () => client.close(),
     };
@@ -301,9 +348,9 @@ async function engine(name) {
   });
   const operation = randomUUID();
   return {
-    call: (action, args) =>
+    call: (action, args, signal) =>
       retainCall(action, args, () =>
-        worker.execute(action, args, undefined, operation),
+        worker.execute(action, args, signal, operation),
       ),
     close: () => worker.dispose(),
   };
@@ -829,9 +876,102 @@ async function runProvider(name) {
     await stop(owned.child, "\n");
   }
 }
+async function runProviderFailures(name) {
+  const refs = [
+    "UIAutomationClient.dll",
+    "UIAutomationProvider.dll",
+    "UIAutomationTypes.dll",
+    "WindowsBase.dll",
+  ].map((n) => `/r:${join(framework, "WPF", n)}`);
+  for (const mode of ["fault", "hang"]) {
+    const owned = await fixture("nullable-uia-fixture", "", refs);
+    const client = await engine(name);
+    try {
+      await record(
+        name,
+        `provider.${mode}`,
+        mode === "fault"
+          ? "Owned fault trigger and honest returned metadata"
+          : "Bound caller cancellation of an entered provider, then release fixture",
+        async () => {
+          await client.call("snapshot", {
+            ...owned.target,
+            includeScreenshot: false,
+          });
+          assert.equal(await owned.command(`arm:${mode}`), "armed");
+          const controller = new AbortController();
+          const started = performance.now();
+          let returned;
+          const pending = client
+            .call(
+              "snapshot",
+              {
+                ...owned.target,
+                includeScreenshot: false,
+                treeTimeoutMs: 3000,
+              },
+              controller.signal,
+            )
+            .then(
+              (result) => {
+                returned = { result };
+              },
+              (error) => {
+                returned = { error: String(error) };
+              },
+            );
+          let entered, settledBeforeAbort;
+          const outcome = () => ({
+            entered,
+            settledBeforeAbort,
+            elapsedMs: Math.round(performance.now() - started),
+            ...returned,
+          });
+          try {
+            entered = await owned.next();
+            assert.equal(entered, `provider:entered:${mode}`);
+            if (mode === "hang") {
+              await delay(200);
+              settledBeforeAbort = returned !== undefined;
+              controller.abort(new Error("Owned provider cancellation"));
+            }
+            await pending;
+            if (mode === "hang") {
+              assert.equal(
+                settledBeforeAbort,
+                false,
+                "Provider call must still be pending at cancellation",
+              );
+              assert.ok(
+                performance.now() - started < 8000,
+                "Cancellation must bound the blocked call before automatic release",
+              );
+              assert.ok(
+                returned.error || returned.result?.ok === false,
+                "Cancelled call must not claim successful observation",
+              );
+            }
+            return outcome();
+          } catch (error) {
+            error.observation = outcome();
+            throw error;
+          } finally {
+            // Independent fixture IPC always releases the owned provider before disposal.
+            owned.child.stdin.write("release\n");
+            await pending;
+          }
+        },
+      );
+    } finally {
+      await closeClient(client);
+      await stop(owned.child, "\n");
+    }
+  }
+}
 async function runChromium() {
   const title = `Pi paired Chromium ${randomUUID()}`,
     html = join(folder, "page.html");
+  ownedTitles.add(title);
   await writeFile(
     html,
     `<!doctype html><title>${title}</title><label>Fixture browser editor<input value="browser fixture text"></label><button>Fixture browser action</button>`,
@@ -953,10 +1093,13 @@ async function runChromium() {
 }
 try {
   for (const name of ["reference", "pi"]) {
-    await runNative(name);
-    await runProvider(name);
+    if (!process.argv.includes("--provider-failures")) {
+      await runNative(name);
+      await runProvider(name);
+    }
+    await runProviderFailures(name);
   }
-  await runChromium();
+  if (!process.argv.includes("--provider-failures")) await runChromium();
 } catch (error) {
   report.fatal = String(error);
 } finally {
@@ -1011,16 +1154,6 @@ try {
   }
   report.cleanupConfirmed = clean;
 }
-report.notRun.push({
-  id: "provider.explicit-failure",
-  reason:
-    "The unknown-control provider returned a traversable tree in both engines; a deliberately failing provider and its explicit error metadata were not exercised.",
-});
-report.notRun.push({
-  id: "provider.hung-call",
-  reason:
-    "No deliberately hanging provider injected; configured traversal budget is reported but cannot bound a synchronous provider call.",
-});
 report.ok =
   !report.fatal &&
   report.cleanupConfirmed &&

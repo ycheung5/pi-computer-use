@@ -18,8 +18,13 @@ if (process.argv.includes("--diagnostics")) {
   );
   const [depth, cancelled] = report.cases;
   assert.equal(depth.status, "fail");
-  assert.equal(depth.observations[0].response.truncated, false);
-  assert.deepEqual(depth.observations[0].response.tree, { name: "owned" });
+  assert.deepEqual(depth.observations[0].response.windows, [
+    { processId: 42, name: "owned" },
+  ]);
+  assert.equal(depth.observations[0].response.omittedUnrelatedWindowCount, 1);
+  assert.ok(!result.stdout.includes("private title"));
+  assert.equal(depth.observations[1].response.truncated, false);
+  assert.deepEqual(depth.observations[1].response.tree, { name: "owned" });
   assert.equal(cancelled.id, "cancel");
   assert.equal(cancelled.expected, "Retain interrupted case");
   assert.match(cancelled.observations[0].error, /COMPUTER_USE_CANCELLED/);
@@ -36,6 +41,7 @@ try {
     [
       fileURLToPath(new URL("./accessibility-comparison.mjs", import.meta.url)),
       process.argv[2],
+      ...(process.argv.includes("--providers") ? ["--provider-failures"] : []),
     ],
     { timeout: 300000, maxBuffer: 8 * 1024 * 1024 },
   );
@@ -50,7 +56,9 @@ assert.ok(
   `CLI must preserve paired report even for mismatches: ${result.stderr}`,
 );
 const report = JSON.parse(line);
-assert.ok(report.cases.length >= 30);
+assert.ok(
+  report.cases.length >= (process.argv.includes("--providers") ? 4 : 30),
+);
 assert.ok(report.cases.some((row) => row.engine === "reference"));
 assert.ok(report.cases.some((row) => row.engine === "pi"));
 assert.ok(
@@ -58,7 +66,9 @@ assert.ok(
 );
 assert.equal(report.physicalInput, false);
 assert.equal(report.cleanupConfirmed, true);
-for (const engine of ["reference", "pi"]) {
+for (const engine of process.argv.includes("--providers")
+  ? []
+  : ["reference", "pi"]) {
   const row = report.cases.find(
     (row) => row.engine === engine && row.id === "native.set-value",
   );
