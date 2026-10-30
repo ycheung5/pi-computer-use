@@ -951,21 +951,21 @@ async function runProviderFailures(name) {
               includeScreenshot: false,
             }),
           );
-          let reader, readerRetirement;
+          let reader, readerRetirement, readerCandidates;
           if (mode === "hang") {
             // operation_end exposes the mutex holder's PID through the normal
             // worker response; releasing the mutex keeps that helper alive.
             const settlement = await client.settle();
-            const candidates = (processes) =>
+            readerCandidates = (processes) =>
               descendants(processes, controllerPid).filter(
                 (p) =>
                   p.ParentProcessId === controllerPid &&
                   p.ProcessId !== settlement?.processId &&
                   !beforeWarm.some((q) => sameProcess(p, q)),
               );
-            const first = candidates(await processSnapshot());
+            const first = readerCandidates(await processSnapshot());
             await delay(100);
-            const second = candidates(await processSnapshot());
+            const second = readerCandidates(await processSnapshot());
             const persistent = second.filter((p) =>
               first.some((q) => sameProcess(p, q)),
             );
@@ -1025,7 +1025,30 @@ async function runProviderFailures(name) {
             entered = await owned.next();
             assert.equal(entered, `provider:entered:${mode}`);
             if (mode === "hang") {
-              await delay(200);
+              const firstActive = readerCandidates(await processSnapshot());
+              await delay(100);
+              const secondActive = readerCandidates(await processSnapshot());
+              readerRetirement.activeCandidates = secondActive.filter((p) =>
+                firstActive.some((q) => sameProcess(p, q)),
+              );
+              readerRetirement.liveBeforeAbort =
+                firstActive.some((p) => sameProcess(p, reader)) &&
+                secondActive.some((p) => sameProcess(p, reader));
+              readerRetirement.providerStateBeforeAbort =
+                await owned.command("provider-state");
+              if (
+                !readerRetirement.liveBeforeAbort ||
+                readerRetirement.activeCandidates.length !== 1 ||
+                !sameProcess(readerRetirement.activeCandidates[0], reader) ||
+                readerRetirement.providerStateBeforeAbort !==
+                  "provider-state:1:False"
+              ) {
+                const error = new Error(
+                  "Reader identification blocked prerequisite: warmed reader must remain uniquely persistent inside the entered provider before abort",
+                );
+                error.prerequisiteBlocked = true;
+                throw error;
+              }
               settledBeforeAbort = returned !== undefined;
               controller.abort(new Error("Owned provider cancellation"));
             }
@@ -1062,6 +1085,7 @@ async function runProviderFailures(name) {
                 await owned.command("provider-state");
               readerRetirement.oldReaderAlive = alive;
               readerRetirement.confirmed =
+                readerRetirement.liveBeforeAbort &&
                 !alive &&
                 readerRetirement.providerState === "provider-state:1:False" &&
                 performance.now() - started < 12000;

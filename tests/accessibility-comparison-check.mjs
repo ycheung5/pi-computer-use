@@ -94,6 +94,8 @@ for (const row of hangs) {
     assert.equal(evidence.confirmed, false);
   } else if (row.status === "pass") {
     assert.equal(evidence.confirmed, true);
+    assert.equal(evidence.liveBeforeAbort, true);
+    assert.equal(evidence.providerStateBeforeAbort, "provider-state:1:False");
     assert.equal(evidence.oldReaderAlive, false);
     assert.equal(evidence.providerState, "provider-state:1:False");
     assert.equal(evidence.freshReadRecovered, true);
