@@ -60,7 +60,7 @@ class OleClipboardFixture {
   STGMEDIUM medium;try{data.GetData(ref descriptor,out medium);}catch(COMException error){return "virtual-descriptor-get:"+error.ErrorCode.ToString("X8");}
   try {if(medium.tymed!=TYMED.TYMED_HGLOBAL || GlobalSize(medium.unionmember).ToUInt64()<596)return "virtual-descriptor-size";
    IntPtr memory=GlobalLock(medium.unionmember);if(memory==IntPtr.Zero)return "virtual-descriptor-lock";
-   try {if(Marshal.ReadInt32(memory)!=1 || Marshal.ReadInt32(memory,72)!=4 || Marshal.PtrToStringUni(IntPtr.Add(memory,76))!="pi-cu-fixture.txt")return "virtual-descriptor-mismatch";}
+   try {if(Marshal.ReadInt32(memory)!=1 || (Marshal.ReadInt32(memory,4) & unchecked((int)0x80000040))!=unchecked((int)0x80000040) || Marshal.ReadInt32(memory,72)!=4 || Marshal.PtrToStringUni(IntPtr.Add(memory,76))!="pi-cu-fixture.txt")return "virtual-descriptor-mismatch";}
    finally {GlobalUnlock(medium.unionmember);}
   }finally{ReleaseStgMedium(ref medium);}
   var content=new FORMATETC {cfFormat=(short)RegisterClipboardFormat("FileContents"),dwAspect=DVASPECT.DVASPECT_CONTENT,lindex=0,tymed=TYMED.TYMED_HGLOBAL};
@@ -177,7 +177,7 @@ class VirtualFileFixtureData : OleDataObject {
   if(f.cfFormat==formats[0].cfFormat)bytes=owner;
   else if(f.cfFormat==formats[1].cfFormat){
    // FILEGROUPDESCRIPTORW: DWORD count plus one 592-byte FILEDESCRIPTORW.
-   bytes=new byte[596];Buffer.BlockCopy(BitConverter.GetBytes(1),0,bytes,0,4);Buffer.BlockCopy(BitConverter.GetBytes(0x40),0,bytes,4,4);
+   bytes=new byte[596];Buffer.BlockCopy(BitConverter.GetBytes(1),0,bytes,0,4);Buffer.BlockCopy(BitConverter.GetBytes(0x80000040u),0,bytes,4,4);
    Buffer.BlockCopy(BitConverter.GetBytes(4),0,bytes,72,4);Buffer.BlockCopy(Encoding.Unicode.GetBytes("pi-cu-fixture.txt\0"),0,bytes,76,36);
   } else bytes=new byte[]{1,2,3,4};
   IntPtr data=GlobalAlloc(0x42,new UIntPtr((uint)bytes.Length));if(data==IntPtr.Zero)throw new OutOfMemoryException();
