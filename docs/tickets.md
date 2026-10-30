@@ -6,6 +6,8 @@ Parent: [spec #23](https://github.com/ycheung5/pi-computer-use/issues/23). The a
 
 GitHub supports native dependencies, but the connected tools expose no dependency-write operation and GitHub CLI is unavailable here. Ticket bodies therefore record explicit blocking issue links; native dependency links have not been created. No parent issue was modified.
 
+Current progress: #24 resolved on 2026-10-30 with published audit/checker commits `fd51aca` and `a905fde`; #25 and #34 are now in progress on isolated branches. The audit found five declaration differences and missing reference-plugin setup in the inspected DSH web profile. Those findings remain obligations; completing baseline discovery is not a parity pass. See [baseline evidence](validation.md#baseline-identity-and-schema-evidence).
+
 | Issue | Deliverable | Blocked by |
 | --- | --- | --- |
 | [#24](https://github.com/ycheung5/pi-computer-use/issues/24) | Establish the DSH baseline and deviation inventory | None |
