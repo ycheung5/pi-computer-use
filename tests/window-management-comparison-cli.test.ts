@@ -273,3 +273,85 @@ test("direct UIA foreground movement is recorded as an observation, not a restor
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("direct focus outcome requires explicit method-return marker and clean process exit", () => {
+  const script = fileURLToPath(
+    new URL("./foreground-focus-comparison.mjs", import.meta.url),
+  );
+  const dir = mkdtempSync(join(tmpdir(), "pi-direct-settlement-"));
+  try {
+    const path = join(dir, "evidence.json");
+    for (const [evidence, expected] of [
+      [
+        {
+          dispatched: true,
+          marker: "sent",
+          closed: true,
+          exitCode: 0,
+          signal: null,
+        },
+        "returned",
+      ],
+      [
+        {
+          dispatched: true,
+          marker: null,
+          closed: true,
+          exitCode: 0,
+          signal: null,
+        },
+        "unknown",
+      ],
+      [
+        {
+          dispatched: true,
+          marker: null,
+          closed: true,
+          exitCode: 1,
+          signal: null,
+        },
+        "unknown",
+      ],
+      [
+        {
+          dispatched: true,
+          marker: "sent",
+          closed: true,
+          exitCode: 1,
+          signal: null,
+        },
+        "unknown",
+      ],
+      [
+        {
+          dispatched: true,
+          marker: "sent",
+          closed: false,
+          exitCode: null,
+          signal: null,
+        },
+        "unknown",
+      ],
+      [
+        {
+          dispatched: true,
+          marker: "sent",
+          closed: true,
+          exitCode: null,
+          signal: "SIGTERM",
+        },
+        "unknown",
+      ],
+    ] as const) {
+      writeFileSync(path, JSON.stringify(evidence));
+      const output = spawnSync(
+        process.execPath,
+        [script, `--direct-report=${path}`],
+        { encoding: "utf8" },
+      );
+      assert.equal(JSON.parse(output.stdout).outcome, expected, output.stderr);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
