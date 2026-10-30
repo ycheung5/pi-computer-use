@@ -27,3 +27,15 @@ export function isSafeClipboardRefusal(result) {
     /^CLIPBOARD_SNAPSHOT_UNSUPPORTED(?::|$)/.test(result.error)
   );
 }
+
+// An absent cleanup acknowledgment does not establish that physical input has stopped.
+export function inputCleanupConfirmed(result) {
+  if (
+    result?.cleanupConfirmed !== true ||
+    result?.clipboardCleanupConfirmed === false
+  )
+    return false;
+  return (
+    result.clipboardCleanupConfirmed === true || isSafeClipboardRefusal(result)
+  );
+}

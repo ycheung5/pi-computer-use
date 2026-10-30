@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   compareEditorObservation,
+  inputCleanupConfirmed,
   isSafeClipboardRefusal,
 } from "./clipboard-editor-observation.mjs";
 
@@ -46,4 +47,31 @@ test("only a recognized pre-input snapshot refusal qualifies as safe", () => {
     { error: "CLIPBOARD_SNAPSHOT_UNSUPPORTED: no" },
   ])
     assert.equal(isSafeClipboardRefusal(result), false);
+});
+
+test("clipboard input retains its owner until both cleanup acknowledgments or a pre-input refusal", () => {
+  assert.equal(
+    inputCleanupConfirmed({
+      ok: true,
+      cleanupConfirmed: true,
+      clipboardCleanupConfirmed: true,
+    }),
+    true,
+  );
+  assert.equal(
+    inputCleanupConfirmed({
+      ok: false,
+      error: "CLIPBOARD_SNAPSHOT_UNSUPPORTED: unchanged",
+      cleanupConfirmed: true,
+    }),
+    true,
+  );
+  for (const result of [
+    undefined,
+    { ok: true },
+    { ok: true, cleanupConfirmed: true },
+    { ok: true, cleanupConfirmed: false, clipboardCleanupConfirmed: true },
+    { ok: false, error: "CLIPBOARD_HELPER_TIMEOUT", cleanupConfirmed: true },
+  ])
+    assert.equal(inputCleanupConfirmed(result), false);
 });
