@@ -45,3 +45,20 @@ test("window management validates targets and launch restrictions before native 
     await worker.dispose();
   }
 });
+
+test("launch rejects oversized text before attempting to open an application", async () => {
+  const worker = new WorkerClient({ launch });
+  try {
+    for (const args of [
+      { target: "x".repeat(32768) },
+      { target: "fixture.exe", arguments: "x".repeat(32768) },
+      { target: "fixture.exe", workingDirectory: "x".repeat(32768) },
+    ]) {
+      const result = await worker.execute("launch_app", args);
+      assert.equal(result.ok, false);
+      assert.match(String(result.error), /INVALID_ARGUMENTS.*outside bounds/);
+    }
+  } finally {
+    await worker.dispose();
+  }
+});
