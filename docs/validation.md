@@ -16,7 +16,7 @@ npm run test:package
 npm run test:parity -- /path/to/dsh-computer-use-win
 ```
 
-`test:package` packs/extracts the actual distribution and verifies its required assets plus every local Markdown link/heading. `test:parity` reads the reference's advertised schemas without desktop calls, comparing all 25 declarations and supported parameter types, defaults, enums, required fields and array/numeric bounds. It does not compare prose or prove runtime behavior. Extra native signed-32-bit bounds on move_window X/Y are reported explicitly. The inspected reference baseline is 0.5.3 at commit `6fb642129595a6357588c70812974951db304662`.
+`test:package` packs/extracts the actual distribution and verifies its required assets plus every local Markdown link/heading. `test:parity` reads the reference's advertised schemas without desktop calls, comparing all 25 declarations and supported parameter types, defaults, enums, required fields, array/numeric/string bounds, patterns and additional-property restrictions. It does not compare prose or prove runtime behavior. Extra native signed-32-bit bounds on move_window X/Y are reported explicitly. The inspected reference baseline is 0.5.3 at commit `6fb642129595a6357588c70812974951db304662`.
 
 On WSL2, serialize all live checks:
 
@@ -67,18 +67,72 @@ Cross-cutting live runners: `test:ownership` (two-host ownership and crash recov
 
 ## Reference difference register
 
-Phase 1 must complete this register; these are starting findings, not exhaustive conclusions. Each completed entry needs reference/Pi source locations, reason/history, scenario IDs, evidence, classification and disposition.
+The 2026-10-30 source/declaration audit below records confirmed differences and remaining runtime investigations. It is not full behavioral parity. Installed DSH identity is still unverified, so #24 remains open. Source locations are relative to their respective checkouts; reference locations refer to the pinned commit.
 
 | ID | Starting difference | Initial disposition | Scenarios |
 | --- | --- | --- | --- |
-| D01 | Direct Pi integration and Windows/WSL2 worker instead of DSH host/MCP integration | Required adaptation; verify equivalent operation boundaries and stopping | C01, C09, C10 |
-| D02 | Shared generic Pi tool descriptions versus detailed DSH action descriptions and routing guidance | Suspected alignment gap; compare model-visible schemas, descriptions, defaults and instructions | C00, A01–A06 |
-| D03 | Pi 50 ms Unicode pacing, separate event calls and Enter/Tab conversion versus reference batching | Demonstrated workaround; necessity and underlying cause unverified | C05 |
-| D04 | Clipboard snapshot/ownership handling changed after live failures | Audit supported formats, restoration and refusal semantics against reference | C06 |
-| D05 | Foreground activation paths differ, including reference Alt-key fallback | Compare mechanism and actual foreground evidence before attributing failures to Windows | C03, C07 |
-| D06 | Pi guidance to reuse existing apps/tabs | Compare reference guidance and ordinary task behavior; preserve unrelated work | A01, A03 |
+| D01 | DSH adapter/MCP server versus Pi extension/launcher/worker | Required adaptation: compare DSH `mcp/dsh-plugin.mjs` bridge with Pi `src/extension.ts`, `src/launcher.ts`, `src/worker.ts`; preserve operation lifecycle, stop and ownership contracts | C01, C09, C10; #31, #34 |
+| D02 | Action-specific compact MCP descriptions versus shared generic Pi descriptions | Confirmed guidance gap: DSH `mcp/server.mjs` conciseDescriptions/compactSchema and `mcp/settings.mjs` routing; Pi `src/extension.ts` registration loops. Audit actual declarations, not only long source descriptions; no runtime repair yet | C00, A01–A06; #35, #36 |
+| D03 | Pi per-unit 50 ms Unicode pacing, separate event calls and Enter/Tab mapping versus unpaced reference batching | Unverified deviation with demonstrated workaround: DSH `scripts/windows-uia.ps1` Unicode sender; Pi `assets/text.cs`; commits `4e4b061`, `dc95162`; successful cases do not isolate mechanism | C05; #26 |
+| D04 | Pi public OLE format validation/ownership-nonce restoration changed after unsupported-snapshot failures | Unverified comparative behavior: Pi `assets/text.cs`, commit `b966475`; DSH clipboard type_text path in `scripts/windows-uia.ps1`. Worker regression proves scoped preservation, not all-format parity | C06; #27 |
+| D05 | Foreground activation, lock diagnostics and restoration | Missing BringWindowToTop was aligned in `7a7c0c5`; locked-session diagnosis added in `89b0d80`. Reference also uses an Alt fallback; Pi `assets/window-management.cs` does not. Necessity/outcomes need paired evidence, not immediate removal of guards | C03, C07; #30 |
+| D06 | Explicit existing-app/tab reuse guidance | User-requested behavior in Pi `src/extension.ts`, commit `f4d6473`. Reference launch and browser routing permit reuse but do not provide equivalent general native-tab instructions; retain provisionally and test preserved work | A01, A03; #35, #36 |
+| D07 | Launch string bounds and health additionalProperties are absent from Pi declarations | Confirmed declaration gaps: DSH `mcp/server.mjs` versus Pi `src/window-management.ts`/health registration. Four launch string constraints and one health object restriction now fail the comparator; production behavior unchanged | C00, C03; #24 baseline, #37 repair triage |
+| D08 | Pi browser library/Windows helper implementation differs from reference direct CDP/PowerShell | Implementation choice, not demonstrated improvement: compare public page-change, fallback, profile, capture and failure semantics using existing capability mapping; source similarity is not the acceptance criterion | C02, C08, C11–C13; #28, #29, #32, #33 |
 
-Separate restrictions embedded in the extension from restrictions supplied by diagnostic prompts. Earlier “stop on uncertainty; no alternatives” prompts cannot establish that the extension lacks recovery.
+
+### Baseline identity and schema evidence
+
+On 2026-10-30 the local reference checkout reported version **0.5.3**, commit **6fb642129595a6357588c70812974951db304662**. Pi audit base was **19bc425** (production code through **7a7c0c5**), package **0.1.0**. The controller ran Node **22.20.0** on genuine WSL2, kernel **6.18.54.1-microsoft-standard-WSL2**. This pins the inspected source, not the user's installed DSH host.
+
+**Installed DSH host/extension identity is blocked:** the inspected WSL web-profile package declares base/web bundles but has empty dependencies; no DSH executable was on that shell's PATH. The usual inspected Windows user app/profile locations, StartApps/uninstall metadata and a process-name query did not identify the installed host. The user confirms DSH is installed but not launched; a running process is not required for this audit. These observations do not prove DSH is absent or establish its selected profile. Locate the user's launch method and loaded extension before closing #24 or attributing real-agent comparisons to this source revision. Credentials and session contents were not read.
+
+The earlier `Reference exited 0` result was reproduced under the development sandbox. A minimal child-process probe also failed with `EPERM`/empty child output; the identical original schema command outside that sandbox passed all its checked fields. The server itself initializes normally. Therefore this exit is an environment restriction, not a reason to change Windows automation or reference startup. Use the environment's approved execution mechanism for subprocess checks; do not bake a sandbox bypass into the package.
+
+A separate read-only capture of public MCP `initialize`/`tools/list` and Pi registered definitions found restrictions the old comparator omitted. The strengthened `test:parity` now emits a structured report before failing and checks string bounds, patterns and additional-property restrictions. On the same unsandboxed WSL invocation it returns **exit 1 with a valid comparison**, not a transport failure:
+
+| Declaration | Reference | Pi declaration |
+| --- | --- | --- |
+| `launch_app.target` | `minLength: 1`, `maxLength: 32767` | Neither advertised |
+| `launch_app.arguments` | `maxLength: 32767` | Not advertised |
+| `launch_app.workingDirectory` | `maxLength: 32767` | Not advertised |
+| `health` object | `additionalProperties: false` | Unspecified |
+
+All **25 names** are present; the five restriction mismatches above are retained for repair triage. The previously documented four extra signed-32-bit bounds on move_window coordinates remain explicitly reported. The audit does not establish that runtime validation is identical or defective in the same way as the declarations. Historical schema passes below remain evidence only for the fields their comparator checked; they are not current full-restriction passes.
+
+### Model-visible guidance inventory
+
+The reference sends **compact action-specific descriptions and compact parameter guidance** through `tools/list`, with full descriptions available through management describe; its long source strings are not all sent on every turn. Pi often uses longer but generic shared descriptions. Word count is not the gap: missing action semantics are. Both systems also supply browser-first guidance and distinguish dispatch from verification. Pi's same-target and non-replay safeguards must remain intact during later guidance alignment.
+
+| Tool | Reference guidance to preserve or compare | Pi baseline finding / follow-up |
+| --- | --- | --- |
+| health | Backend availability | Pi describes worker connectivity; do not imply full capability health; C01 |
+| snapshot | Combined tree/image, partial evidence and sparse OCR | Generic observation description omits combined behavior/browser viewport; C02 |
+| accessibility_tree | Bounded tree, incomplete absence, browser outline | Generic observation description omits browser outline semantics; C02 |
+| list_windows | Native identity and browser-tab discovery | Native identity described; browser discovery supplied in shared guidelines; C02/C11 |
+| find | Sparse-search OCR and screen coordinates versus IDs | Generic description loses this action-specific distinction; C02/C08 |
+| element_info | ID or physical screen point inspection | Generic description lacks point lookup distinction; C02 |
+| click | Element/background versus physical point, restoration and unverified background delivery | Shared browser-action description omits dispatch distinctions; C07/C11 |
+| double_click | Element or screen point, background unverified | Shared browser-action description omits dispatch distinctions; C07 |
+| move | Pointer movement to element/screen point | Shared description does not explain hover behavior; C07 |
+| drag | Physical screen path and foreground use | Pi pointer guard description omits path meaning; C07 |
+| scroll | Background-first element scroll, positive deltaY down | Shared description omits direction/routing; C04/C07 |
+| type_text | Current focus, auto background edit/clipboard routing and restoration | Shared description and absent focusMode prose lose method distinctions; C05/C06 |
+| keypress | Chord example, Windows-key restriction and background printable-character limit | Shared description omits these limits; C05 |
+| focus | UIA keyboard focus | Shared description lacks action-specific focus meaning; C04 |
+| invoke | Supported patterns, optional click fallback, expand/collapse/scroll actions | Shared description lacks action selection/fallback semantics; C04 |
+| set_value | Background value/fallback; page fill and address/new-tab navigation | Dedicated Pi promptGuidelines restore browser routing, but shared description lacks native method detail; C04/C11 |
+| activate_window | Always activates; shared flag cannot suppress | Shared description omits unconditional behavior; C03 |
+| wait | Delay then observe | Pi describes explicit waiting; verify no objective-success claim; C09 |
+| ocr | Literal matching, inspect lines on miss, screen word coordinates | Pi covers literal matching but fewer usage details; C08 |
+| screenshot | No UIA; image-to-screen formula versus page pixels | Pi describes native capture metadata but not full coordinate distinction; C08 |
+| wait_for | Observable conditions, partial absence inconclusive | Shared description loses wait semantics; C02/C11 |
+| close_window | Background graceful close with possible save dialog | Shared description loses veto/dialog behavior; C03/C12 |
+| move_window | Physical position, no resize, coordinate cache refresh | Pi generic management description lacks position-specific meaning; C03 |
+| launch_app | Shell lifetime, interpreter restrictions, verify resulting window | Pi gives explicit reuse guidance; missing declared string bounds remain D07; C03 |
+| tools | List/describe/enable/disable/reset and startup exposure | Compare full versus compact describe payload and preset behavior; C00/C10 |
+
+The existing capability matrix and C00–C13/A01–A06 catalog map these entries to executable or missing checks. This inventory identifies what to investigate; it does not prescribe copying reference wording or prematurely modifying production guidance.
 
 ### Unicode mechanism investigation
 

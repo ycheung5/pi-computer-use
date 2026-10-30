@@ -120,6 +120,10 @@ try {
       "maximum",
       "minItems",
       "maxItems",
+      "minLength",
+      "maxLength",
+      "pattern",
+      "additionalProperties",
     ]) {
       if (
         expected[field] !== undefined &&
@@ -148,22 +152,12 @@ try {
     }
     compare(tool.inputSchema, current.parameters, tool.name);
   }
-  assert.deepEqual(
-    missing,
-    [],
-    "All reference tools and supported parameters must exist",
-  );
-  assert.deepEqual(
-    differences,
-    [],
-    "Reference argument types/defaults/bounds must remain compatible",
-  );
   const version = JSON.parse(
     await readFile(resolve(reference, "package.json"), "utf8"),
   ).version;
   console.log(
     JSON.stringify({
-      ok: true,
+      ok: missing.length === 0 && differences.length === 0,
       referenceVersion: version,
       tools: 25,
       missing,
@@ -172,6 +166,16 @@ try {
       scope:
         "Public declarations only; does not establish application/runtime behavior",
     }),
+  );
+  assert.deepEqual(
+    missing,
+    [],
+    "All reference tools and supported parameters must exist",
+  );
+  assert.deepEqual(
+    differences,
+    [],
+    "Reference argument types/defaults/bounds/restrictions must remain compatible",
   );
 } finally {
   for (const handler of host.shutdown) await handler();
