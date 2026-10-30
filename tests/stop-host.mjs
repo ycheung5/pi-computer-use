@@ -11,6 +11,18 @@ const worker = new WorkerClient({
   onStop: (id) => seen.push(id),
 });
 const operation = "stop-fixture-operation";
+const run = promisify(execFile);
+async function assertEvent(name, signaled) {
+  // Independently observe the actual Windows kernel event, not the tool result.
+  const script = `$e=[Threading.EventWaitHandle]::OpenExisting('${name}'); try { if($e.WaitOne(0) -ne $${signaled}){throw 'unexpected cancellation event state'} } finally {$e.Dispose()}`;
+  await run("powershell.exe", [
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-EncodedCommand",
+    Buffer.from(script, "utf16le").toString("base64"),
+  ]);
+}
 try {
   const prepared = await worker.execute(
     "prepare_input",
@@ -24,21 +36,14 @@ try {
   assert.ok(prepared.readyActions.includes("drag"));
   assert.ok(prepared.readyActions.includes("keypress"));
   assert.match(prepared.cancelEvent, /^Local\\PiComputerUseStop-/);
+  await assertEvent(prepared.cancelEvent, false);
   worker.stopOperation(operation);
   const deadline = Date.now() + 3000;
   while (!seen.includes(operation)) {
     if (Date.now() > deadline) throw new Error("stop notification timed out");
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  const run = promisify(execFile);
-  const script = `$e=[Threading.EventWaitHandle]::OpenExisting('${prepared.cancelEvent}'); try { if(!$e.WaitOne(3000)){throw 'cancel event was not signaled'} } finally {$e.Dispose()}`;
-  await run("powershell.exe", [
-    "-NoLogo",
-    "-NoProfile",
-    "-NonInteractive",
-    "-EncodedCommand",
-    Buffer.from(script, "utf16le").toString("base64"),
-  ]);
+  await assertEvent(prepared.cancelEvent, true);
   const retry = await worker.execute(
     "list_windows",
     { maxWindows: 1 },
@@ -55,6 +60,15 @@ try {
     "new-user-operation",
   );
   assert.equal(recovered.ok, true);
+  const fresh = await worker.execute(
+    "prepare_input",
+    {},
+    undefined,
+    "new-user-operation",
+  );
+  assert.equal(fresh.ok, true);
+  assert.notEqual(fresh.cancelEvent, prepared.cancelEvent);
+  await assertEvent(fresh.cancelEvent, false);
   const gated = await worker.execute(
     "click",
     { x: 0, y: 0, nativeWindowHandle: 1, processId: 1 },
@@ -68,6 +82,8 @@ try {
       ok: true,
       hookRegistration: true,
       cancelEvent: true,
+      eventInitiallyUnsignaled: true,
+      freshOperationEventIsolated: true,
       sameOperationBlocked: true,
       newOperation: true,
       guardFailureSentPhysicalInput: false,
