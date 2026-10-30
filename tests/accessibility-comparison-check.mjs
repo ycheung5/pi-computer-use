@@ -76,6 +76,30 @@ for (const engine of process.argv.includes("--providers")
   if (row.status === "pass") assert.equal(row.actual.editor, "Pi 中文 café 😀");
   else assert.ok(row.error, "Failed outcomes must retain evidence");
 }
+const hangs = report.cases.filter((row) => row.id === "provider.hang");
+assert.equal(
+  hangs.length,
+  2,
+  "Both engines retain blocked-provider lifetime evidence",
+);
+for (const row of hangs) {
+  const evidence = (row.actual ?? row.observation)?.readerRetirement;
+  assert.ok(
+    evidence,
+    `${row.engine}: retain independent reader-lifetime evidence`,
+  );
+  assert.equal(typeof evidence.confirmed, "boolean");
+  if (row.status === "blocked") {
+    assert.match(row.error, /Reader identification blocked prerequisite/);
+    assert.equal(evidence.confirmed, false);
+  } else if (row.status === "pass") {
+    assert.equal(evidence.confirmed, true);
+    assert.equal(evidence.oldReaderAlive, false);
+    assert.equal(evidence.providerState, "provider-state:1:False");
+    assert.equal(evidence.freshReadRecovered, true);
+  } else
+    assert.ok(row.error, "Failed retirement must retain the actual failure");
+}
 console.log(JSON.stringify(report));
 console.log(
   JSON.stringify({
