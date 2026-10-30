@@ -183,6 +183,7 @@ try {
     after: after.count,
     total,
     keysReleased: before.keysReleased && after.keysReleased,
+    dispatch,
   };
   const assessment = assessStop(evidence);
   const recovered = await bounded(
