@@ -136,3 +136,25 @@ test("an acknowledged preparation remains held if the input owner exits", async 
   assert.equal(launches, 1);
   await assert.rejects(worker.dispose(), /INPUT_CLEANUP_UNCONFIRMED/);
 });
+
+test("an acknowledgement write failure retains the possible input owner", async () => {
+  const peer = `setInterval(()=>{},10000);const i=require('node:readline').createInterface({input:process.stdin});i.on('line',line=>{const r=JSON.parse(line);if(r.action==='health'){console.log(JSON.stringify({id:r.id,result:{ok:true,action:'health',processId:process.pid}}));return;}if(r.action==='click'){process.stdin.on('error',()=>{});require('node:fs').closeSync(0);console.log(JSON.stringify({event:'input_prepare',requestId:r.id,operationId:r.operationId,token:'owned-token'}));}});`;
+  const worker = new WorkerClient({
+    timeoutMs: 1000,
+    launch: async () => ({ executable: process.execPath, args: ["-e", peer] }),
+  });
+  const health = await worker.execute("health", {});
+  const pid = Number(health.processId);
+  try {
+    await assert.rejects(
+      worker.execute("click", {}, undefined, "ack-error"),
+      /WORKER_WRITE_FAILED|EPIPE/,
+    );
+    await assert.rejects(worker.retire(), /INPUT_CLEANUP_UNCONFIRMED/);
+    assert.doesNotThrow(() => process.kill(pid, 0));
+  } finally {
+    process.kill(pid, "SIGKILL");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await worker.dispose().catch(() => undefined);
+  }
+});

@@ -29,7 +29,7 @@ test("real worker waits for a matching input preparation acknowledgment before n
   );
   await writeFile(
     fake,
-    `#!/usr/bin/env node\nconst {createInterface}=require('node:readline');const {appendFileSync}=require('node:fs');createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.cancel)return;if(r.action==='click')appendFileSync(process.env.PI_CU_BARRIER_JOURNAL,'dispatch\\n');console.log(JSON.stringify({id:r.id,result:{ok:true,action:r.action,listenerProcessId:process.pid,cleanupConfirmed:true}}));});\n`,
+    `#!/usr/bin/env node\nconst {createInterface}=require('node:readline');const {appendFileSync}=require('node:fs');createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.cancel)return;if(r.action==='click'){appendFileSync(process.env.PI_CU_BARRIER_JOURNAL,'dispatch\\n');if(process.env.PI_CU_BARRIER_HOLD==='1')return;}console.log(JSON.stringify({id:r.id,result:{ok:true,action:r.action,listenerProcessId:process.pid,cleanupConfirmed:true}}));});\n`,
     { mode: 0o755 },
   );
   await writeFile(
@@ -125,11 +125,27 @@ test("real worker waits for a matching input preparation acknowledgment before n
       "late acknowledgement must not dispatch",
     );
     child.stdin.write(
-      `${JSON.stringify({ id: 3, action: "click", args: { x: 1, y: 1, dispatch: "foreground" }, operationId: "new-operation" })}\n`,
+      `${JSON.stringify({ id: 3, action: "click", args: { x: 1, y: 1, dispatch: "foreground" }, operationId: "race-operation" })}\n`,
+    );
+    let racing = await next();
+    while (racing.event !== "input_prepare") racing = await next();
+    child.stdin.write(
+      `${JSON.stringify({ inputAck: racing.token, requestId: 3 })}\n${JSON.stringify({ stop: "race-operation" })}\n`,
+    );
+    let raced = await next();
+    while (raced.id !== 3) raced = await next();
+    const journalAfterRace = await readFile(journal, "utf8");
+    assert.ok(
+      ["dispatch\n", "dispatch\ndispatch\n"].includes(journalAfterRace),
+      "ACK/stop race can dispatch at most once",
+    );
+    if (!raced.result.ok) assert.match(raced.result.error, /STOPPED/);
+    child.stdin.write(
+      `${JSON.stringify({ id: 4, action: "click", args: { x: 1, y: 1, dispatch: "foreground" }, operationId: "new-operation" })}\n`,
     );
     let disconnected = await next();
     while (disconnected.event !== "input_prepare") disconnected = await next();
-    assert.equal(disconnected.requestId, 3);
+    assert.equal(disconnected.requestId, 4);
     child.stdin.end();
     let closeTimer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
@@ -143,7 +159,7 @@ test("real worker waits for a matching input preparation acknowledgment before n
     ]).finally(() => clearTimeout(closeTimer));
     assert.equal(
       await readFile(journal, "utf8"),
-      "dispatch\n",
+      journalAfterRace,
       "stdin close before acknowledgement must not dispatch",
     );
     const wrappedEnv = {
@@ -185,9 +201,62 @@ test("real worker waits for a matching input preparation acknowledgment before n
     }
     assert.equal(
       await readFile(journal, "utf8"),
-      "dispatch\ndispatch\n",
+      `${journalAfterRace}dispatch\n`,
       "WorkerClient and the actual worker complete the private handshake",
     );
+    const crashEnv = {
+      ...wrappedEnv,
+      LOCALAPPDATA: join(root, "local3"),
+      PI_CU_SETTINGS_FILE: join(root, "settings3.json"),
+      PI_CU_BARRIER_HOLD: "1",
+    };
+    const crashBoot = `Object.assign(process.env,${JSON.stringify(crashEnv)});${boot}`;
+    const crashed = new WorkerClient({
+      timeoutMs: 5000,
+      launch: async () => ({
+        executable: process.execPath,
+        args: ["--import", "tsx", "--input-type=module", "-e", crashBoot],
+      }),
+    });
+    let crashPid = 0;
+    try {
+      const health = await crashed.execute("health", {});
+      crashPid = Number(health.processId);
+      assert.ok(crashPid > 0);
+      const pending = crashed.execute(
+        "click",
+        { x: 1, y: 1, dispatch: "foreground" },
+        undefined,
+        "crash-operation",
+      );
+      const rejected = assert.rejects(pending, /WORKER_EXITED/);
+      for (let i = 0; i < 100; i++) {
+        if (
+          (await readFile(journal, "utf8")) ===
+          `${journalAfterRace}dispatch\ndispatch\n`
+        )
+          break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.equal(
+        await readFile(journal, "utf8"),
+        `${journalAfterRace}dispatch\ndispatch\n`,
+        "fake native dispatch must start after ACK before crash",
+      );
+      process.kill(crashPid, "SIGKILL");
+      await rejected;
+      await assert.rejects(
+        crashed.execute("health", {}),
+        /INPUT_CLEANUP_UNCONFIRMED/,
+      );
+      await assert.rejects(crashed.dispose(), /INPUT_CLEANUP_UNCONFIRMED/);
+    } finally {
+      if (crashPid) {
+        try {
+          process.kill(crashPid, "SIGKILL");
+        } catch {}
+      }
+    }
   } finally {
     if (!child.stdin.destroyed) child.stdin.end();
     let timer: ReturnType<typeof setTimeout> | undefined;
