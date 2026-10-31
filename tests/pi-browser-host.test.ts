@@ -30,7 +30,7 @@ test("real-browser plan works without a build, dependencies, credentials or chil
     );
     const plan = JSON.parse(result.stdout);
     assert.equal(plan.mode, "plan");
-    assert.deepEqual(plan.scenarios, ["form", "advanced", "stale"]);
+    assert.deepEqual(plan.scenarios, ["form", "advanced", "stale", "mixed"]);
     assert.deepEqual(plan.requested, {
       provider: "openai",
       model: "gpt-6.1-sol",
@@ -792,6 +792,200 @@ test("browser fixture faults deny dispatch through actual SDK hooks", async () =
       );
       assert.equal(receipt.sdkErrors, 0, JSON.stringify(receipt));
     }
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test("mixed acceptance requires browser-issued code before native effect and observed completion", async () => {
+  const facts = {
+    ...formReport(),
+    base: "http://127.0.0.1:1234/",
+    oracle: {
+      payload: {
+        name: "Mixed task 中文 café 😀",
+        notes: "Browser to native",
+        accepted: true,
+        choice: "beta",
+      },
+      events: { submissions: 1 },
+    },
+    native: {
+      owned: { nativeWindowHandle: 11, processId: 22 },
+      initial: {
+        approve: { code: "7391", count: 0 },
+        ignore: { code: "2846", count: 0 },
+      },
+      final: {
+        approve: { code: "7391", count: 1 },
+        ignore: { code: "2846", count: 0 },
+      },
+      receipt: { issuedCode: "7391", confirmations: 1 },
+      workerRetired: true,
+      cleanup: { fixtureRetired: true, folderRemoved: true },
+    },
+    finalReport: "Confirmed native completion for 7391",
+    audit: [
+      {
+        type: "guard_tool_result",
+        toolName: "windows_computer_use_snapshot",
+        details: {
+          ok: true,
+          tab: { id: "t123", url: "http://127.0.0.1:1234/form" },
+          nodes: [{ name: '{"confirmationCode":"7391"}' }],
+        },
+      },
+      {
+        type: "guard_tool_result",
+        toolName: "windows_computer_use_snapshot",
+        details: {
+          ok: true,
+          nativeWindowHandle: 11,
+          processId: 22,
+          tree: {
+            children: [
+              { id: "opaque-native", name: "", controlType: "Button" },
+            ],
+          },
+        },
+      },
+      {
+        type: "guard_tool_call",
+        toolCallId: "once",
+        toolName: "windows_computer_use_invoke",
+        input: { elementId: "opaque-native", fallbackClick: false },
+      },
+      {
+        type: "guard_tool_result",
+        toolCallId: "once",
+        toolName: "windows_computer_use_invoke",
+        details: { ok: true, verification: "sent" },
+      },
+      {
+        type: "guard_tool_result",
+        toolName: "windows_computer_use_snapshot",
+        details: {
+          ok: true,
+          tab: { id: "t123", url: "http://127.0.0.1:1234/form" },
+          nodes: [{ name: "Native confirmation complete: 7391" }],
+        },
+      },
+    ],
+  };
+  assert.equal((await verify("mixed", facts)).pass, true);
+  for (const audit of [
+    facts.audit.slice(1),
+    [
+      facts.audit[1],
+      facts.audit[2],
+      facts.audit[3],
+      facts.audit[0],
+      facts.audit[4],
+    ],
+    facts.audit.slice(0, -1),
+    [
+      {
+        ...facts.audit[0],
+        details: {
+          ok: true,
+          tab: { id: "t123", url: "http://127.0.0.1:1234/form" },
+          query: '{"confirmationCode":"7391"}',
+          matches: [],
+        },
+      },
+      ...facts.audit.slice(1),
+    ],
+  ])
+    assert.equal((await verify("mixed", { ...facts, audit })).pass, false);
+  for (const native of [
+    {
+      ...facts.native,
+      final: { ...facts.native.final, ignore: { code: "2846", count: 1 } },
+    },
+    { ...facts.native, receipt: { issuedCode: "2846", confirmations: 1 } },
+    { ...facts.native, workerRetired: false },
+  ])
+    assert.equal((await verify("mixed", { ...facts, native })).pass, false);
+});
+
+test("mixed SDK routing preserves owned images and rejects cross-channel or uncertain dispatch", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "pi-mixed-sdk-"));
+  try {
+    await mkdir(join(folder, "tests"));
+    await mkdir(join(folder, "dist"));
+    for (const name of ["pi-browser-fixture.mjs", "pi-visual-fixture.mjs"])
+      await copyFile(
+        new URL(name, import.meta.url),
+        join(folder, "tests", name),
+      );
+    await writeFile(join(folder, "package.json"), '{"type":"module"}');
+    await writeFile(
+      join(folder, "dist/extension.js"),
+      'export default pi=>pi.registerTool({name:"windows_computer_use_snapshot",execute:async()=>({content:[],details:{ok:true}})});',
+    );
+    const result = await run(process.execPath, [
+      "--input-type=module",
+      "-e",
+      `
+      import assert from 'node:assert/strict';
+      import {writeFileSync,readFileSync,mkdirSync,rmSync} from 'node:fs';
+      import {join} from 'node:path';import {pathToFileURL} from 'node:url';
+      import {ExtensionRunner,createExtensionRuntime} from '@earendil-works/pi-coding-agent';
+      const root=process.argv[1],base='http://127.0.0.1:1234/';
+      const {default:scope}=await import(pathToFileURL(join(root,'tests/pi-browser-fixture.mjs')));
+      const box={x:0,y:0,width:600,height:400},client={x:10,y:30,width:580,height:350};
+      const identity={pid:22,creation:'owned-generation',executable:'owned-fixture'};
+      const owned={nativeWindowHandle:11,processId:22,title:'owned',windowsNode:process.execPath,pipeName:'offline',identity};
+      const proof={ok:true,identity,target:{...owned,windowBounds:box,clientBounds:client}};
+      const screenshot={windowCaptureFailed:false,occludedPossible:false,method:'printwindow',bounds:box,origin:{x:0,y:0},width:600,height:400,imageScale:1,imageScaleY:1};
+      let imagePositive=false;
+      for(const kind of ['running','mixed-tab','mixed-ref','implicit','retained','audit-io','unsafe','proof-failure']) {
+        const dir=join(root,kind);mkdirSync(dir);
+        const journal=join(dir,'owner.json'),nativeJournal=join(dir,'native.json'),auditFile=join(dir,'audit.jsonl');
+        const running={phase:'running',expiresAt:Date.now()+60000};
+        const proofPath=join(dir,'proof.json');writeFileSync(proofPath,JSON.stringify(proof));
+        writeFileSync(journal,JSON.stringify(running));writeFileSync(nativeJournal,JSON.stringify(running));
+        process.env.PI_CU_TEST_SPEC=JSON.stringify({scenario:'mixed',base,journal,auditFile,native:{owned,fixtureJournal:nativeJournal,clientCode:'console.log(require("node:fs").readFileSync('+JSON.stringify(proofPath)+',"utf8"))' }});
+        const handlers=new Map();let registrations=0;
+        await scope({on:(n,h)=>handlers.set(n,[...(handlers.get(n)??[]),h]),registerTool:()=>registrations++});
+        assert.equal(registrations,1,'production registration occurs once');
+        const runner=new ExtensionRunner([{path:'owned-mixed-fixture',handlers}],createExtensionRuntime(),process.cwd(),null,null);
+        let sdkErrors=0;runner.onError(()=>sdkErrors++);
+        const event=(name,input,id)=>({type:'tool_call',toolName:'windows_computer_use_'+name,toolCallId:id,input});
+        const open=event('set_value',{elementId:'new-tab',value:base+'form'},'open');
+        const openDecision=await runner.emitToolCall(open);assert.equal(openDecision?.block,undefined,JSON.stringify(openDecision));
+        await runner.emitToolResult({...open,type:'tool_result',content:[],details:{ok:true,tab:{id:'t123',url:base+'form'},nodes:[{id:'t123:e1',name:'Name'}]}});
+        const snap=event('snapshot',{nativeWindowHandle:11,processId:22,captureWindow:true},'native');
+        const initialDecision=await runner.emitToolCall(snap);assert.equal(initialDecision?.block,undefined,JSON.stringify(initialDecision));
+        const imageResult={...snap,type:'tool_result',isError:false,content:[{type:'image',data:'OWNED_IMAGE_BYTES'}],details:{ok:true,nativeWindowHandle:11,processId:22,windowRef:'actual-returned-ref',screenshot,tree:{children:[{id:'native-opaque',name:'',controlType:'Button',boundingBox:{x:40,y:50,width:200,height:80}}]}}};
+        const forwarded=await runner.emitToolResult(imageResult);
+        assert.equal(forwarded.content[0].data,'OWNED_IMAGE_BYTES');imagePositive=true;
+        assert.equal(readFileSync(auditFile,'utf8').includes('OWNED_IMAGE_BYTES'),false);
+        let args={elementId:'native-opaque',fallbackClick:false};let name='invoke';
+        if(kind==='mixed-tab')args.browserTab='t123';
+        if(kind==='mixed-ref')args={elementId:'t123:e1',windowRef:'actual-returned-ref',fallbackClick:false};
+        if(kind==='implicit'){name='screenshot';args={};}
+        if(kind==='retained')writeFileSync(nativeJournal,JSON.stringify({phase:'retained'}));
+        if(kind==='audit-io'){rmSync(auditFile);mkdirSync(auditFile);}
+        if(kind==='unsafe'){
+          const unsafe=await runner.emitToolResult({...imageResult,details:{...imageResult.details,screenshot:{...screenshot,occludedPossible:true},text:'PRIVATE_DERIVED_TEXT'},content:[{type:'image',data:'PRIVATE_PIXELS'},{type:'text',text:'PRIVATE_DERIVED_TEXT'}]});
+          assert.equal(unsafe.isError,true);
+          assert.equal(JSON.stringify(unsafe).includes('PRIVATE_'),false);
+          assert.equal(readFileSync(auditFile,'utf8').includes('PRIVATE_'),false);
+        }
+        if(kind==='proof-failure')writeFileSync(proofPath,JSON.stringify({...proof,identity:{...identity,creation:'different-generation'}}));
+        const decision=await runner.emitToolCall(event(name,args,'attempt'));
+        assert.equal(decision?.block,kind==='running'?undefined:true,kind);
+        assert.equal(sdkErrors,0,kind);
+      }
+      assert.equal(imagePositive,true);console.log('Mixed actual SDK scope/privacy checks passed');
+    `,
+      folder,
+    ]);
+    assert.match(
+      result.stdout,
+      /Mixed actual SDK scope\/privacy checks passed/,
+    );
   } finally {
     await rm(folder, { recursive: true, force: true });
   }

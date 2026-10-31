@@ -12,8 +12,11 @@ import { computerUseHost } from "./native-host.mjs";
 
 assert.equal(process.platform, "win32");
 const serverMode = process.argv[2] === "--visual-server";
+const codeAssociation = process.argv.includes("--code-association");
 const visualAssociation =
-  serverMode || process.env.PI_CU_OCR_VISUAL_ASSOCIATION === "1";
+  serverMode ||
+  codeAssociation ||
+  process.env.PI_CU_OCR_VISUAL_ASSOCIATION === "1";
 const title = `Pi CU OCR ${Date.now()}`;
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-ocr-fixture-"));
 const executable = join(folder, "fixture.exe");
@@ -39,7 +42,12 @@ const built = spawnSync(
 assert.equal(built.status, 0, built.stdout + built.stderr);
 const fixture = spawn(
   executable,
-  [title, ...(visualAssociation ? ["visual-association"] : [])],
+  [
+    title,
+    ...(visualAssociation
+      ? [codeAssociation ? "code-association" : "visual-association"]
+      : []),
+  ],
   {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
@@ -131,8 +139,7 @@ async function verifyVisualAssociation() {
     ),
   );
   for (const text of [
-    "APPROVE",
-    "IGNORE",
+    ...(codeAssociation ? ["CODE"] : ["APPROVE", "IGNORE"]),
     oracle.approve.code,
     oracle.ignore.code,
   ])
@@ -180,17 +187,21 @@ async function verifyVisualAssociation() {
   assert.equal(recognized.details.occludedPossible, false);
   assert.match(
     recognized.details.text,
-    new RegExp(`APPROVE\\s*${oracle.approve.code}`),
+    new RegExp(
+      `${codeAssociation ? "CODE" : "APPROVE"}\\s*${oracle.approve.code}`,
+    ),
   );
   assert.match(
     recognized.details.text,
-    new RegExp(`IGNORE\\s*${oracle.ignore.code}`),
+    new RegExp(
+      `${codeAssociation ? "CODE" : "IGNORE"}\\s*${oracle.ignore.code}`,
+    ),
   );
   assert.equal(oracle.approve.count, 0);
   assert.equal(oracle.ignore.count, 0);
   const query = await call({
     ...target,
-    query: `APPROVE ${oracle.approve.code}`,
+    query: `${codeAssociation ? "CODE" : "APPROVE"} ${oracle.approve.code}`,
     maxWidth: 0,
   });
   assert.equal(query.details.matched.length, 1);
@@ -228,7 +239,9 @@ async function verifyVisualAssociation() {
   console.log(
     JSON.stringify({
       ok: true,
-      check: "visual OCR association",
+      check: codeAssociation
+        ? "neutral code OCR association"
+        : "visual OCR association",
       uiaLabelsAbsent: true,
       observedIdOnly: true,
       physicalInput: false,

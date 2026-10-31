@@ -202,6 +202,91 @@ export async function serveVisualFixture({
 
 const clientCode = `const net=require('node:net');const socket=net.connect('\\\\\\\\.\\\\pipe\\\\'+process.argv[1]);let data='';const timer=setTimeout(()=>process.exit(1),10000);socket.on('connect',()=>socket.write(JSON.stringify({action:process.argv[2]})+'\\n'));socket.on('data',b=>data+=b);socket.on('end',()=>{clearTimeout(timer);const r=JSON.parse(data);console.log(JSON.stringify(r));if(!r.ok)process.exitCode=1});socket.on('error',()=>{clearTimeout(timer);process.exitCode=1});`;
 
+// Shared by the visual and mixed browser tasks; callers retain these actual pipes on uncertainty.
+export function prepareOwnedVisualFixture(native, root, codesOnly = false) {
+  const translate = (path) =>
+    process.platform === "win32"
+      ? path
+      : execFileSync("wslpath", ["-w", path], { encoding: "utf8" }).trim();
+  const workerPath = translate(join(root, "dist/worker.js")).replace(
+    /'/g,
+    "''",
+  );
+  const queryWorkers = () => {
+    const script = `$ErrorActionPreference='Stop'; $all=@(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction Stop); $owned=@($all|Where-Object {$_.CommandLine -and $_.CommandLine.Contains('${workerPath}')}|ForEach-Object {@{pid=$_.ProcessId;creation=$_.CreationDate.ToUniversalTime().ToString('o')}});ConvertTo-Json -Compress -InputObject @($owned)`;
+    const powershell =
+      process.platform === "win32"
+        ? "powershell.exe"
+        : "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
+    const result = JSON.parse(
+      execFileSync(
+        powershell,
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-EncodedCommand",
+          Buffer.from(script, "utf16le").toString("base64"),
+        ],
+        {
+          encoding: "utf8",
+          timeout: 15000,
+          stdio: ["ignore", "pipe", "ignore"],
+        },
+      ),
+    );
+    if (!Array.isArray(result)) throw Error("strict worker query unavailable");
+    return result;
+  };
+  const server = spawn(
+    native.executable,
+    [
+      translate(join(root, "tests/native-ocr.mjs")),
+      "--visual-server",
+      "pi-cu-visual-" + randomUUID(),
+      ...(codesOnly ? ["--code-association"] : []),
+    ],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
+  server.stderr.resume();
+  const closed = once(server, "close").catch(() => [null, "launch-error"]),
+    lines = createInterface({ input: server.stdout });
+  return {
+    server,
+    closed,
+    lines,
+    queryWorkers,
+    async ready() {
+      const result = await Promise.race([
+        once(lines, "line"),
+        closed.then(() => null),
+        new Promise((resolve) => setTimeout(() => resolve(null), 10000)),
+      ]);
+      if (!result) throw Error("owned fixture startup unconfirmed");
+      const owned = {
+        ...JSON.parse(result[0]),
+        windowsNode: native.executable,
+      };
+      if (!owned.ready) throw Error("owned fixture not ready");
+      const ipc = (action) =>
+        JSON.parse(
+          execFileSync(
+            native.executable,
+            ["-e", clientCode, owned.pipeName, action],
+            { encoding: "utf8", timeout: 15000 },
+          ),
+        );
+      const initial = ipc("oracle");
+      if (
+        !initial.ok ||
+        initial.approve.count !== 0 ||
+        initial.ignore.count !== 0
+      )
+        throw Error("owned fixture not fresh");
+      return { owned, initial, ipc, clientCode };
+    },
+  };
+}
+
 async function run(runs) {
   const root = fileURLToPath(new URL("../", import.meta.url));
   const { nativeWorkerLaunch } = await import("../dist/launcher.js");
@@ -236,35 +321,6 @@ async function run(runs) {
       .digest("hex");
   const output = await fs.mkdtemp(join(tmpdir(), "pi-visual-model-")),
     reports = [];
-  const workerPath = translate(join(root, "dist/worker.js")).replace(
-    /'/g,
-    "''",
-  );
-  const queryWorkers = () => {
-    const script = `$ErrorActionPreference='Stop'; $all=@(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction Stop); $owned=@($all|Where-Object {$_.CommandLine -and $_.CommandLine.Contains('${workerPath}')}|ForEach-Object {@{pid=$_.ProcessId;creation=$_.CreationDate.ToUniversalTime().ToString('o')}});ConvertTo-Json -Compress -InputObject @($owned)`;
-    const powershell =
-      process.platform === "win32"
-        ? "powershell.exe"
-        : "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
-    const result = JSON.parse(
-      execFileSync(
-        powershell,
-        [
-          "-NoProfile",
-          "-NonInteractive",
-          "-EncodedCommand",
-          Buffer.from(script, "utf16le").toString("base64"),
-        ],
-        {
-          encoding: "utf8",
-          timeout: 15000,
-          stdio: ["ignore", "pipe", "ignore"],
-        },
-      ),
-    );
-    if (!Array.isArray(result)) throw Error("strict worker query unavailable");
-    return result;
-  };
   for (let reset = 1; reset <= runs; reset++) {
     const dir = await fs.mkdtemp(join(output, `${reset}-`));
     const write = (name, value) =>
@@ -275,42 +331,12 @@ async function run(runs) {
       writeFileSync(join(dir, name), JSON.stringify(value) + "\n", {
         mode: 0o600,
       });
-    const server = spawn(
-      native.executable,
-      [
-        translate(join(root, "tests/native-ocr.mjs")),
-        "--visual-server",
-        "pi-cu-visual-" + randomUUID(),
-      ],
-      { stdio: ["ignore", "pipe", "pipe"] },
-    );
-    server.stderr.resume();
-    const serverClosed = once(server, "close").catch(() => [
-      null,
-      "launch-error",
-    ]);
+    const prepared = prepareOwnedVisualFixture(native, root);
+    const { server, closed: serverClosed, lines, queryWorkers } = prepared;
     const completed = await keepVisualOwnership(
       server,
       async (assertFixtureActive) => {
-        const lines = createInterface({ input: server.stdout }),
-          [line] = await once(lines, "line");
-        const owned = { ...JSON.parse(line), windowsNode: native.executable };
-        if (!owned.ready) throw Error("fixture not ready");
-        const ipc = (action) =>
-          JSON.parse(
-            execFileSync(
-              native.executable,
-              ["-e", clientCode, owned.pipeName, action],
-              { encoding: "utf8", timeout: 15000 },
-            ),
-          );
-        const initial = ipc("oracle");
-        if (
-          !initial.ok ||
-          initial.approve.count !== 0 ||
-          initial.ignore.count !== 0
-        )
-          throw Error("fixture not fresh");
+        const { owned, initial, ipc } = await prepared.ready();
         await write("preflight.json", { owned, initial });
         journal("fixture-owner.json", {
           phase: "running",

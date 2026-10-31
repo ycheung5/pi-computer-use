@@ -19,9 +19,8 @@ await writeFile(
     browserSignIn: false,
   }),
 );
-const mixed = process.env.PI_CU_MIXED_FIXTURE
-  ? JSON.parse(process.env.PI_CU_MIXED_FIXTURE)
-  : null;
+const mixedConfig = process.argv[4] ?? process.env.PI_CU_MIXED_FIXTURE;
+const mixed = mixedConfig ? JSON.parse(mixedConfig) : null;
 let issuedCode = null,
   confirmations = 0;
 const mixedPayload = {
@@ -91,7 +90,7 @@ const formHtml = `<!doctype html><meta charset="utf-8"><title>Paired browser for
 <script>form.addEventListener('submit',async event=>{event.preventDefault();
 const payload={name:document.getElementById('name').value,notes:notes.value,accepted:accepted.checked,choice:choice.value};
 const response=await fetch('/form/submit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
-result.textContent=JSON.stringify(await response.json());});</script>${mixed ? `<p id="nativeAcknowledgement">Native confirmation pending</p><script>setInterval(()=>fetch('/mixed/state').then(r=>r.json()).then(s=>nativeAcknowledgement.textContent=s.acknowledgement),300)</script>` : ""}`;
+result.textContent=JSON.stringify(await response.json());});</script>${mixed ? `<p id="nativeAcknowledgement">Native confirmation pending</p><script>async function pollNative(){try{const s=await(await fetch('/mixed/state')).json();nativeAcknowledgement.textContent=s.acknowledgement;}finally{setTimeout(pollNative,300)}}pollNative()</script>` : ""}`;
 const downloadName = `pi-advanced-${randomUUID()}.txt`;
 let advancedState = { upload: null, uploadRequests: 0, downloads: 0 };
 const advancedHtml = `<!doctype html><meta charset="utf-8"><title>Advanced browser fixture</title>
@@ -215,6 +214,7 @@ const server = createServer(async (request, response) => {
       );
     });
   } else if (request.url === "/form") {
+    if (mixed) issuedCode = null;
     formSubmission = null;
     formEvents = { starts: 0, ready: 0, submissions: 0 };
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
