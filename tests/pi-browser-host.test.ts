@@ -713,3 +713,86 @@ test("mixed confirmation reveals a code only after exact submission and acknowle
     await rm(folder, { recursive: true, force: true });
   }
 });
+
+test("browser fixture faults deny dispatch through actual SDK hooks", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "pi-browser-guard-faults-"));
+  try {
+    await mkdir(join(folder, "tests"));
+    await mkdir(join(folder, "dist"));
+    await copyFile(
+      new URL("./pi-browser-fixture.mjs", import.meta.url),
+      join(folder, "tests/pi-browser-fixture.mjs"),
+    );
+    await writeFile(join(folder, "package.json"), '{"type":"module"}');
+    await writeFile(
+      join(folder, "dist/extension.js"),
+      `export default pi=>pi.registerTool({name:'windows_computer_use_set_value',execute:async()=>({content:[],details:{ok:true,tab:{id:'t123',url:'http://127.0.0.1:1234/form'},nodes:[{id:'t123:e1',name:'Name'}]}})});`,
+    );
+    const script = `
+      import {writeFileSync,mkdirSync,rmSync} from 'node:fs';
+      import {join} from 'node:path';
+      import {pathToFileURL} from 'node:url';
+      import {ExtensionRunner,createExtensionRuntime} from '@earendil-works/pi-coding-agent';
+      const root=process.argv[1], base='http://127.0.0.1:1234/';
+      const {default:scope}=await import(pathToFileURL(join(root,'tests/pi-browser-fixture.mjs')));
+      const receipts=[];
+      for(const kind of ['running','retained','missing','malformed','unknown-phase','audit-io','window-ref','after-audit-io','after-processing-error']) {
+        const dir=join(root,kind);mkdirSync(dir);
+        const journal=join(dir,'owner.json'),audit=join(dir,'audit.jsonl');
+        if(kind!=='missing')writeFileSync(journal,kind==='malformed'?'{':JSON.stringify({phase:kind==='retained'?'retained':kind==='unknown-phase'?'settled':'running'}));
+        if(kind==='audit-io')mkdirSync(audit);
+        process.env.PI_CU_TEST_SPEC=JSON.stringify({base,scenario:'form',journal,auditFile:audit});
+        const handlers=new Map(),tools=new Map();
+        await scope({on:(n,h)=>handlers.set(n,[h]),registerTool:d=>tools.set(d.name,d)});
+        const runner=new ExtensionRunner([{path:'owned-offline-fixture',handlers}],createExtensionRuntime(),process.cwd(),null,null);
+        let errors=0;runner.onError(()=>errors++);
+        const event={type:'tool_call',toolName:'windows_computer_use_set_value',toolCallId:kind,input:{elementId:'new-tab',value:base+'form'}};
+        if(kind.startsWith('after-')) {
+          await runner.emitToolCall(event);
+          const result=await tools.get(event.toolName).execute(kind,event.input);
+          await runner.emitToolResult({...event,type:'tool_result',...result});
+          event.input={elementId:'t123:e1',value:'safe owned value'};
+          if(kind==='after-audit-io'){rmSync(audit);mkdirSync(audit);}
+          await runner.emitToolResult({...event,type:'tool_result',content:[],isError:kind==='after-audit-io',details:kind==='after-audit-io'?{ok:false,error:'UNKNOWN_MUTATION_RESULT'}:{ok:true,nodes:{}}});
+          if(kind==='after-audit-io'){rmSync(audit,{recursive:true});writeFileSync(audit,'');}
+        }
+        if(kind==='window-ref')event.input.windowRef='native-lifetime-reference';
+        let decision,threw=false,dispatches=0;
+        try{decision=await runner.emitToolCall(event);}catch{threw=true;}
+        if(!threw&&!decision?.block){await tools.get(event.toolName).execute(kind,event.input);dispatches++;}
+        receipts.push({kind,threw,blocked:decision?.block===true,dispatches,sdkErrors:errors});
+      }
+      console.log(JSON.stringify(receipts));
+    `;
+    const result = await run(process.execPath, [
+      "--input-type=module",
+      "-e",
+      script,
+      folder,
+    ]);
+    const receipts = JSON.parse(result.stdout) as Array<{
+      kind: string;
+      threw: boolean;
+      blocked: boolean;
+      dispatches: number;
+      sdkErrors: number;
+    }>;
+    assert.equal(receipts.length, 9);
+    for (const receipt of receipts) {
+      assert.equal(receipt.threw, false, JSON.stringify(receipts));
+      assert.equal(
+        receipt.blocked,
+        receipt.kind !== "running",
+        JSON.stringify(receipts),
+      );
+      assert.equal(
+        receipt.dispatches,
+        receipt.kind === "running" ? 1 : 0,
+        JSON.stringify(receipt),
+      );
+      assert.equal(receipt.sdkErrors, 0, JSON.stringify(receipt));
+    }
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});

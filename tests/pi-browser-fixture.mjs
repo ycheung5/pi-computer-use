@@ -61,6 +61,7 @@ export default async function (pi) {
     url: null,
     opening: false,
     haltWrites: false,
+    guardFault: false,
     stopped: false,
     advanced: false,
     second: false,
@@ -78,17 +79,30 @@ export default async function (pi) {
     block: true,
     reason: "SCOPED_FIXTURE_DENIED: " + why,
   });
+  // Both synchronous hook boundaries retain faults instead of losing state through SDK errors.
+  const guarded =
+    (handler, before = false) =>
+    (event) => {
+      try {
+        return handler(event);
+      } catch {
+        state.guardFault = true;
+        return before ? deny("fixture audit or state unavailable") : undefined;
+      }
+    };
   const oracle = () => formState(base);
-  pi.on("tool_call", (e) => {
+  const before = (e) => {
+    if (state.guardFault)
+      return deny("fixture guard fault; no further dispatch");
     audit({
       type: "guard_tool_call",
       toolCallId: e.toolCallId,
       toolName: e.toolName,
       input: e.input,
     });
-    if (JSON.parse(readFileSync(journal, "utf8")).phase === "retained")
+    if (JSON.parse(readFileSync(journal, "utf8"))?.phase !== "running")
       return deny(
-        "controller retains uncertain ownership; no further dispatch",
+        "controller ownership is not proven running; no further dispatch",
       );
     const n = e.toolName?.replace(/^windows_computer_use_/, ""),
       a = e.input;
@@ -99,17 +113,22 @@ export default async function (pi) {
       typeof a !== "object"
     )
       return deny("unsupported tool");
-    if (n === "wait") return;
     if (
-      !allowed.has(n) ||
-      ["nativeWindowHandle", "processId", "windowTitle", "x", "y"].some(
-        (k) => a[k] !== undefined,
-      ) ||
+      (!allowed.has(n) && n !== "wait") ||
+      [
+        "windowRef",
+        "nativeWindowHandle",
+        "processId",
+        "windowTitle",
+        "x",
+        "y",
+      ].some((k) => a[k] !== undefined) ||
       a.scope === "desktop"
     )
       return deny(
         "only observed elements in the owned headless browser tab are in scope",
       );
+    if (n === "wait") return;
     if (state.haltWrites && !reads.has(n))
       return deny("previous mutation or cleanup was uncertain");
     if (n === "set_value" && a.elementId === "new-tab") {
@@ -158,8 +177,9 @@ export default async function (pi) {
         ))
     )
       return deny("browser/window shortcuts are outside scope");
-  });
-  pi.on("tool_result", (e) => {
+  };
+  pi.on("tool_call", guarded(before, true));
+  const after = (e) => {
     audit({
       type: "guard_tool_result",
       toolCallId: e.toolCallId,
@@ -247,7 +267,8 @@ export default async function (pi) {
     observe(d.element);
     for (const node of observed.values())
       if (node.name === "Direct upload" && node.id) files.add(node.id);
-  });
+  };
+  pi.on("tool_result", guarded(after));
   const wrapped = new Proxy(pi, {
     get(target, key) {
       if (key !== "registerTool") {
