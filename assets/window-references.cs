@@ -13,6 +13,11 @@ partial class WindowsBridge {
   static void BeginWindowDispatch(){CheckReferenceBeforeDispatch();windowDispatchAttempted=true;}
   static void FinishWindowReference(Dictionary<string,object> payload){
     if(currentReference==null)return;
+    bool cleanupFailed=payload.ContainsKey("cleanupConfirmed") && !Convert.ToBoolean(payload["cleanupConfirmed"]);
+    if(!cleanupFailed && Convert.ToString(payload["action"])=="close_window" && windowDispatchAttempted && payload.ContainsKey("posted") && Convert.ToBoolean(payload["posted"]) && !IsWindow(currentReference.Window)){
+      // WM_CLOSE was posted; observing its intended disappearance is not a failed action.
+      payload["targetState"]="absent";payload["windowRef"]=currentReference.Id;return;
+    }
     if(!CurrentReferenceIntact()){
       payload["ok"]=false;payload.Remove("inputRequired");payload["dispatchAttempted"]=windowDispatchAttempted;
       string warning=windowDispatchAttempted?"WINDOW_REFERENCE_LOST_AFTER_DISPATCH: app effects may have occurred; observe before further action; never replay":"WINDOW_REFERENCE_LOST: lifetime proof is unavailable; observe again";
@@ -39,7 +44,10 @@ partial class WindowsBridge {
   static object ObserveReferencePresence(Dictionary<string,object> args) {
     WindowReference entry;string id=Convert.ToString(args["windowRef"]);
     if(windowReferences.TryGetValue(id,out entry) && ((args.ContainsKey("nativeWindowHandle") && Convert.ToInt64(args["nativeWindowHandle"])!=entry.Window.ToInt64()) || (args.ContainsKey("processId") && Convert.ToUInt32(args["processId"])!=entry.Owner)))throw new InvalidOperationException("WINDOW_REFERENCE_CONFLICT: selectors disagree with the observed lifetime");
-    if(windowReferences.TryGetValue(id,out entry) && entry.Seen>=DateTime.UtcNow.AddMinutes(-5) && !IsWindow(entry.Window))return new Dictionary<string,object>{{"ok",true},{"action","list_windows"},{"referencePresent",false},{"windows",new List<object>()}};
+    if(windowReferences.TryGetValue(id,out entry) && entry.Seen>=DateTime.UtcNow.AddMinutes(-5) && !IsWindow(entry.Window)){
+      if(args.ContainsKey("windowTitle"))throw new InvalidOperationException("WINDOW_REFERENCE_CONSTRAINT_UNAVAILABLE: destroyed window title cannot be verified");
+      return new Dictionary<string,object>{{"ok",true},{"action","list_windows"},{"referencePresent",false},{"windows",new List<object>()}};
+    }
     entry=ResolveWindowReference(args);
     return new Dictionary<string,object>{{"ok",true},{"action","list_windows"},{"referencePresent",true},{"windows",new List<object>()}};
   }
@@ -49,7 +57,7 @@ partial class WindowsBridge {
     foreach(string id in remove){WindowReference entry=windowReferences[id];WindowMarker.Remove(entry.Window,entry.Owner,entry.Marker);windowReferences.Remove(id);}
   }
   static WindowReference ObserveWindowReference(IntPtr window,Dictionary<string,object> metadata) {
-    if(window==IntPtr.Zero)return null;
+    if(window==IntPtr.Zero){metadata["windowRefUnavailable"]="WINDOW_REFERENCE_UNAVAILABLE: no native root could be established";return null;}
     CheckWindowReference(window);uint owner=WindowOwner(window);
     foreach(var pair in windowReferences)if(pair.Value.Window==window && pair.Value.Owner==owner && pair.Value.Seen>=DateTime.UtcNow.AddMinutes(-5) && WindowMarker.Matches(window,owner,pair.Value.Marker)){pair.Value.Seen=DateTime.UtcNow;return pair.Value;}
     PruneWindowReferences();

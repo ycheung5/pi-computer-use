@@ -76,10 +76,10 @@ partial class WindowsBridge {
     for(int level=0;level<128 && parent!=null;level++){int hwnd=parent.Current.NativeWindowHandle;if(hwnd!=0)return GetAncestor(new IntPtr(hwnd),2);parent=TreeWalker.RawViewWalker.GetParent(parent);}
     return IntPtr.Zero;
   }
-  static Dictionary<string,object> DescribeElement(AutomationElement element, IntPtr window, bool full, int depth) {
+  static Dictionary<string,object> DescribeElement(AutomationElement element, IntPtr window, bool full, int depth, bool bind=true) {
     AutomationElement.AutomationElementInformation current=element.Current;
     string runtime=RuntimeId(element),id=null;window=ElementWindow(element,window);
-    var bindingMetadata=new Dictionary<string,object>();WindowReference binding=ObserveWindowReference(window,bindingMetadata);
+    var bindingMetadata=new Dictionary<string,object>();WindowReference binding=bind?ObserveWindowReference(window,bindingMetadata):null;
     if(binding!=null) {
       string key=binding.Id+":"+runtime;ObservedElement existing;
       if(elementKeys.TryGetValue(key,out id) && observed.TryGetValue(id,out existing))existing.Seen=DateTime.UtcNow;
@@ -89,6 +89,7 @@ partial class WindowsBridge {
     bool unknownType=controlType==null || String.IsNullOrEmpty(controlType.ProgrammaticName);
     Dictionary<string,object> info=new Dictionary<string,object> { {"name",current.Name ?? ""},{"controlType",unknownType ? "Unknown" : controlType.ProgrammaticName.Replace("ControlType.","")},{"depth",depth},{"isEnabled",current.IsEnabled},{"isOffscreen",current.IsOffscreen},{"hasKeyboardFocus",current.HasKeyboardFocus},{"isPassword",current.IsPassword} };
     if(id!=null)info["id"]=id;
+    if(binding==null && bindingMetadata.ContainsKey("windowRefUnavailable"))info["windowRefUnavailable"]=bindingMetadata["windowRefUnavailable"];
     if(!current.BoundingRectangle.IsEmpty) info["boundingBox"]=UiaBox(current.BoundingRectangle);
     if(unknownType) info["controlTypeUnavailable"]=true;
     if(!String.IsNullOrEmpty(current.AutomationId)) info["automationId"]=current.AutomationId;
@@ -182,7 +183,7 @@ partial class WindowsBridge {
       if(args.ContainsKey("elementId")) element=ResolveObservedElement(Convert.ToString(args["elementId"]),args,out owner);
       else {element=AutomationElement.FromPoint(new System.Windows.Point(Convert.ToInt32(args["x"]),Convert.ToInt32(args["y"])));owner=ElementWindow(element,IntPtr.Zero);if(args.ContainsKey("windowRef") || args.ContainsKey("nativeWindowHandle") || args.ContainsKey("processId") || args.ContainsKey("windowTitle")){IntPtr target=ResolveObservationWindow(args);if(owner!=target)throw new InvalidOperationException("ELEMENT_WRONG_OWNER: point is outside target; observe again");}}
       var infoMetadata=new Dictionary<string,object>();WindowReference infoBinding=ObserveWindowReference(owner,infoMetadata);if(infoBinding!=null)currentReference=infoBinding;
-      Dictionary<string,object> result=Result(true,action); result["element"]=DescribeElement(element,owner,full,0);AddWindowReference(result,owner); if(((Dictionary<string,object>)result["element"]).ContainsKey("controlTypeUnavailable")) result["conclusive"]=false; return result;
+      Dictionary<string,object> result=Result(true,action); result["element"]=DescribeElement(element,owner,full,0,infoBinding!=null);foreach(var pair in infoMetadata){result[pair.Key]=pair.Value;if(pair.Key=="windowRefUnavailable")((Dictionary<string,object>)result["element"])[pair.Key]=pair.Value;}if(infoBinding!=null)result["windowRef"]=infoBinding.Id; if(((Dictionary<string,object>)result["element"]).ContainsKey("controlTypeUnavailable")) result["conclusive"]=false; return result;
     }
     bool desktop=TextOption(args,"scope","active_window")=="desktop";
     IntPtr window=desktop ? IntPtr.Zero : ResolveObservationWindow(args);

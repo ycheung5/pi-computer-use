@@ -35,11 +35,12 @@ const built = spawnSync(
   { encoding: "utf8", windowsHide: true },
 );
 assert.equal(built.status, 0, built.stdout + built.stderr);
-const fixture = spawn(
-  executable,
-  [`Owned lifetime ${Date.now()}`, "--lifetime"],
-  { stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
-);
+const fixtureTitle = `Owned lifetime ${Date.now()}`;
+const fixture = spawn(executable, [fixtureTitle, "--lifetime"], {
+  stdio: ["pipe", "pipe", "pipe"],
+  windowsHide: true,
+});
+const fixtureClosed = once(fixture, "close");
 const lines = createInterface({ input: fixture.stdout })[
   Symbol.asyncIterator
 ]();
@@ -274,9 +275,63 @@ async function verifyPreparationGuard() {
     if (provider.exitCode === null) await once(provider, "close");
   }
 }
+async function verifyTerminalTargets() {
+  const initial = await next();
+  receipts.push({ terminalInitial: initial });
+  const observed = await call("accessibility_tree", {
+    nativeWindowHandle: initial.hwnd,
+    processId: initial.pid,
+    maxDepth: 0,
+  });
+  assert.equal(observed.ok, true);
+  fixture.stdin.write("replace\n");
+  const replacement = await next();
+  receipts.push({ terminalReplacement: replacement });
+  assert.notEqual(
+    replacement.hwnd,
+    initial.hwnd,
+    "this case requires the old numeric handle to be absent",
+  );
+  const constrained = await call("wait_for", {
+    windowRef: observed.windowRef,
+    windowTitle: fixtureTitle,
+    condition: "window",
+    appear: false,
+    timeoutMs: 100,
+    intervalMs: 50,
+  });
+  assert.equal(
+    constrained.verification,
+    "inconclusive",
+    "a destroyed reference cannot verify its current title constraint",
+  );
+  const current = await call("accessibility_tree", {
+    nativeWindowHandle: replacement.hwnd,
+    processId: replacement.pid,
+    maxDepth: 0,
+  });
+  assert.equal(current.ok, true);
+  const close = await call("close_window", { windowRef: current.windowRef });
+  assert.equal(close.ok, true, JSON.stringify(close));
+  assert.equal(close.posted, true);
+  assert.equal(close.verification, "sent");
+  assert.equal(close.effectsUncertain, undefined);
+  await fixtureClosed;
+  const closed = await call("wait_for", {
+    windowRef: current.windowRef,
+    condition: "window",
+    appear: false,
+    timeoutMs: 100,
+    intervalMs: 50,
+  });
+  assert.equal(closed.verification, "observed");
+}
 let ok = false;
 try {
-  if (process.argv.includes("--provider-only")) {
+  if (process.argv.includes("--terminal-only")) {
+    await verifyTerminalTargets();
+    ok = true;
+  } else if (process.argv.includes("--provider-only")) {
     await next();
     await verifyPreparationGuard();
     ok = true;
@@ -570,17 +625,19 @@ try {
 } finally {
   await disposeAuthority(worker);
   for (const authority of authorities) await disposeAuthority(authority);
-  fixture.stdin.write("marker-count\n");
-  const remainingMarkers = await next();
-  receipts.push({ remainingMarkers });
-  assert.equal(
-    remainingMarkers.removed,
-    0,
-    "normal native retirement removes owned markers",
-  );
+  if (fixture.exitCode === null) {
+    fixture.stdin.write("marker-count\n");
+    const remainingMarkers = await next();
+    receipts.push({ remainingMarkers });
+    assert.equal(
+      remainingMarkers.removed,
+      0,
+      "normal native retirement removes owned markers",
+    );
+  }
   if (fixture.exitCode === null) {
     fixture.stdin.end("stop\n");
-    await once(fixture, "close");
+    await fixtureClosed;
   }
   const live = powershellJson(
     `$expected=@(${[...ownedPids].join(",")});foreach($id in $expected){try{$p=[System.Diagnostics.Process]::GetProcessById($id)}catch [System.ArgumentException]{continue};try{[void]$p.WaitForExit(5000)}finally{$p.Dispose()}};ConvertTo-Json -Compress -InputObject @(Get-Process -ErrorAction Stop|Where-Object{$expected -contains $_.Id}|ForEach-Object{$_.Id})`,
