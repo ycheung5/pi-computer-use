@@ -317,6 +317,29 @@ try {
       const clicked = await client.execute("click", { elementId: button.id });
       assert.equal(clicked.ok, true, JSON.stringify(clicked));
     };
+    const shadowMatches = await client.execute("find", {
+      browserTab: tab,
+      query: "Shadow editable",
+    });
+    const shadowEditable = shadowMatches.results.find(
+      (entry) => entry.role === "textbox" && entry.name === "Shadow editable",
+    );
+    assert.ok(shadowEditable?.id, JSON.stringify(shadowMatches));
+    const shadowFocus = await client.execute("focus", {
+      elementId: shadowEditable.id,
+    });
+    assert.equal(shadowFocus.ok, true, JSON.stringify(shadowFocus));
+    const replaceShadow = await client.execute("keypress", {
+      browserTab: tab,
+      keys: ["ctrl", "a"],
+    });
+    assert.equal(replaceShadow.ok, true, JSON.stringify(replaceShadow));
+    const shadowText = await client.execute("type_text", {
+      browserTab: tab,
+      text: "shadow edit",
+    });
+    assert.equal(shadowText.ok, true, JSON.stringify(shadowText));
+
     for (const [kind, expected] of [
       ["shadow", "shadow locked | shadow edit plus"],
       ["frame", "frame locked | frame edit plus"],

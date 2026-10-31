@@ -12,6 +12,8 @@ Browser `type_text` and common editing keypresses refuse a focused element with 
 
 Tab IDs are salted per launch; element IDs are scoped to one tab document. Navigation clears observed element handles; disconnection withdraws tabs. Re-observe after navigation/reconnect rather than reusing old IDs. Never mix native HWND/PID/title or desktop x/y with browser references. Browser image bounds use page pixels and carry their actual width, height and imageScale; they are not desktop screen coordinates.
 
+Browser focus checks the active element in the target's document or shadow root. An open-shadow editor can therefore report successful focus when the page document itself reports its host as active. A headless Edge fixture exercises focus and text entry through Pi tools; this does not establish focus behavior for closed shadow roots or cross-origin frames.
+
 ## Validation
 
 Run `npm run build`, then `npm run test:browser -- edge` or `npm run test:browser -- chrome` from Windows Node or WSL2. Append `--headless` for a hidden test. The fixture starts its HTTP server on Windows and uses only disposable profiles. It sends no physical input and does not attach to daily browsers. It verifies Pi tool calls, tree/find/inspection, scaled screenshots, unchanged foreground, stale-ID rejection and disconnect/reconnect. Keep the desktop steady during the visible foreground check.
