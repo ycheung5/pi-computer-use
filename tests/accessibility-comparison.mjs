@@ -11,11 +11,12 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 let activeCase;
@@ -194,11 +195,43 @@ if (providerReport) {
   process.exit(result.status === "pass" ? 0 : 1);
 }
 const nativeScrollOnly = process.argv.includes("--native-scroll-only");
+const nativeChromiumOnly = process.argv.includes("--native-chromium-only");
+if (nativeChromiumOnly) {
+  assert.ok(
+    process.argv
+      .slice(2)
+      .every(
+        (arg) =>
+          !arg.startsWith("--") ||
+          ["--native-chromium-only", "--plan"].includes(arg),
+      ),
+    "Unknown native Chromium option",
+  );
+  if (process.argv.includes("--plan")) {
+    console.log(
+      JSON.stringify({
+        executed: false,
+        physicalInput: false,
+        fallback: false,
+        engines: ["reference", "pi"],
+        cases: [
+          "chromium.native-uia",
+          "chromium.set-value",
+          "chromium.focus",
+          "chromium.invoke",
+        ],
+      }),
+    );
+    process.exit(0);
+  }
+}
 const providerUnavailableOnly = process.argv.includes(
   "--provider-unavailable-only",
 );
 assert.ok(
-  !(nativeScrollOnly && providerUnavailableOnly),
+  [nativeScrollOnly, providerUnavailableOnly, nativeChromiumOnly].filter(
+    Boolean,
+  ).length <= 1,
   "Choose only one isolated comparison",
 );
 if (providerUnavailableOnly) {
@@ -254,7 +287,7 @@ if (nativeScrollOnly) {
   );
 }
 const cliReference =
-  nativeScrollOnly || providerUnavailableOnly
+  nativeScrollOnly || providerUnavailableOnly || nativeChromiumOnly
     ? scrollArguments.find((arg) => !arg.startsWith("--"))
     : process.argv[2];
 assert.ok(cliReference, "Pass reference checkout");
@@ -278,7 +311,7 @@ if (process.platform === "linux") {
   const output = process.env.PI_CU_RELEASE_OUTPUT
     ? await win(process.env.PI_CU_RELEASE_OUTPUT)
     : undefined;
-  const code = `import{pathToFileURL}from'node:url';${output ? `process.env.PI_CU_RELEASE_OUTPUT=${JSON.stringify(output)};` : "delete process.env.PI_CU_RELEASE_OUTPUT;"}process.argv=[process.execPath,${JSON.stringify(script)},${JSON.stringify(reference)},...${JSON.stringify(nativeScrollOnly ? ["--native-scroll-only"] : providerUnavailableOnly ? ["--provider-unavailable-only"] : process.argv.slice(3))}];await import(pathToFileURL(${JSON.stringify(script)}).href);`;
+  const code = `import{pathToFileURL}from'node:url';${output ? `process.env.PI_CU_RELEASE_OUTPUT=${JSON.stringify(output)};` : "delete process.env.PI_CU_RELEASE_OUTPUT;"}process.argv=[process.execPath,${JSON.stringify(script)},${JSON.stringify(reference)},...${JSON.stringify(nativeScrollOnly ? ["--native-scroll-only"] : providerUnavailableOnly ? ["--provider-unavailable-only"] : nativeChromiumOnly ? ["--native-chromium-only"] : process.argv.slice(3))}];await import(pathToFileURL(${JSON.stringify(script)}).href);`;
   const child = run(launch.executable, ["--input-type=module", "-e", code], {
     cwd: launch.cwd,
     ...(nativeScrollOnly
@@ -349,6 +382,7 @@ const framework = join(
   "v4.0.30319",
 );
 const fixtures = [];
+const browsers = [];
 let browser;
 async function stop(child, command = "stop\n") {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
@@ -1372,10 +1406,6 @@ async function runChromium() {
   const title = `Pi paired Chromium ${randomUUID()}`,
     html = join(folder, "page.html");
   ownedTitles.add(title);
-  await writeFile(
-    html,
-    `<!doctype html><title>${title}</title><label>Fixture browser editor<input value="browser fixture text"></label><button>Fixture browser action</button>`,
-  );
   let executable;
   for (const candidate of [
     join(
@@ -1406,93 +1436,287 @@ async function runChromium() {
     });
     return;
   }
-  browser = spawn(
-    executable,
-    [
-      `--user-data-dir=${join(folder, "profile")}`,
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--disable-background-mode",
-      "--disable-features=CalculateNativeWinOcclusion",
-      "--disable-backgrounding-occluded-windows",
-      "--disable-renderer-backgrounding",
-      `--app=${pathToFileURL(html).href}`,
-    ],
-    { stdio: ["ignore", "ignore", "pipe"], windowsHide: true, cwd: folder },
+  let receipt, currentEngine;
+  const token = randomUUID();
+  const page = `<!doctype html><meta charset="utf-8"><title>${title}</title><label>Fixture browser editor<input id="editor" value="browser fixture text"></label><button id="action">Fixture browser action</button><script>
+    let clicks=0,sequence=0;const run=location.search.slice(1);
+    const editor=document.getElementById('editor'),button=document.getElementById('action');
+    function report(){fetch('/${token}/receipt',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run,sequence:++sequence,value:editor.value,activeControl:document.activeElement.id||'body',clicks})}).catch(()=>{});}
+    button.addEventListener('click',()=>{clicks++;report();});
+    document.addEventListener('focusin',report);
+    setInterval(report,100);report();
+  </script>`;
+  await writeFile(html, page);
+  const server = createServer(async (request, response) => {
+    if (
+      request.method === "GET" &&
+      request.url === `/${token}/page?${currentEngine}`
+    ) {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(
+        page.replace(
+          `<title>${title}</title>`,
+          `<title>${title} ${currentEngine}</title>`,
+        ),
+      );
+      return;
+    }
+    if (request.method === "POST" && request.url === `/${token}/receipt`) {
+      let data = "";
+      for await (const chunk of request) {
+        data += chunk;
+        if (data.length > 8192) {
+          response.writeHead(413);
+          response.end();
+          return;
+        }
+      }
+      try {
+        const next = JSON.parse(data);
+        if (
+          next.run === currentEngine &&
+          Number.isSafeInteger(next.sequence) &&
+          (!receipt || next.sequence > receipt.sequence)
+        )
+          receipt = next;
+        response.writeHead(204);
+        response.end();
+      } catch {
+        response.writeHead(400);
+        response.end();
+      }
+      return;
+    }
+    response.writeHead(404);
+    response.end();
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${server.address().port}/${token}/page`;
+  const observed = async (predicate) => {
+    const until = Date.now() + 3000;
+    while (!predicate(receipt)) {
+      if (Date.now() >= until)
+        throw new Error(
+          `Owned page observation not satisfied: ${JSON.stringify(receipt)}`,
+        );
+      await delay(20);
+    }
+    return { ...receipt };
+  };
+  const observer = await fixture(
+    "controls-fixture",
+    `Pi Chromium input observer ${randomUUID()}`,
   );
-  for (const name of ["pi", "reference"]) {
-    const client = await engine(name);
-    try {
-      await record(
-        name,
-        "chromium.native-uia",
-        "Native UIA finds fixture page button",
-        async () => {
-          let target;
-          const until = Date.now() + 15000;
-          while (Date.now() < until) {
-            const r = success(
-              await client.call("list_windows", {
-                maxWindows: 200,
-                includeInvisible: true,
-              }),
+  ownedTitles.add(observer.title);
+  try {
+    for (const name of ["pi", "reference"]) {
+      currentEngine = name;
+      receipt = undefined;
+      const targetTitle = `${title} ${name}`;
+      ownedTitles.add(targetTitle);
+      browser = spawn(
+        executable,
+        [
+          `--user-data-dir=${join(folder, `profile-${name}`)}`,
+          "--no-first-run",
+          "--no-default-browser-check",
+          "--disable-background-mode",
+          "--disable-features=CalculateNativeWinOcclusion",
+          "--disable-backgrounding-occluded-windows",
+          "--disable-renderer-backgrounding",
+          `--app=${url}?${name}`,
+        ],
+        { stdio: ["ignore", "ignore", "pipe"], windowsHide: true, cwd: folder },
+      );
+      browsers.push(browser);
+      const client = await engine(name);
+      let args, button;
+      try {
+        await record(
+          name,
+          "chromium.native-uia",
+          "Native UIA finds fixture page button",
+          async () => {
+            let target;
+            const until = Date.now() + 15000;
+            while (Date.now() < until) {
+              const r = success(
+                await client.call("list_windows", {
+                  maxWindows: 200,
+                  includeInvisible: true,
+                }),
+              );
+              assert.ok(
+                Array.isArray(r.windows),
+                JSON.stringify({ keys: Object.keys(r), error: r.error }),
+              );
+              target = r.windows.find((w) => w.name.includes(targetTitle));
+              if (target) break;
+              await delay(150);
+            }
+            assert.ok(target, "Owned browser window not discoverable");
+            args = {
+              nativeWindowHandle: target.nativeWindowHandle,
+              processId: target.processId,
+              activate: false,
+            };
+            let r;
+            const ready = Date.now() + 10000;
+            do {
+              r = await client.call("find", {
+                ...args,
+                query: "Fixture browser action",
+                ocrFallback: false,
+                includeOffscreen: true,
+              });
+              if (
+                (r.matches ?? r.results)?.some(
+                  (x) => x.name === "Fixture browser action",
+                )
+              )
+                break;
+              if (!r.ok) break;
+              await delay(150);
+            } while (Date.now() < ready);
+            success(r);
+            const el = (r.matches ?? r.results ?? []).find(
+              (x) => x.name === "Fixture browser action",
             );
-            assert.ok(
-              Array.isArray(r.windows),
-              JSON.stringify({ keys: Object.keys(r), error: r.error }),
+            assert.ok(el, JSON.stringify(r));
+            const info = success(
+              await client.call("element_info", { ...args, elementId: el.id }),
             );
-            target = r.windows.find((w) => w.name.includes(title));
-            if (target) break;
-            await delay(150);
-          }
-          assert.ok(target, "Owned browser window not discoverable");
-          const args = {
-            nativeWindowHandle: target.nativeWindowHandle,
-            processId: target.processId,
-            activate: false,
-          };
-          let r;
-          const ready = Date.now() + 10000;
-          do {
-            r = await client.call("find", {
+            assert.equal(info.element.controlType, "Button");
+            button = el;
+            const initialPage = await observed(
+              (current) => current?.run === name,
+            );
+            assert.equal(initialPage.value, "browser fixture text");
+            assert.equal(initialPage.clicks, 0);
+            return {
+              initialPage,
+              name: info.element.name,
+              controlType: info.element.controlType,
+              webContent: r.webContent ?? null,
+              attemptDeadlineMs: 10000,
+            };
+          },
+        );
+        if (!button || !args) continue;
+        const findEditor = async () => {
+          const found = success(
+            await client.call("find", {
               ...args,
-              query: "Fixture browser action",
+              query: "Fixture browser editor",
+              controlType: "Edit",
               ocrFallback: false,
               includeOffscreen: true,
-            });
-            if (
-              (r.matches ?? r.results)?.some(
-                (x) => x.name === "Fixture browser action",
-              )
-            )
-              break;
-            if (!r.ok) break;
-            await delay(150);
-          } while (Date.now() < ready);
-          success(r);
-          const el = (r.matches ?? r.results ?? []).find(
-            (x) => x.name === "Fixture browser action",
+            }),
           );
-          assert.ok(el, JSON.stringify(r));
-          const info = success(
-            await client.call("element_info", { ...args, elementId: el.id }),
-          );
-          assert.equal(info.element.controlType, "Button");
-          return {
-            name: info.element.name,
-            controlType: info.element.controlType,
-            webContent: r.webContent ?? null,
-            attemptDeadlineMs: 10000,
-          };
-        },
-      );
-    } finally {
-      await closeClient(client);
+          const matches = found.matches ?? found.results ?? [];
+          assert.equal(matches.length, 1, JSON.stringify(found));
+          return matches[0];
+        };
+        let editor;
+        const actionCase = async (id, expected, run) =>
+          record(name, id, expected, async () => {
+            const before = await observer.observe();
+            const pageBefore = await observed((value) => Boolean(value));
+            try {
+              const effect = await run();
+              const after = await observer.observe();
+              return { before, after, pageBefore, ...effect };
+            } catch (error) {
+              error.observation = {
+                before,
+                after: await observer.observe(),
+                pageBefore,
+                pageAfter: receipt,
+              };
+              throw error;
+            }
+          });
+        await actionCase(
+          "chromium.focus",
+          "Native UIA focus changes the logical active control without input fallback",
+          async () => {
+            editor = await findEditor();
+            const first = success(
+              await client.call("focus", { ...args, elementId: button.id }),
+            );
+            await observed((value) => value?.activeControl === "action");
+            const result = success(
+              await client.call("focus", { ...args, elementId: editor.id }),
+            );
+            const pageAfter = await observed(
+              (value) => value?.activeControl === "editor",
+            );
+            return { toolResults: [first, result], pageAfter };
+          },
+        );
+        const value = `Native UIA ${name} 中文 café 😀`;
+        await actionCase(
+          "chromium.set-value",
+          "Native UIA value matches the independent page value",
+          async () => {
+            assert.ok(editor, "Editor discovery prerequisite failed");
+            const result = success(
+              await client.call("set_value", {
+                ...args,
+                elementId: editor.id,
+                value,
+                fallbackType: false,
+              }),
+            );
+            assert.match(
+              result.method,
+              /^(uia_value|ValuePattern)$/,
+              "fallback or unexpected native method is not accepted",
+            );
+            const pageAfter = await observed(
+              (current) => current?.value === value,
+            );
+            return { toolResult: result, pageAfter };
+          },
+        );
+        await actionCase(
+          "chromium.invoke",
+          "Native UIA invokes once and page reports exact field payload",
+          async () => {
+            const baseline = await observed((current) => Boolean(current));
+            const result = success(
+              await client.call("invoke", {
+                ...args,
+                elementId: button.id,
+                fallbackClick: false,
+              }),
+            );
+            assert.match(
+              result.method,
+              /^(uia_invoke|Invoke)$/,
+              "fallback or unexpected native method is not accepted",
+            );
+            const pageAfter = await observed(
+              (current) => current?.clicks === baseline.clicks + 1,
+            );
+            assert.equal(pageAfter.value, value);
+            return {
+              toolResult: result,
+              pageAfter,
+              clickIncrement: pageAfter.clicks - baseline.clicks,
+            };
+          },
+        );
+      } finally {
+        await closeClient(client);
+      }
     }
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
   }
 }
 try {
-  for (const name of ["reference", "pi"]) {
+  for (const name of nativeChromiumOnly ? [] : ["reference", "pi"]) {
     if (nativeScrollOnly) {
       await runNativeScroll(name);
       continue;
@@ -1508,9 +1732,10 @@ try {
     await runProviderFailures(name);
   }
   if (
-    !nativeScrollOnly &&
-    !providerUnavailableOnly &&
-    !process.argv.includes("--provider-failures")
+    nativeChromiumOnly ||
+    (!nativeScrollOnly &&
+      !providerUnavailableOnly &&
+      !process.argv.includes("--provider-failures"))
   )
     await runChromium();
 } catch (error) {
@@ -1526,33 +1751,35 @@ try {
       report.cleanupError = String(error);
     }
   }
-  if (browser?.pid) {
-    const closed =
-      browser.exitCode !== null || browser.signalCode !== null
-        ? Promise.resolve()
-        : once(browser, "close");
-    const killed = spawnSync(
-      "taskkill.exe",
-      ["/PID", String(browser.pid), "/T", "/F"],
-      { encoding: "utf8", windowsHide: true },
-    );
-    if (killed.status !== 0) report.browserCleanupWarning = killed.stderr;
-    let timer;
-    try {
-      await Promise.race([
-        closed,
-        new Promise((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error("Owned browser exit unconfirmed")),
-            6000,
-          );
-        }),
-      ]);
-    } catch (error) {
-      clean = false;
-      report.browserCleanupError = String(error);
-    } finally {
-      clearTimeout(timer);
+  for (const browser of browsers) {
+    if (browser?.pid) {
+      const closed =
+        browser.exitCode !== null || browser.signalCode !== null
+          ? Promise.resolve()
+          : once(browser, "close");
+      const killed = spawnSync(
+        "taskkill.exe",
+        ["/PID", String(browser.pid), "/T", "/F"],
+        { encoding: "utf8", windowsHide: true },
+      );
+      if (killed.status !== 0) report.browserCleanupWarning = killed.stderr;
+      let timer;
+      try {
+        await Promise.race([
+          closed,
+          new Promise((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error("Owned browser exit unconfirmed")),
+              6000,
+            );
+          }),
+        ]);
+      } catch (error) {
+        clean = false;
+        report.browserCleanupError = String(error);
+      } finally {
+        clearTimeout(timer);
+      }
     }
   }
   try {
