@@ -1075,6 +1075,15 @@ test("mixed SDK routing preserves owned images and rejects cross-channel or unce
         const open=event('set_value',{elementId:'new-tab',value:base+'form'},'open');
         const openDecision=await runner.emitToolCall(open);assert.equal(openDecision?.block,undefined,JSON.stringify(openDecision));
         await runner.emitToolResult({...open,type:'tool_result',content:[],details:{ok:true,tab:{id:'t123',url:base+'form'},nodes:[{id:'t123:e1',name:'Name'}]}});
+        if(kind==='running'){
+          const browserImage=event('snapshot',{browserTab:'t123'},'browser-image');
+          assert.equal((await runner.emitToolCall(browserImage))?.block,undefined);
+          const original={...browserImage,type:'tool_result',isError:false,content:[{type:'image',mimeType:'image/png',data:'OWNED_BROWSER_IMAGE_BYTES'}],details:{ok:true,tab:{id:'t123',url:base+'form'},nodes:[],screenshot:{mimeType:'image/png',width:1,height:1}}};
+          const patch=await runner.emitToolResult(original),outgoing={...original,...patch};
+          assert.equal(outgoing.content[0].data,'OWNED_BROWSER_IMAGE_BYTES','SDK preserves owned browser image for provider');
+          const audit=readFileSync(auditFile,'utf8');assert.equal(audit.includes('OWNED_BROWSER_IMAGE_BYTES'),false);assert.equal(/"(?:data|base64)"\\s*:/.test(audit),false);
+        }
+
         const snap=event('snapshot',{nativeWindowHandle:11,processId:22,captureWindow:true},'native');
         const initialDecision=await runner.emitToolCall(snap);assert.equal(initialDecision?.block,undefined,JSON.stringify(initialDecision));
         const imageResult={...snap,type:'tool_result',isError:false,content:[{type:'image',data:'OWNED_IMAGE_BYTES'}],details:{ok:true,nativeWindowHandle:11,processId:22,windowRef:'actual-returned-ref',screenshot,tree:{children:[{id:'native-opaque',name:'',controlType:'Button',boundingBox:{x:40,y:50,width:200,height:80}}]}}};

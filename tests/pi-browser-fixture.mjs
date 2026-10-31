@@ -45,7 +45,11 @@ export default async function (pi) {
   const nativeRoutes = new Set();
   let nativeGuard, nativeBefore, nativeTrace;
   const audit = (e) =>
-    appendFileSync(auditFile, `${JSON.stringify(e)}\n`, { mode: 0o600 });
+    appendFileSync(
+      auditFile,
+      `${JSON.stringify(nativeTrace ? nativeTrace(e) : e)}\n`,
+      { mode: 0o600 },
+    );
   if (config.native) {
     const { createVisualGuard, visualBeforeHook, traceWithoutImages } =
       await import("./pi-visual-fixture.mjs");
