@@ -33,6 +33,7 @@ const html = `<!doctype html><title>Browser action fixture</title>
 <button onclick="setTimeout(()=>delayed.textContent='Delayed result',200)">Start delayed</button><p id="delayed">Waiting</p>
 <div style="height:1800px"></div><p>Bottom fixture</p><script>window.counter=0</script>`;
 let formSubmission = null;
+let formEvents = { starts: 0, ready: 0, submissions: 0 };
 const formHtml = `<!doctype html><meta charset="utf-8"><title>Paired browser form fixture</title>
 <h1>Paired browser form fixture</h1>
 <form id="form"><label>Name<input id="name"></label>
@@ -42,7 +43,7 @@ const formHtml = `<!doctype html><meta charset="utf-8"><title>Paired browser for
 <label>Disabled field<input disabled value="Disabled value"></label>
 <label>Read-only field<input readonly value="Read-only value"></label>
 <button>Submit form</button></form><pre id="result">Not submitted</pre>
-<button id="delayedButton" onclick="delayed.textContent='Pending';setTimeout(()=>delayed.textContent='Delayed result ready',300)">Start delayed result</button>
+<button id="delayedButton" onclick="delayed.textContent='Pending';fetch('/form/delayed/start',{method:'POST'}).then(()=>setTimeout(()=>fetch('/form/delayed/ready',{method:'POST'}).then(()=>delayed.textContent='Delayed result ready'),300))">Start delayed result</button>
 <p id="delayed">Not started</p><div style="height:1600px"></div><p>Form bottom marker</p>
 <script>form.addEventListener('submit',async event=>{event.preventDefault();
 const payload={name:document.getElementById('name').value,notes:notes.value,accepted:accepted.checked,choice:choice.value};
@@ -94,6 +95,15 @@ const server = createServer((request, response) => {
     advancedState = { upload: null, uploadRequests: 0, downloads: 0 };
     response.setHeader("content-type", "text/html; charset=utf-8");
     response.end(advancedHtml);
+  } else if (request.url === "/form/delayed/state") {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(formEvents));
+  } else if (
+    request.method === "POST" &&
+    ["/form/delayed/start", "/form/delayed/ready"].includes(request.url)
+  ) {
+    formEvents[request.url.endsWith("start") ? "starts" : "ready"]++;
+    response.end("ok");
   } else if (request.url === "/form/state") {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify(formSubmission));
@@ -104,11 +114,13 @@ const server = createServer((request, response) => {
     });
     request.on("end", () => {
       formSubmission = JSON.parse(body);
+      formEvents.submissions++;
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify(formSubmission));
     });
   } else if (request.url === "/form") {
     formSubmission = null;
+    formEvents = { starts: 0, ready: 0, submissions: 0 };
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     response.end(formHtml);
   } else if (request.url === "/download") {
