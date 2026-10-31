@@ -1591,8 +1591,14 @@ async function runChromium() {
             const initialPage = await observed(
               (current) => current?.run === name,
             );
-            assert.equal(initialPage.value, "browser fixture text");
-            assert.equal(initialPage.clicks, 0);
+            try {
+              assert.equal(initialPage.value, "browser fixture text");
+              assert.equal(initialPage.activeControl, "body");
+              assert.equal(initialPage.clicks, 0);
+            } catch (error) {
+              error.observation = { initialPage };
+              throw error;
+            }
             return {
               initialPage,
               name: info.element.name,
@@ -1622,16 +1628,23 @@ async function runChromium() {
           record(name, id, expected, async () => {
             const before = await observer.observe();
             const pageBefore = await observed((value) => Boolean(value));
+            let effect, after;
             try {
-              const effect = await run();
-              const after = await observer.observe();
+              effect = await run();
+              after = await observer.observe();
+              assert.equal(
+                after.lastInputTick,
+                before.lastInputTick,
+                "Unexpected input activity; quiet native UIA delivery is unconfirmed",
+              );
               return { before, after, pageBefore, ...effect };
             } catch (error) {
               error.observation = {
+                ...effect,
                 before,
-                after: await observer.observe(),
+                after: after ?? (await observer.observe()),
                 pageBefore,
-                pageAfter: receipt,
+                pageAfter: effect?.pageAfter ?? receipt,
               };
               throw error;
             }
@@ -1753,16 +1766,17 @@ try {
   }
   for (const browser of browsers) {
     if (browser?.pid) {
-      const closed =
-        browser.exitCode !== null || browser.signalCode !== null
-          ? Promise.resolve()
-          : once(browser, "close");
-      const killed = spawnSync(
-        "taskkill.exe",
-        ["/PID", String(browser.pid), "/T", "/F"],
-        { encoding: "utf8", windowsHide: true },
-      );
-      if (killed.status !== 0) report.browserCleanupWarning = killed.stderr;
+      const exited = browser.exitCode !== null || browser.signalCode !== null;
+      const closed = exited ? Promise.resolve() : once(browser, "close");
+      // An already-exited child no longer authorizes terminating its old PID.
+      if (!exited) {
+        const killed = spawnSync(
+          "taskkill.exe",
+          ["/PID", String(browser.pid), "/T", "/F"],
+          { encoding: "utf8", windowsHide: true },
+        );
+        if (killed.status !== 0) report.browserCleanupWarning = killed.stderr;
+      }
       let timer;
       try {
         await Promise.race([
