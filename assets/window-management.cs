@@ -42,17 +42,34 @@ partial class WindowsBridge {
     // the existing identity, foreground and input guards still apply.
   }
   [DllImport("user32.dll",EntryPoint="BringWindowToTop")]static extern bool ManagementBringToTop(IntPtr window);
-  static bool ManagementActivate(IntPtr window,uint owner) {
+  static string ManagementForegroundRelationship(IntPtr foreground,IntPtr window,uint owner) {
+    if(foreground==IntPtr.Zero)return "unavailable";
+    if(foreground==window)return "target";
+    if(GetAncestor(foreground,2)==window)return "target_child";
+    return ManagementOwner(foreground)==owner?"same_process":"other_process";
+  }
+  static bool ManagementActivate(IntPtr window,uint owner) {return ManagementActivate(window,owner,null);}
+  static bool ManagementActivate(IntPtr window,uint owner,Dictionary<string,object> diagnostics) {
     ManagementAssert(window,owner);ManagementEnsureUnlockedSession();
     if(IsIconic(window))ManagementShow(window,9);
     if(GetForegroundWindow()==window)return true;
-    SetForegroundWindow(window);
+    bool initial=SetForegroundWindow(window);
+    if(diagnostics!=null)diagnostics["initialRequestAccepted"]=initial;
     if(GetForegroundWindow()==window)return true;
     IntPtr front=GetForegroundWindow();uint ignored;uint frontThread=GetWindowThreadProcessId(front,out ignored),own=ManagementThread();bool attached=false;
-    try {if(frontThread!=0&&frontThread!=own)attached=ManagementAttach(own,frontThread,true);ManagementAssert(window,owner);ManagementBringToTop(window);ManagementAssert(window,owner);SetForegroundWindow(window);}
+    if(diagnostics!=null)diagnostics["foregroundBeforeFallback"]=ManagementForegroundRelationship(front,window,owner);
+    try {
+      bool attempted=frontThread!=0&&frontThread!=own;
+      if(attempted)attached=ManagementAttach(own,frontThread,true);
+      if(diagnostics!=null){diagnostics["inputThreadAttachAttempted"]=attempted;if(attempted)diagnostics["inputThreadAttached"]=attached;}
+      ManagementAssert(window,owner);bool raised=ManagementBringToTop(window);ManagementAssert(window,owner);bool requested=SetForegroundWindow(window);
+      if(diagnostics!=null){diagnostics["raiseAccepted"]=raised;diagnostics["fallbackRequestAccepted"]=requested;}
+    }
     finally {if(attached)ManagementAttach(own,frontThread,false);}
     for(int index=0;index<8&&GetForegroundWindow()!=window;index++)Thread.Sleep(10);
-    return GetForegroundWindow()==window;
+    IntPtr finalForeground=GetForegroundWindow();
+    if(diagnostics!=null)diagnostics["foregroundAfterFallback"]=ManagementForegroundRelationship(finalForeground,window,owner);
+    return finalForeground==window;
   }
   static object ManageNativeWindow(string action,Dictionary<string,object> args) {
     if(action=="launch_app")return LaunchFromDesktop(args);
