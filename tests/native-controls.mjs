@@ -120,6 +120,20 @@ try {
     (window) => window.hasKeyboardFocus,
   );
   const sibling = Number((await fixtureCommand("sibling")).split(":")[1]);
+  const wrongWindow = await call("set_value", {
+    nativeWindowHandle: sibling,
+    elementId: edit.id,
+    value: "must not be written",
+  });
+  assert.equal(wrongWindow.ok, false);
+  assert.match(wrongWindow.error, /ELEMENT_WRONG_OWNER/);
+  assert.match(wrongWindow.error, /observe.*target.*element/i);
+  assert.match(wrongWindow.error, /not.*automatic/i);
+  const unchangedAfterMismatch = await call("element_info", {
+    elementId: edit.id,
+    detailLevel: "full",
+  });
+  assert.equal(unchangedAfterMismatch.element.value, "Pi 測試");
   const activated = await call("activate_window", {});
   if (activated.ok) {
     const switcher = (await find("Switch sibling", "Hyperlink"))[0];

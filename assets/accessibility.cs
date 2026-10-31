@@ -108,7 +108,7 @@ partial class WindowsBridge {
     catch(ElementNotAvailableException) { observed.Remove(id); throw new InvalidOperationException("STALE_ELEMENT: control no longer exists; observe again"); }
   }
   static void ValidateElementTarget(IntPtr window, Dictionary<string,object> args) {
-    if(args.ContainsKey("nativeWindowHandle") || args.ContainsKey("processId") || args.ContainsKey("windowTitle")) if(ResolveObservationWindow(args)!=window) throw new InvalidOperationException("ELEMENT_WRONG_OWNER: element belongs to a different target window");
+    if(args.ContainsKey("nativeWindowHandle") || args.ContainsKey("processId") || args.ContainsKey("windowTitle")) if(ResolveObservationWindow(args)!=window) throw new InvalidOperationException("ELEMENT_WRONG_OWNER: element belongs to a different target window; observe the target window and element again; do not automatically replay the action");
   }
   sealed class Traversal {
     public Stopwatch Watch=Stopwatch.StartNew(); public int Budget,Maximum,Depth,Count,UnknownControlTypes; public string Reason; public string Error; public bool Offscreen,Full,BrowserLayout; public TreeWalker Walker;
@@ -166,7 +166,7 @@ partial class WindowsBridge {
     if(action=="element_info") {
       IntPtr owner; AutomationElement element;
       if(args.ContainsKey("elementId")) element=ResolveObservedElement(Convert.ToString(args["elementId"]),args,out owner);
-      else { element=AutomationElement.FromPoint(new System.Windows.Point(Convert.ToInt32(args["x"]),Convert.ToInt32(args["y"]))); owner=IntPtr.Zero; if(args.ContainsKey("nativeWindowHandle") || args.ContainsKey("processId") || args.ContainsKey("windowTitle")) { IntPtr target=ResolveObservationWindow(args); Dictionary<string,object> info=DescribeElement(element,IntPtr.Zero,full,0); ObservedElement entry; if(!observed.TryGetValue(Convert.ToString(info["id"]),out entry) || entry.Window!=target) throw new InvalidOperationException("ELEMENT_WRONG_OWNER: point is outside target"); owner=target; } }
+      else { element=AutomationElement.FromPoint(new System.Windows.Point(Convert.ToInt32(args["x"]),Convert.ToInt32(args["y"]))); owner=IntPtr.Zero; if(args.ContainsKey("nativeWindowHandle") || args.ContainsKey("processId") || args.ContainsKey("windowTitle")) { IntPtr target=ResolveObservationWindow(args); Dictionary<string,object> info=DescribeElement(element,IntPtr.Zero,full,0); ObservedElement entry; if(!observed.TryGetValue(Convert.ToString(info["id"]),out entry) || entry.Window!=target) throw new InvalidOperationException("ELEMENT_WRONG_OWNER: point is outside target; observe the target window and element again; do not automatically replay the action"); owner=target; } }
       Dictionary<string,object> result=Result(true,action); result["element"]=DescribeElement(element,owner,full,0); if(((Dictionary<string,object>)result["element"]).ContainsKey("controlTypeUnavailable")) result["conclusive"]=false; return result;
     }
     bool desktop=TextOption(args,"scope","active_window")=="desktop";
