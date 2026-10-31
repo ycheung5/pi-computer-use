@@ -6,7 +6,7 @@ Start with [docs/README.md](docs/README.md) and read only the sections relevant 
 
 ## Structure
 
-This repository currently contains documentation only. Add application code in `src/`, tests in `tests/`, and packaged resources in `assets/` when needed. Start with flat, responsibility-named modules; introduce subdirectories only when concrete complexity warrants them. Keep host-specific integrations separate from reusable logic.
+Application code lives in `src/`, tests in `tests/`, and packaged resources in `assets/`. Keep flat, responsibility-named modules; introduce subdirectories only when concrete complexity warrants them. Keep host-specific integrations separate from reusable logic.
 
 Maintain the documentation index when adding or moving docs. Keep each requirement in the spec, delivery detail in the plan, and rationale in an ADR; link rather than duplicate.
 
@@ -14,7 +14,9 @@ Maintain the documentation index when adding or moving docs. Keep each requireme
 
 Introduce language-standard formatting, linting and tests alongside the first implementation. Check in configuration and the dependency lockfile; document clean installation, development, build, tests, formatting and linting commands in README.md. Use only configured commands.
 
-Test external behavior, including failures, through the agreed interfaces. Keep tests deterministic and document live Windows prerequisites; run physical-input tests on a dedicated interactive desktop. See the plan's coverage matrix for release checks.
+Test external behavior, including failures, through the agreed interfaces. Keep tests deterministic and document live Windows prerequisites. For live/physical test boundaries, read [testing decisions](docs/spec.md#testing-decisions) and the [current queue](docs/tickets.md#execution-queue); use the plan's coverage matrix for release checks.
+
+Before live Windows tests from a WSL worktree, read [runtime verification](docs/runtime.md#verification) for dependency-path prerequisites.
 
 ## Changes and configuration
 

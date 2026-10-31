@@ -1,16 +1,16 @@
 # Pi computer-use implementation plan
 
-Status: scope confirmed by the user; specification synthesized. No application implementation exists yet.
+Status: the user authorized merging [implementation PR #38](https://github.com/ycheung5/pi-computer-use/pull/38) into `main` as the development baseline on 2026-11-01. This does not declare a release or complete outstanding acceptance. Continue from [current delivery outcomes](tickets.md#delivery-outcomes-and-ownership); remaining requirements retain their open issues.
 
 Requirements and behavioral contracts are authoritative in the [specification](spec.md). Use the [documentation index](README.md) to load only relevant context.
 
 ## Structure
 
-Start with flat, responsibility-named TypeScript modules in `src/`, tests in `tests/`, and packaged assets in `assets/` when needed. Keep host-specific launcher and Windows interop logic separate from reusable orchestration through modules, without pre-creating nested directories. The [repository layout](README.md#repository-layout) is the navigation guide.
+Keep flat, responsibility-named TypeScript modules in `src/`, tests in `tests/`, and packaged assets in `assets/`. Keep host-specific launcher and Windows interop logic separate from reusable orchestration through modules, without pre-creating nested directories. The [repository layout](README.md#repository-layout) is the navigation guide.
 
 ## Feasibility gates
 
-Complete these early in milestone 1, before investing in the full implementation:
+These original feasibility gates remain regression obligations. Reuse recorded evidence; repeat checks when changes or missing evidence warrant it:
 
 1. Prove a packaged Windows worker launches from native Pi and WSL2 Pi with clean stdio framing, spaces/Unicode paths, Windows-drive and WSL-filesystem checkouts, cancellation, parent exit and no orphan processes. Users must not install Windows Node separately.
 2. Compare a small native helper with TypeScript-accessible native interop for UIA, screenshots, OCR, input and global stopping. Prefer TypeScript, but choose the smallest maintainable implementation that satisfies failure isolation and Windows threading requirements. Do not infer that the Pi SDK itself supplies desktop access.
@@ -37,18 +37,45 @@ Every supported tool gets argument validation, success, failure, cancellation wh
 | Presentation | Pi tool rendering, image results, evidence/error distinctions; real indicators, stop shortcuts, remote/recording visibility and display changes checked manually |
 | Performance | Reproducible cold startup, warm reads, input dispatch and complete workflows compared with reference on the same machine |
 
-Use deterministic local browser pages and dedicated disposable Windows fixture apps for automation. Do not drive the user's normal apps or profiles in automated suites. Separate portable unit/contract tests from live Windows integration suites, and separate tests that emit physical input so they run only on a dedicated interactive desktop.
+Use deterministic local pages, isolated browser profiles and disposable Windows targets. The user selected scoped tests in the current Windows session with standing idle-test authorization. Bound actions to owned disposable targets and preserve unrelated apps/documents; serialize desktop activity. Separate portable, live and physical-input suites. A fixture requiring stronger isolation stays blocked until its actual prerequisites are met.
 
 Exercise the integrated extension through both native Windows Pi and WSL2 Pi; worker-only tests do not prove both launch paths. Pin/document tested Pi and dependency versions. Retain failure logs and timing artifacts without persisting sensitive desktop content unnecessarily. CI may run portable tests and suitable Windows fixtures; interactive-desktop, multi-monitor, emergency-stop and user acceptance runs must be recorded separately when CI cannot reproduce them.
 
 ## Detailed milestones
 
-1. **Foundation and feasibility:** package/toolchain/lockfile; worker protocol and launcher; runtime packaging and native-interop experiments; ownership proof; initial contract tests; reference capability/parameter inventory and benchmark harness.
-2. **Pi and desktop integration:** native tool registration, personal settings command, tool loading modes, lifecycle/operation tracking, worker queue and cancellation; Windows observation, capture/OCR, guarded input/window actions, independent stopping and indicators.
-3. **Browser and presentation parity:** Chrome/Edge and experimental Firefox paths; isolated/kept profiles; browser page-change results; Pi rendering and settings; integration tests for browser actions and failures.
-4. **Release validation:** complete coverage matrix on both hosts; clean-install checks, performance comparison and documented limitations; user acceptance testing; resolve failures before declaring release readiness.
+The initial foundation, desktop and browser implementation exists; release acceptance is incomplete. The current work is the following investigation and repair cycle, tracked by [issue #23](https://github.com/ycheung5/pi-computer-use/issues/23), not a restart of initial implementation. Requirements remain in the [spec](spec.md); named cases and evidence live in [validation](validation.md#alignment-scenario-catalog).
 
-Each milestone must be runnable and testable. Full feature parity remains the first-release criterion; incremental milestones are not a reduced-scope release.
+| Phase | Work and tests | Exit evidence |
+| --- | --- | --- |
+| 1. Audit differences | Map all 25 declarations, descriptions, defaults, routing, fallback, results and lifecycle behavior to DSH. Trace previous fixes to symptoms and tests. Diagnose the latest schema-runner failure. | Each material difference is classified and linked to a test or required investigation; the schema runner produces a valid result. No behavioral-parity claim from schema equality. |
+| 2. Collect tool baseline | Run existing deterministic suites and paired native/browser scenarios on reset fixtures. Cover every capability's supported success and relevant failure paths. Collect the whole runnable suite, not just the first failure. | Versioned outcome report, missing coverage and blocked environments explicitly listed; sufficient reproductions to distinguish implementation problems from fixture/environment problems. Failures remain open. |
+| 3. Collect agent baseline | Run ordinary outcome-based tasks and controlled recovery scenarios in Pi and DSH. Permit supported recovery within disposable test data. | Outcome and trace report for each host/model combination; observed recovery, unnecessary stops, interventions and misleading success claims recorded. No presumed model causation. |
+| 4. Diagnose and align | Reproduce failures with direct tool calls where possible. Compare mechanisms and change one suspected cause at a time. Implement reference behavior unless a demonstrated gap requires improvement. | Failed cases and affected regressions rerun; required task/recovery scenarios pass three consecutive reset runs on the final candidate. Unresolved outcomes remain failed, blocked or explicitly accepted limitations. |
+| 5. Optimize | Retain the accepted cases and measure justified changes against them and DSH. | Correctness and preservation first, fewer unnecessary interventions second, latency and token use third. No improvement claim from speed alone. |
+
+The phases describe evidence and completion obligations. Execute phases 2–4 per scenario: collect its baseline, diagnose an observed failure, make a targeted repair, and rerun that scenario and affected regressions. Full-suite collection is not a prerequisite for diagnosing an available failure. A blocked or unsafe case halts its dependent activity; independently safe Pi scenarios remain runnable, including while DSH credentials are unavailable. Final reconciliation still accounts for every required outcome. No fixed production retry count or five-minute agent policy is introduced.
+
+Every investigation or implementation change must reconcile the affected documentation before its phase closes: requirements in the spec, sequencing here, cases/results in validation, current behavior in topic guides, and deliberate-deviation rationale in an ADR. Replace stale guidance and remove duplicate instructions; preserve concise historical evidence without presenting it as current acceptance. Update the index and check links after moves.
+
+Current checkpoint (2026-10-31): audit/comparison tickets #24, #25, #29, #32, #33 and #34 are complete in their recorded scopes. Other tool comparisons and real-agent acceptance are partial. Targeted schema, guidance, input-protocol and browser-control repairs have already landed; final acceptance and optimization remain incomplete. Use the [execution queue](tickets.md#execution-queue) rather than restarting implementation or waiting for every unrelated comparison. Reuse existing fixtures; each new runner requires a named coverage gap. No new public test-only seam is planned.
+
+## Window lifetime design
+
+The user approved stronger tracking under #28. [ADR 0002](adr/0002-window-lifetime-references.md) records the independently reviewed design; the native lifetime implementation has passed independent review with [scoped acceptance](validation.md#window-lifetime-reference-acceptance). Raw selectors remain explicitly weaker compatibility selection.
+
+Use the existing native bridge as the sole reference authority. One optional `windowRef` identifies an observed lifetime; HWND/PID/title and raw native-window IDs remain compatibility selectors. A supplied reference cannot be discarded or restamped internally. Conflicting selectors fail explicitly. Native-child restart expires its references; fresh observation is recovery, never automatic mutation replay.
+
+Bind cached UIA elements to the root reference and an immutable issued element ID, retaining RuntimeId as comparison metadata. Later observations must not overwrite an old reference with another root binding. Reuse the existing private WGC target handoff for stateless marker validation; OCR, snapshot images, waits, implicit targets and physical fallbacks must retain the originating reference.
+
+If marker acquisition fails, preserve ordinary read metadata and an explicit reference-unavailable reason, but issue neither a strong window reference nor actionable native element IDs. Raw native-window selectors remain explicitly compatible; a failed strong reference is never silently converted into one. This avoids presenting an unbound element ID as safe to mutate.
+
+Snapshot's existing default `captureWindow: false` produces a desktop image. Keep that image separately labeled as desktop evidence while the tree carries its window reference; do not forward a window reference into desktop capture or imply those pixels belong to the bound window. Window-image, OCR and hit-test composition retain the observed root reference.
+
+Missing markers, expiry, unknown epochs and access denial are lost proof, not confirmed disappearance. Validate before dispatch and at existing multi-step checks; already-dispatched effects and concurrent destruction after the final check cannot be undone or atomically excluded. Normal expiry/disposal removes only owned markers. Residue after abrupt native-child exit remains explicit; no property sweeper, broker, privilege bypass or new event thread is planned.
+
+The owned-window probe and interface were independently reviewed before implementation. Existing public tool/worker and owned fixtures now exercise the implemented contract, including a provider pause before final validation and a separate post-effect proof-loss case with independent counters. [Current scoped evidence](validation.md#window-lifetime-reference-acceptance) retains isolated-session gaps and distinguishes the separately recorded #6 automatic capture repair. Actual identical-HWND reuse and verified UIPI denial remain distinct prerequisites; different handles or synthetic denial cannot be mislabeled as those cases. The optional owned-fixture real-time expiry case now validates the actual five-minute lifetime without refreshing or restarting its authority. Paired warm checks add no fixed sleeps or extra model rounds.
+
+Live binding tests stay on disposable owned windows. Global discovery and internal launch-enumeration paths must be reviewed for metadata writes; tests that would bind unrelated windows require a suitably isolated session rather than bypassing the user's scoped-test choice.
 
 ## Completion criteria
 
