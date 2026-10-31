@@ -16,6 +16,8 @@ Introduce language-standard formatting, linting and tests alongside the first im
 
 Test external behavior, including failures, through the agreed interfaces. Keep tests deterministic and document live Windows prerequisites. For live/physical test boundaries, read [testing decisions](docs/spec.md#testing-decisions) and the [current queue](docs/tickets.md#execution-queue); use the plan's coverage matrix for release checks.
 
+Before live Windows tests from a WSL worktree, read [runtime verification](docs/runtime.md#verification) for dependency-path prerequisites.
+
 ## Changes and configuration
 
 Use concise imperative commit subjects and focused changes. PRs explain behavior, relevant issues and validation results; include screenshots for visible changes and note setup changes.

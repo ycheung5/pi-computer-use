@@ -24,6 +24,8 @@ Desktop ownership, independent stopping and guarded input paths are integrated. 
 
 ## Verification
 
+For live Windows tests from a WSL worktree, make dependencies readable by Windows Node before starting a fixture. An absolute Linux `node_modules` symlink can work in Linux while Windows cannot resolve `puppeteer-core` through it. Use a real worktree dependency installation or a Windows-readable staged copy, build the candidate, and verify dependency resolution from that exact location. Record staged source identity; a missing package in the test copy is a staging failure, not a product failure.
+
 - `npm run check`: TypeScript, Biome and portable tests for tool execution, lazy reuse, disposal, startup cancellation, failed-start recovery, timeout non-replay and checksum rejection.
 - `npm run build`: emits extension and worker modules; browser execution uses the declared puppeteer-core runtime dependency.
 - `npm run test:package`: verifies the actual distribution includes compiled/native assets, runtime notices and a self-contained indexed documentation set.
