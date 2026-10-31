@@ -11,13 +11,13 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { keepVisualOwnership } from "./pi-visual-host.mjs";
 
-export function commandObserver(file) {
-  const source = `import {appendFileSync} from 'node:fs';import {StringDecoder} from 'node:string_decoder';
-let sequence=0,fault=false;const file=${JSON.stringify(file)};
+export function commandObserver(file, navigationHash = null) {
+  const source = `import {appendFileSync} from 'node:fs';import {StringDecoder} from 'node:string_decoder';import {createHash} from 'node:crypto';
+let sequence=0,fault=false;const file=${JSON.stringify(file)},navigationHash=${JSON.stringify(navigationHash)};
 const record=row=>{try{appendFileSync(file,JSON.stringify({sequence:++sequence,pid:process.pid,time:Date.now(),monotonicMs:performance.now(),fault,...row})+'\\n',{mode:0o600});}catch{fault=true;}};
 record({kind:'ready',executable:process.execPath,worker:process.argv[1],cwd:process.cwd(),settingsFile:process.env.PI_CU_SETTINGS_FILE});
 const decoder={input:new StringDecoder('utf8'),output:new StringDecoder('utf8')},buffer={input:'',output:''};
-const observe=(kind,chunk)=>{try{buffer[kind]+=typeof chunk==='string'?chunk:decoder[kind].write(chunk);let end;while((end=buffer[kind].indexOf('\\n'))>=0){const line=buffer[kind].slice(0,end);buffer[kind]=buffer[kind].slice(end+1);const r=JSON.parse(line),d=r.result;record({kind,id:r.id,action:r.action,operationId:r.operationId,milliseconds:r.args?.milliseconds,stop:r.stop,cancel:r.cancel,event:r.event,phase:r.phase,result:d?{ok:d.ok,action:d.action,error:d.error,processId:d.processId,released:d.released}:undefined});}if(buffer[kind].length>65536){fault=true;record({kind:'fault',error:'oversized protocol frame'});}}catch{fault=true;record({kind:'fault',error:'malformed protocol frame'});}};
+const observe=(kind,chunk)=>{try{buffer[kind]+=typeof chunk==='string'?chunk:decoder[kind].write(chunk);let end;while((end=buffer[kind].indexOf('\\n'))>=0){const line=buffer[kind].slice(0,end);buffer[kind]=buffer[kind].slice(end+1);const r=JSON.parse(line),d=r.result;const nav=navigationHash&&r.action==='set_value'&&typeof r.args?.value==='string'&&typeof r.args?.elementId==='string'&&(r.args.elementId==='new-tab'||r.args.elementId.endsWith(':address'))&&createHash('sha256').update(r.args.value).digest('hex')===navigationHash;record({kind,navigationHash:nav?navigationHash:undefined,target:nav?(r.args.elementId==='new-tab'?'new-tab':'address'):undefined,id:r.id,action:r.action,operationId:r.operationId,milliseconds:r.args?.milliseconds,stop:r.stop,cancel:r.cancel,event:r.event,phase:r.phase,result:d?{ok:d.ok,action:d.action,error:navigationHash&&d.error&&!['COMPUTER_USE_STOPPED','COMPUTER_USE_CANCELLED'].includes(d.error)?'OTHER_WORKER_ERROR':d.error,processId:d.processId,released:d.released}:undefined});}if(buffer[kind].length>65536){fault=true;record({kind:'fault',error:'oversized protocol frame'});}}catch{fault=true;record({kind:'fault',error:'malformed protocol frame'});}};
 const emit=process.stdin.emit;process.stdin.emit=function(...args){if(args[0]==='data')observe('input',args[1]);return Reflect.apply(emit,this,args);};
 const write=process.stdout.write;process.stdout.write=function(...args){observe('output',args[0]);return Reflect.apply(write,this,args);};`;
   return (
@@ -60,7 +60,15 @@ export function commandGuard(event, readOwner, record) {
 // Report/collector seam: command acceptance or SDK abort alone is not worker cancellation.
 export function assessCommandSettlement(pending, rows) {
   const failed = (reason) => ({ status: "failed", reason });
-  if (!Number.isFinite(pending.monotonicMs) || pending.milliseconds !== 30000)
+  const navigation =
+    pending.action === "set_value" &&
+    /^[a-f0-9]{64}$/.test(pending.navigationHash ?? "");
+  const budget = navigation ? 15000 : pending.milliseconds,
+    action = navigation ? "set_value" : "wait";
+  if (
+    !Number.isFinite(pending.monotonicMs) ||
+    (!navigation && budget !== 30000)
+  )
     return failed("request clock/budget unavailable");
   const replies = rows.filter(
     (row) =>
@@ -73,15 +81,11 @@ export function assessCommandSettlement(pending, rows) {
     elapsedMs = response.monotonicMs - pending.monotonicMs;
   if (
     response.result?.ok !== false ||
-    response.result.action !== "wait" ||
+    response.result.action !== action ||
     response.result.error !== "COMPUTER_USE_STOPPED"
   )
     return failed("worker did not report stop-specific wait cancellation");
-  if (
-    !Number.isFinite(elapsedMs) ||
-    elapsedMs < 0 ||
-    elapsedMs >= pending.milliseconds
-  )
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0 || elapsedMs >= budget)
     return failed(
       "worker cancellation was not before the original timer deadline",
     );
@@ -118,7 +122,75 @@ export function assessCommandSettlement(pending, rows) {
     return failed(
       "operation ownership release failed or preceded cancellation",
     );
+  if (navigation && acknowledgment.monotonicMs - pending.monotonicMs >= budget)
+    return failed("navigation ownership release exceeded original deadline");
   return { status: "observed", elapsedMs, response, acknowledgment };
+}
+
+// Only an independently entered held response and a sole actual worker request authorize abort.
+export function heldNavigationEntry(rows, held, hash) {
+  if (rows.some((row) => row.fault || row.kind === "fault"))
+    throw Error("worker observation fault");
+  if (
+    held?.entries !== 1 ||
+    held.completed !== 0 ||
+    held.closed !== 0 ||
+    held.urlHash !== hash
+  )
+    return;
+  const pending = rows.filter(
+    (row) =>
+      row.kind === "input" &&
+      row.action &&
+      !rows.some(
+        (reply) =>
+          reply.kind === "output" &&
+          reply.pid === row.pid &&
+          reply.id === row.id,
+      ),
+  );
+  if (
+    pending.length === 1 &&
+    Number.isSafeInteger(pending[0].id) &&
+    pending[0].id > 0 &&
+    Number.isSafeInteger(pending[0].pid) &&
+    pending[0].pid > 0 &&
+    typeof pending[0].operationId === "string" &&
+    pending[0].operationId.length > 0 &&
+    Number.isFinite(pending[0].monotonicMs) &&
+    pending[0].action === "set_value" &&
+    pending[0].navigationHash === hash &&
+    ["new-tab", "address"].includes(pending[0].target)
+  )
+    return pending[0];
+}
+
+// Exact observed worker only. Query failure is unknown; any live/reused PID blocks retirement.
+export function commandWorkerIdentity(executable, pid) {
+  assert.ok(Number.isSafeInteger(pid) && pid > 0);
+  const script = `$ErrorActionPreference='Stop';$r=@(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}' -ErrorAction Stop);ConvertTo-Json -Compress -InputObject @($r|ForEach-Object{@{pid=$_.ProcessId;creation=$_.CreationDate.ToUniversalTime().ToString('o');executable=$_.ExecutablePath}})`;
+  const code = `const cp=require('node:child_process'),p=require('node:path');process.stdout.write(cp.execFileSync(p.join(process.env.WINDIR,'System32','WindowsPowerShell','v1.0','powershell.exe'),['-NoProfile','-NonInteractive','-EncodedCommand',${JSON.stringify(Buffer.from(script, "utf16le").toString("base64"))}],{encoding:'utf8',windowsHide:true,timeout:10000}));`;
+  const result = spawnSync(executable, ["-e", code], {
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 15000,
+  });
+  assert.equal(result.status, 0, String(result.error ?? result.stderr));
+  const rows = JSON.parse(result.stdout);
+  assert.ok(rows.length <= 1);
+  if (rows.length) assert.ok(rows[0].creation && rows[0].executable);
+  return rows[0];
+}
+
+export function commandRows(file, settled = false) {
+  const text = readFileSync(file, "utf8");
+  if (settled && text && !text.endsWith("\n"))
+    throw Error("incomplete settled worker observation");
+  return text
+    .slice(0, text.lastIndexOf("\n") + 1)
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
 }
 
 export function commandOptions(args) {

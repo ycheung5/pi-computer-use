@@ -1,6 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, readFileSync } from "node:fs";
-export const scenarios = ["form", "advanced", "stale", "mixed", "partial"];
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+export const scenarios = [
+  "form",
+  "advanced",
+  "stale",
+  "mixed",
+  "partial",
+  "cancel",
+];
 export async function formState(base) {
   const { nativeWorkerLaunch } = await import("../dist/launcher.js");
   const native = await nativeWorkerLaunch();
@@ -90,15 +97,26 @@ export default async function (pi) {
       () => {},
     );
   }
-  const { default: computerUse } = await import("../dist/extension.js");
+  const { default: computerUse, registerComputerUse } = await import(
+    "../dist/extension.js"
+  );
   if (!/^http:\/\/127\.0\.0\.1:\d+\/$/.test(base ?? ""))
     throw Error("trusted fixture base required");
   if (!scenarios.includes(scenario)) throw Error("unknown fixture scenario");
   const form = base + "form",
     advanced = base + "advanced",
-    initial = scenario === "advanced" ? advanced : form,
+    initial =
+      scenario === "cancel"
+        ? config.cancel.heldUrl
+        : scenario === "advanced"
+          ? advanced
+          : form,
     urls = new Set(
-      scenario === "advanced" ? [advanced, base + "child"] : [form, advanced],
+      scenario === "cancel"
+        ? [initial]
+        : scenario === "advanced"
+          ? [advanced, base + "child"]
+          : [form, advanced],
     );
   const tabs = new Set(),
     files = new Set();
@@ -136,6 +154,89 @@ export default async function (pi) {
         return before ? deny("fixture audit or state unavailable") : undefined;
       }
     };
+  let cancelSupport;
+  if (scenario === "cancel") {
+    if (
+      !initial.startsWith(base + "held-") ||
+      !/^[a-f0-9]{64}$/.test(config.cancel.hash)
+    )
+      throw Error("owned held fixture required");
+    cancelSupport = await import("./pi-host-command.mjs");
+  }
+  function watchHeld(ctx) {
+    let busy = false,
+      closed = false,
+      pin;
+    const tick = async () => {
+      if (busy || closed || state.stopped || state.guardFault) return;
+      busy = true;
+      try {
+        let rows;
+        try {
+          rows = cancelSupport.commandRows(config.cancel.trace);
+        } catch (error) {
+          if (error.code === "ENOENT") return;
+          throw error;
+        }
+        const ready = rows.find((row) => row.kind === "ready");
+        if (ready && !pin) {
+          pin = cancelSupport.commandWorkerIdentity(
+            config.cancel.windowsNode,
+            ready.pid,
+          );
+          if (
+            !pin ||
+            pin.executable.toLowerCase() !== ready.executable.toLowerCase()
+          )
+            throw Error("worker identity unknown");
+          audit({ type: "cancel_worker_pin", pin });
+        }
+        const held = await (await fetch(base + "held/state")).json();
+        if (closed) return;
+        if (held.entries > 1 || held.completed > 0)
+          throw Error("held navigation entry ambiguous or completed");
+        const pending = cancelSupport.heldNavigationEntry(
+          cancelSupport.commandRows(config.cancel.trace),
+          held,
+          config.cancel.hash,
+        );
+        if (!pending || !pin) return;
+        if (pending.pid !== pin.pid || typeof ctx?.abort !== "function")
+          throw Error("real SDK abort context unavailable");
+        audit({
+          type: "controlled_cancel",
+          pending,
+          witness: held,
+          workerPin: pin,
+        });
+        state.stopped = true; // Fence dispatch before the actual SDK abort.
+        ctx.abort();
+      } catch (error) {
+        state.guardFault = true;
+        try {
+          const owner = JSON.parse(readFileSync(journal, "utf8"));
+          writeFileSync(
+            journal,
+            JSON.stringify({
+              ...owner,
+              phase: "retained",
+              reason: "cancel-observation-unknown",
+              error: String(error),
+            }),
+          );
+        } catch {
+          /* Local fault fence remains authoritative even if audit storage failed. */
+        }
+      } finally {
+        busy = false;
+      }
+    };
+    const timer = setInterval(() => void tick(), 50);
+    return () => {
+      closed = true;
+      clearInterval(timer);
+    };
+  }
   const oracle = () => formState(base);
   const before = (e) => {
     if (state.guardFault)
@@ -472,13 +573,51 @@ export default async function (pi) {
               if (!stale || tree.details?.ok !== true) state.haltWrites = true;
               return result;
             }
+            if (
+              scenario === "cancel" &&
+              n === "set_value" &&
+              args.value === initial
+            ) {
+              const result = definition.execute(...params),
+                stopWatch = watchHeld(ctx);
+              try {
+                const value = await result;
+                if (state.guardFault)
+                  await new Promise(() => setInterval(() => {}, 60000));
+                return value;
+              } catch (error) {
+                if (state.guardFault)
+                  await new Promise(() => setInterval(() => {}, 60000));
+                throw error;
+              } finally {
+                stopWatch();
+              }
+            }
             return definition.execute(...params);
           },
         });
       };
     },
   });
-  computerUse(wrapped);
+  if (scenario === "cancel") {
+    const { nativeWorkerLaunch } = await import("../dist/launcher.js");
+    registerComputerUse(wrapped, {
+      launch: async (signal) => {
+        const launch = await nativeWorkerLaunch(signal);
+        return {
+          ...launch,
+          args: [
+            "--import",
+            cancelSupport.commandObserver(
+              config.cancel.windowsTrace,
+              config.cancel.hash,
+            ),
+            ...launch.args,
+          ],
+        };
+      },
+    });
+  } else computerUse(wrapped);
 }
 
 const first = {
@@ -514,6 +653,8 @@ export function brief(scenario, source) {
     return `At ${form}, submit name “${mixedExpected.name}”, notes “${mixedExpected.notes}”, accept terms and choose Beta. The submitted form returns a confirmation code. In our owned native window HWND ${source.native.nativeWindowHandle}, PID ${source.native.processId}, title ${JSON.stringify(source.native.title)}, invoke the one neutral CODE button bearing that returned code exactly once and preserve the other button. Confirm the browser's native-completion acknowledgement and report the code. Use only this local browser tab and owned native window with public observed references. Native controls require semantic Invoke with fallbackClick:false and activate:false; snapshots must use captureWindow:true for owned-window images. No keyboard, pointer, clipboard, launch, other windows or desktop images. Reobserve after conclusive no-effect refusal; do not replay uncertain effects; stop on actual cancellation or unknown cleanup.`;
   if (scenario === "form")
     return `At ${form}, submit name “${formExpected.name}”, notes “${formExpected.notes}”, accept terms and choose Beta. Start the delayed result and verify “Delayed result ready”, preserving disabled/read-only fields.${safety}`;
+  if (scenario === "cancel")
+    return `Open ${source.heldUrl}, verify its confirmation, and report the result.${safety}`;
   if (scenario === "partial")
     return `At ${form}, submit name “${formExpected.name}”, notes “${formExpected.notes}”, accept terms and choose Beta. Verify the submission and preserve disabled/read-only fields.${safety}`;
   if (scenario === "advanced")
@@ -829,7 +970,7 @@ export function verifyOutcome(scenario, f) {
     );
   const settled =
     f.lifecycle?.settled === true &&
-    f.lifecycle.aborted === false &&
+    f.lifecycle.aborted === (scenario === "cancel") &&
     f.lifecycle.exitCode === 0 &&
     f.lifecycle.parseError !== true;
   const cleanup =
@@ -838,7 +979,23 @@ export function verifyOutcome(scenario, f) {
     f.cleanup.fixtureExited === true;
   let outcome = false,
     partialResult;
-  if (scenario === "partial") {
+  if (scenario === "cancel") {
+    const c = f.cancel;
+    outcome =
+      c?.assessment?.status === "observed" &&
+      c.assessment.response?.id === c.pending?.id &&
+      c.assessment.response?.pid === c.pending?.pid &&
+      c.assessment.response?.result?.error === "COMPUTER_USE_STOPPED" &&
+      c.assessment.acknowledgment?.result?.released === true &&
+      c.http?.urlHash === c.pending?.navigationHash &&
+      c.workerRetired === true &&
+      c.http?.entries === 1 &&
+      c.http.completed === 0 &&
+      c.http.closed === 1 &&
+      c.noPostStopBusiness === true &&
+      c.noCompletionClaim === true &&
+      c.triggerCount === 1;
+  } else if (scenario === "partial") {
     partialResult = partialRecovery(f);
     outcome = partialResult.pass;
   } else if (scenario === "mixed") {
