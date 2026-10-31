@@ -6,6 +6,8 @@ Browser `element_info` includes disabled and read-only state for applicable cont
 
 Installed Chrome and Edge are discovered from Windows default-browser registration, App Paths and conventional locations. The worker uses pinned puppeteer-core 25.16.0 with explicit installed executables, CDP, no managed browser downloads and no daily profiles. Temporary profiles and an isolated browser context are created by the worker. Background target creation is explicit. The Chromium channel supports reading/navigation and guarded element interactions, page text/key input, scrolling, explicit waits, JavaScript dialogs, popups, upload/download metadata and tab closure. Experimental installed Firefox uses a separate WebDriver BiDi channel described below. Dedicated kept profiles are opt-in as described below. Browser drag remains unsupported as in the reference.
 
+HTML `readonly` blocks `set_value` only for input types and textareas where the attribute applies. An ignored attribute on a checkbox or radio does not make it read-only; explicit `aria-readonly` is still respected.
+
 ## Identity and coordinates
 
 Tab IDs are salted per launch; element IDs are scoped to one tab document. Navigation clears observed element handles; disconnection withdraws tabs. Re-observe after navigation/reconnect rather than reusing old IDs. Never mix native HWND/PID/title or desktop x/y with browser references. Browser image bounds use page pixels and carry their actual width, height and imageScale; they are not desktop screen coordinates.

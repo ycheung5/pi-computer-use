@@ -1611,10 +1611,25 @@ async function setBrowserValue(
         node.closest('[aria-disabled="true"], [inert]')
       )
         return "disabled";
-      if (
-        node.getAttribute("readonly") !== null ||
-        node.getAttribute("aria-readonly") === "true"
-      )
+      const nativeReadonly =
+        (node instanceof HTMLTextAreaElement && node.readOnly) ||
+        (node instanceof HTMLInputElement &&
+          [
+            "text",
+            "search",
+            "url",
+            "tel",
+            "email",
+            "password",
+            "date",
+            "month",
+            "week",
+            "time",
+            "datetime-local",
+            "number",
+          ].includes(node.type) &&
+          node.readOnly);
+      if (nativeReadonly || node.getAttribute("aria-readonly") === "true")
         return "readonly";
       if (node instanceof HTMLSelectElement) return "select";
       if (node instanceof HTMLInputElement) {
