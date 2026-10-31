@@ -85,17 +85,19 @@ test("profile fixture plans need no backend, dependency tree or fixture files", 
     for (const [flag, mode] of [
       ["--reconnect", "same-worker-reconnect"],
       ["--cleanup-control", "missing-lease-cleanup-control"],
+      ["--dispose-only", "temporary-profile-disposal"],
     ] as const) {
+      const app = flag === "--dispose-only" ? "firefox" : "edge";
       const result = spawnSync(
         process.execPath,
-        [script, "edge", flag, "--plan"],
+        [script, app, flag, "--plan"],
         { encoding: "utf8" },
       );
       assert.equal(result.status, 0, result.stderr);
       const plan = JSON.parse(result.stdout);
       assert.equal(plan.executed, false);
       assert.equal(plan.mode, mode);
-      assert.equal(plan.app, "edge");
+      assert.equal(plan.app, app);
       assert.equal(plan.physicalInput, false);
       assert.equal(plan.dailyProfile, false);
       assert.deepEqual(readdirSync(folder), ["browser-profiles-host.mjs"]);

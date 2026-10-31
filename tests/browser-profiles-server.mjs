@@ -3,6 +3,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import {
+  access,
   mkdir,
   mkdtemp,
   readdir,
@@ -23,7 +24,7 @@ await writeFile(
   JSON.stringify({
     browserApp: process.argv[2] ?? "edge",
     browserVisible: false,
-    browserSignIn: true,
+    browserSignIn: !process.argv.includes("--dispose-only"),
   }),
 );
 const server = createServer(async (request, response) => {
@@ -50,6 +51,18 @@ server.listen(0, "127.0.0.1", () =>
       url: `http://127.0.0.1:${server.address().port}`,
       settings,
       root,
+      ...(process.argv.includes("--dispose-only")
+        ? {
+            server: (() => {
+              const own = processAt(process.pid);
+              return {
+                processId: own.pid,
+                creationDate: own.creationDate,
+                executable: own.executable,
+              };
+            })(),
+          }
+        : {}),
     }),
   ),
 );
@@ -243,12 +256,110 @@ async function closeOwned(request) {
     creationDate: observed.creationDate,
   };
 }
+
+let disposal;
+function profileRoots(path) {
+  const escaped = path.replaceAll("'", "''");
+  const result = execFileSync(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `$ErrorActionPreference='Stop';$prefix='${escaped}';$rows=@(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.Contains($prefix) });ConvertTo-Json -Compress -InputObject @($rows|ForEach-Object{@{pid=$_.ProcessId;creationDate=$_.CreationDate.ToUniversalTime().ToString('o');executable=$_.ExecutablePath}})`,
+    ],
+    { encoding: "utf8", windowsHide: true, timeout: 10000 },
+  );
+  return JSON.parse(result);
+}
+async function inspectDisposal(workerPid) {
+  assertPid(workerPid);
+  if (!process.argv.includes("--dispose-only") || disposal)
+    throw new Error("disposal inspection unavailable");
+  const dirs = (await readdir(root)).filter((name) =>
+    /^temporary-[A-Za-z0-9_-]+$/.test(name),
+  );
+  if (dirs.length !== 1)
+    throw new Error("expected exactly one temporary profile");
+  const path = join(root, dirs[0]);
+  const owner = JSON.parse(await readFile(path + ".lock/owner.json", "utf8"));
+  if (owner.workerPid !== workerPid || owner.phase !== "running")
+    throw new Error("owned temporary lease mismatch");
+  const worker = processAt(workerPid);
+  const browser = processAt(owner.browserPid);
+  if (process.argv[2] !== "firefox")
+    throw new Error("Firefox disposal mode required");
+  const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const argument = new RegExp(
+    '(?:^|\\s)--?profile\\s+(?:"' + escaped + '"|' + escaped + ")(?=\\s|$)",
+    "i",
+  );
+  if (
+    !worker?.executable?.toLowerCase().endsWith("\\node.exe") ||
+    !worker.commandLine?.includes("worker.js") ||
+    !browser?.executable?.toLowerCase().endsWith("\\firefox.exe") ||
+    !argument.test(browser.commandLine) ||
+    !/(?:^|\s)--?headless(?:=|\s|$)/i.test(browser.commandLine)
+  )
+    throw new Error("owned worker/browser/profile identity unavailable");
+  const matching = profileRoots(path);
+  if (
+    !matching.some(
+      (row) =>
+        row.pid === browser.pid && row.creationDate === browser.creationDate,
+    )
+  )
+    throw new Error("profile matcher positive control missing");
+  rememberRoot(worker, path);
+  rememberRoot(browser, path);
+  for (const row of matching) rememberRoot(row, path);
+  const clean = (row) => ({
+    processId: row.pid,
+    creationDate: row.creationDate,
+    executable: row.executable,
+  });
+  disposal = {
+    profile: path,
+    worker: clean(worker),
+    browser: clean(browser),
+    matching,
+  };
+  return { ok: true, ...disposal, headless: true, kept: false };
+}
+async function verifyDisposal() {
+  if (!disposal) throw new Error("disposal identity missing");
+  for (const row of observedRoots.values())
+    if (processAt(row.processId))
+      throw new Error("recorded root live/reused; retain storage");
+  if (profileRoots(disposal.profile).length)
+    throw new Error("owned profile processes remain; retain storage");
+  for (const path of [disposal.profile, disposal.profile + ".lock"]) {
+    try {
+      await access(path);
+      throw new Error("profile/lock retained after disposal");
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  return {
+    ok: true,
+    recordedRootsAbsent: true,
+    profileProcessesAbsent: true,
+    profileAbsent: true,
+    lockAbsent: true,
+  };
+}
+
 const lines = createInterface({ input: process.stdin });
 for await (const line of lines) {
   try {
     const request = JSON.parse(line);
     let response;
-    if (request.action === "arm-cleanup-control")
+    if (request.action === "inspect-disposal")
+      response = await inspectDisposal(request.workerPid);
+    else if (request.action === "verify-disposal")
+      response = await verifyDisposal();
+    else if (request.action === "arm-cleanup-control")
       response = await armCleanupControl();
     else if (request.action === "inspect-profile")
       response = await inspect(request.workerPid);

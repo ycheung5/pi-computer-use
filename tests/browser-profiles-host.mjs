@@ -8,11 +8,20 @@ import { promisify } from "node:util";
 const run = promisify(execFile);
 const app = process.argv[2] ?? "edge";
 const reconnect = process.argv.includes("--reconnect");
+const disposeOnly = process.argv.includes("--dispose-only");
 const cleanupControlMode = process.argv.includes("--cleanup-control");
 assert.ok(
   ["edge", "chrome", "firefox"].includes(app),
   "Use edge, chrome or firefox",
 );
+if (disposeOnly)
+  assert.ok(
+    app === "firefox" &&
+      !reconnect &&
+      !cleanupControlMode &&
+      !process.argv.includes("--temporary-crash"),
+    "Disposal mode requires firefox and no other scenario",
+  );
 if (reconnect)
   assert.ok(
     ["edge", "chrome"].includes(app),
@@ -20,15 +29,17 @@ if (reconnect)
   );
 if (process.argv.includes("--plan")) {
   assert.ok(
-    reconnect || cleanupControlMode,
-    "Use --plan with --reconnect or --cleanup-control",
+    reconnect || cleanupControlMode || disposeOnly,
+    "Use --plan with --reconnect, --cleanup-control or --dispose-only",
   );
   console.log(
     JSON.stringify({
       executed: false,
-      mode: cleanupControlMode
-        ? "missing-lease-cleanup-control"
-        : "same-worker-reconnect",
+      mode: disposeOnly
+        ? "temporary-profile-disposal"
+        : cleanupControlMode
+          ? "missing-lease-cleanup-control"
+          : "same-worker-reconnect",
       app,
       physicalInput: false,
       dailyProfile: false,
@@ -48,10 +59,14 @@ let serverPath = fileURLToPath(
 );
 if (process.platform !== "win32")
   serverPath = (await run("wslpath", ["-w", serverPath])).stdout.trim();
-const server = spawn(launch.executable, [serverPath, app], {
-  windowsHide: true,
-  stdio: ["pipe", "pipe", "pipe"],
-});
+const server = spawn(
+  launch.executable,
+  [serverPath, app, ...(disposeOnly ? ["--dispose-only"] : [])],
+  {
+    windowsHide: true,
+    stdio: ["pipe", "pipe", "pipe"],
+  },
+);
 let serverErrors = "";
 server.stderr.setEncoding("utf8");
 server.stderr.on("data", (chunk) => {
@@ -72,6 +87,11 @@ const source = await new Promise((resolve, reject) => {
 process.env.PI_CU_SETTINGS_FILE = source.settings;
 process.env.PI_CU_BROWSER_PROFILE_ROOT = source.root;
 process.env.WSLENV = `${process.env.WSLENV ?? ""}:PI_CU_SETTINGS_FILE:PI_CU_BROWSER_EXECUTABLE:PI_CU_BROWSER_PROFILE_ROOT:PI_CU_BROWSER_IDLE_MS`;
+if (disposeOnly) {
+  console.log(JSON.stringify({ phase: "fixture-ready", source }));
+  await verifyDisposal();
+  process.exit(0);
+}
 const hosts = [];
 function create() {
   const host = computerUseHost();
@@ -447,4 +467,72 @@ if (cleanupControlMode) {
       ...JSON.parse(verified.stdout),
     }),
   );
+}
+
+async function verifyDisposal() {
+  const { WorkerClient } = await import("../dist/client.js");
+  const client = new WorkerClient({ launch: nativeWorkerLaunch });
+  try {
+    console.log(JSON.stringify({ phase: "before-health" }));
+    const health = await client.execute("health", {});
+    console.log(
+      JSON.stringify({ phase: "health", processId: health.processId }),
+    );
+    assert.equal(health.ok, true, JSON.stringify(health));
+    console.log(JSON.stringify({ phase: "before-open" }));
+    const opened = await client.execute("set_value", {
+      elementId: "new-tab",
+      value: source.url + "/read",
+    });
+    assert.equal(opened.ok, true, JSON.stringify(opened));
+    assert.ok(opened.tab?.id);
+    console.log(JSON.stringify({ phase: "before-read" }));
+    const read = await client.execute("accessibility_tree", {
+      browserTab: opened.tab.id,
+    });
+    assert.equal(read.ok, true, JSON.stringify(read));
+    assert.match(read.text, /Profile fixture/);
+    console.log(JSON.stringify({ phase: "before-inspection" }));
+    const before = await fixture({
+      action: "inspect-disposal",
+      workerPid: health.processId,
+    });
+    console.log(JSON.stringify({ phase: "owned-before-disposal", before }));
+    await client.dispose();
+    console.log(JSON.stringify({ phase: "before-cleanup-verification" }));
+    const after = await fixture({ action: "verify-disposal" });
+    lines.close();
+    const exited = new Promise((resolve) => server.once("close", resolve));
+    server.stdin.end();
+    await exited;
+    assert.equal(server.exitCode, 0, serverErrors);
+    const retired = await run(launch.executable, [
+      "--input-type=module",
+      "-e",
+      `import {execFileSync} from "node:child_process"; import {access} from "node:fs/promises"; import {dirname} from "node:path"; const pid=Number(process.argv[1]); if(!Number.isSafeInteger(pid)||pid<1)throw Error("INVALID_FIXTURE_PID");const ps="$ErrorActionPreference='Stop';$rows=@(Get-CimInstance Win32_Process -Filter 'ProcessId="+pid+"' -ErrorAction Stop);ConvertTo-Json -Compress -InputObject @($rows|ForEach-Object{$_.ProcessId})";const rows=JSON.parse(execFileSync("powershell.exe",["-NoProfile","-NonInteractive","-Command",ps],{encoding:"utf8",windowsHide:true,timeout:10000}));if(rows.length)throw Error("FIXTURE_PID_STILL_PRESENT_OR_REUSED");try{await access(dirname(process.argv[2]));throw Error("FIXTURE_STORAGE_RETAINED")}catch(error){if(error.code!=="ENOENT")throw error}console.log(JSON.stringify({fixtureProcessAbsent:true,fixtureStorageAbsent:true}))`,
+      String(source.server.processId),
+      source.root,
+    ]);
+    const fixtureCleanup = JSON.parse(retired.stdout);
+    console.log(
+      JSON.stringify({
+        ok: true,
+        mode: "temporary-profile-disposal",
+        app,
+        before,
+        after,
+        fixtureStorageRemoved: true,
+        physicalInput: false,
+      }),
+    );
+  } catch (error) {
+    console.error(
+      "PROFILE_DISPOSAL_UNCONFIRMED: owned fixture retained",
+      error,
+    );
+    // Keep the owned worker/fixture pipes and storage until ownership is resolved.
+    // Never inherit the full-suite finally block's close/kill behavior here.
+    setInterval(() => {}, 60_000);
+    await new Promise(() => {});
+  }
 }
