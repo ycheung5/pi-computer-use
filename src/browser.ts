@@ -1519,17 +1519,61 @@ async function pressBrowserKeys(
     (control && alt && main.length === 1) ||
     (shift && lower === "insert");
   const newline = !control && !alt && lower === "enter";
-  if (plainText || editingKey || editingShortcut || newline) {
+  const adjustmentKey = [
+    "up",
+    "down",
+    "left",
+    "right",
+    "home",
+    "end",
+    "pageup",
+    "pagedown",
+  ].includes(lower);
+  if (plainText || editingKey || editingShortcut || newline || adjustmentKey) {
     const readonly = await callPage(
       tab,
-      (checkNewline: boolean) => {
+      (check: { newline: boolean; adjustment: boolean }) => {
         const element = document.activeElement;
         if (!element || element.getAttribute("aria-readonly") !== "true")
           return false;
+        if (check.adjustment) {
+          const role = element.getAttribute("role")?.trim().split(/\s+/)[0];
+          return (
+            element instanceof HTMLSelectElement ||
+            (element instanceof HTMLInputElement &&
+              [
+                "number",
+                "range",
+                "date",
+                "datetime-local",
+                "month",
+                "week",
+                "time",
+                "color",
+                "radio",
+              ].includes(element.type)) ||
+            [
+              "spinbutton",
+              "slider",
+              "scrollbar",
+              "combobox",
+              "listbox",
+              "radiogroup",
+            ].includes(role ?? "")
+          );
+        }
         // Enter in a single-line input may submit a form instead of editing.
-        return !checkNewline || !(element instanceof HTMLInputElement);
+        return !check.newline || !(element instanceof HTMLInputElement);
       },
-      newline && !plainText && !editingKey && !editingShortcut,
+      {
+        newline: newline && !plainText && !editingKey && !editingShortcut,
+        adjustment:
+          adjustmentKey &&
+          !plainText &&
+          !editingKey &&
+          !editingShortcut &&
+          !newline,
+      },
       signal,
     );
     if (readonly)

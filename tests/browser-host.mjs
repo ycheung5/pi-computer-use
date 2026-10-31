@@ -228,6 +228,52 @@ try {
     elementId: ariaReadonlyNotes.id,
   });
   assert.equal(notesAfter.element.value, "fixed notes");
+  for (const [query, expected] of [
+    ["ARIA read-only number", "5"],
+    ["ARIA read-only range", "40"],
+    ["ARIA read-only choice", "Alpha"],
+    ["ARIA read-only date", "2026-10-31"],
+  ]) {
+    const matches = await client.execute("find", { browserTab: tab, query });
+    const target = matches.results.find(
+      (entry) =>
+        entry.id &&
+        entry.name?.includes(query) &&
+        ["spinbutton", "slider", "combobox", "Date", "date", "group"].includes(
+          entry.role,
+        ),
+    );
+    assert.ok(target?.id, JSON.stringify({ query, matches }));
+    assert.equal(
+      (await client.execute("focus", { elementId: target.id })).ok,
+      true,
+    );
+    for (const key of [
+      "up",
+      "down",
+      "left",
+      "right",
+      "home",
+      "end",
+      "pageup",
+      "pagedown",
+    ]) {
+      const result = await client.execute("keypress", {
+        browserTab: tab,
+        keys: [key],
+      });
+      assert.equal(result.ok, false, JSON.stringify({ query, key, result }));
+      assert.match(result.error, /BROWSER_NOT_EDITABLE/);
+    }
+    const after = await client.execute("element_info", {
+      elementId: target.id,
+    });
+    assert.equal(
+      after.element.value,
+      expected,
+      JSON.stringify({ query, after }),
+    );
+  }
   const checkboxMatches = await client.execute("find", {
     browserTab: tab,
     query: "Checkbox with ignored readonly",
