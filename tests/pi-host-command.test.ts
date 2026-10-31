@@ -159,3 +159,76 @@ test("observer faults preserve malformed bytes and cannot fabricate clean proof"
     await rm(folder, { recursive: true, force: true });
   }
 });
+
+test("command settlement requires actual timely wait cancellation and released ownership", async () => {
+  const { assessCommandSettlement } = await helper();
+  const pending = {
+    kind: "input",
+    id: 3,
+    action: "wait",
+    milliseconds: 30000,
+    operationId: "op-A",
+    pid: 17,
+    sequence: 2,
+    monotonicMs: 1000,
+  };
+  const records = [
+    {
+      kind: "output",
+      event: "stopped",
+      operationId: "op-A",
+      pid: 17,
+      sequence: 3,
+      monotonicMs: 1200,
+    },
+    {
+      kind: "output",
+      id: 3,
+      pid: 17,
+      sequence: 4,
+      monotonicMs: 1300,
+      result: { ok: false, action: "wait", error: "COMPUTER_USE_STOPPED" },
+    },
+    {
+      kind: "input",
+      action: "operation_end",
+      operationId: "op-A",
+      id: 4,
+      pid: 17,
+      sequence: 5,
+      monotonicMs: 1350,
+    },
+    {
+      kind: "output",
+      id: 4,
+      pid: 17,
+      sequence: 6,
+      monotonicMs: 1400,
+      result: { ok: true, action: "operation_end", released: true },
+    },
+  ];
+  assert.equal(assessCommandSettlement(pending, records).status, "observed");
+  const replace = (index: number, patch: Record<string, unknown>) =>
+    records.map((row, i) => (i === index ? { ...row, ...patch } : row));
+  for (const changed of [
+    replace(1, { result: { ok: true, action: "wait" } }),
+    replace(1, { monotonicMs: 31000 }),
+    records.filter((_, i) => i !== 1),
+    replace(1, { pid: 99 }),
+    replace(1, { id: 99 }),
+    replace(1, { monotonicMs: undefined }),
+    replace(3, {
+      result: { ok: true, action: "operation_end", released: false },
+    }),
+    replace(3, {
+      result: { ok: false, action: "operation_end", released: true },
+    }),
+    records.filter((_, i) => i !== 3),
+    replace(3, { sequence: 3 }),
+  ])
+    assert.notEqual(
+      assessCommandSettlement(pending, changed).status,
+      "observed",
+      JSON.stringify(changed),
+    );
+});

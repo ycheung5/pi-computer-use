@@ -14,7 +14,7 @@ import { keepVisualOwnership } from "./pi-visual-host.mjs";
 export function commandObserver(file) {
   const source = `import {appendFileSync} from 'node:fs';import {StringDecoder} from 'node:string_decoder';
 let sequence=0,fault=false;const file=${JSON.stringify(file)};
-const record=row=>{try{appendFileSync(file,JSON.stringify({sequence:++sequence,pid:process.pid,time:Date.now(),fault,...row})+'\\n',{mode:0o600});}catch{fault=true;}};
+const record=row=>{try{appendFileSync(file,JSON.stringify({sequence:++sequence,pid:process.pid,time:Date.now(),monotonicMs:performance.now(),fault,...row})+'\\n',{mode:0o600});}catch{fault=true;}};
 record({kind:'ready',executable:process.execPath,worker:process.argv[1]});
 const decoder={input:new StringDecoder('utf8'),output:new StringDecoder('utf8')},buffer={input:'',output:''};
 const observe=(kind,chunk)=>{try{buffer[kind]+=typeof chunk==='string'?chunk:decoder[kind].write(chunk);let end;while((end=buffer[kind].indexOf('\\n'))>=0){const line=buffer[kind].slice(0,end);buffer[kind]=buffer[kind].slice(end+1);const r=JSON.parse(line),d=r.result;record({kind,id:r.id,action:r.action,operationId:r.operationId,milliseconds:r.args?.milliseconds,stop:r.stop,cancel:r.cancel,event:r.event,phase:r.phase,result:d?{ok:d.ok,action:d.action,error:d.error,processId:d.processId,released:d.released}:undefined});}if(buffer[kind].length>65536){fault=true;record({kind:'fault',error:'oversized protocol frame'});}}catch{fault=true;record({kind:'fault',error:'malformed protocol frame'});}};
@@ -55,6 +55,70 @@ export function commandGuard(event, readOwner, record) {
   } catch {
     return deny();
   }
+}
+
+// Report/collector seam: command acceptance or SDK abort alone is not worker cancellation.
+export function assessCommandSettlement(pending, rows) {
+  const failed = (reason) => ({ status: "failed", reason });
+  if (!Number.isFinite(pending.monotonicMs) || pending.milliseconds !== 30000)
+    return failed("request clock/budget unavailable");
+  const replies = rows.filter(
+    (row) =>
+      row.kind === "output" && row.pid === pending.pid && row.id === pending.id,
+  );
+  if (!replies.length)
+    return { status: "pending", reason: "actual wait response absent" };
+  if (replies.length !== 1) return failed("duplicate wait response");
+  const response = replies[0],
+    elapsedMs = response.monotonicMs - pending.monotonicMs;
+  if (
+    response.result?.ok !== false ||
+    response.result.action !== "wait" ||
+    response.result.error !== "COMPUTER_USE_STOPPED"
+  )
+    return failed("worker did not report stop-specific wait cancellation");
+  if (
+    !Number.isFinite(elapsedMs) ||
+    elapsedMs < 0 ||
+    elapsedMs >= pending.milliseconds
+  )
+    return failed(
+      "worker cancellation was not before the original timer deadline",
+    );
+  const ends = rows.filter(
+    (row) =>
+      row.kind === "input" &&
+      row.pid === pending.pid &&
+      row.action === "operation_end" &&
+      row.operationId === pending.operationId,
+  );
+  if (!ends.length)
+    return { status: "pending", reason: "operation settlement request absent" };
+  if (ends.length !== 1) return failed("ambiguous operation settlement");
+  const acknowledgments = rows.filter(
+    (row) =>
+      row.kind === "output" && row.pid === pending.pid && row.id === ends[0].id,
+  );
+  if (!acknowledgments.length)
+    return {
+      status: "pending",
+      reason: "released ownership acknowledgment absent",
+    };
+  const acknowledgment = acknowledgments[0];
+  if (
+    acknowledgments.length !== 1 ||
+    acknowledgment.result?.ok !== true ||
+    acknowledgment.result.action !== "operation_end" ||
+    acknowledgment.result.released !== true ||
+    acknowledgment.sequence <= response.sequence ||
+    acknowledgment.sequence <= ends[0].sequence ||
+    !Number.isFinite(acknowledgment.monotonicMs) ||
+    acknowledgment.monotonicMs < response.monotonicMs
+  )
+    return failed(
+      "operation ownership release failed or preceded cancellation",
+    );
+  return { status: "observed", elapsedMs, response, acknowledgment };
 }
 
 function ps(script) {
@@ -325,6 +389,8 @@ export async function runPassiveCommandStop() {
         }
       }, "actual wait frame");
       assert.equal(typeof pending.operationId, "string");
+      assert.equal(pending.pid, workerPid);
+      assert.equal(observer()[0].pid, workerPid);
       const identities = await until(() => {
         const rows = descendants();
         const helper = rows.find(
@@ -360,7 +426,6 @@ export async function runPassiveCommandStop() {
         claim:
           "received wait request, owned mutex held and no response; not timer-scheduling instrumentation",
       });
-      const stopAt = Date.now();
       send("stop", "prompt", { message: "/computer-stop" });
       const stop = await response("stop");
       assert.equal(stop.success, true);
@@ -378,7 +443,6 @@ export async function runPassiveCommandStop() {
         JSON.stringify(cancelled.result),
         /COMPUTER_USE_STOPPED|CANCELLED|AbortError|aborted/i,
       );
-      assert.ok(Date.now() - stopAt < 30000);
       assert.ok(
         observer().some(
           (r) =>
@@ -387,6 +451,12 @@ export async function runPassiveCommandStop() {
             r.operationId === pending.operationId,
         ),
       );
+      const cancellationProof = await until(() => {
+        const proof = assessCommandSettlement(pending, observer());
+        if (proof.status === "failed") throw Error(proof.reason);
+        return proof.status === "observed" ? proof : undefined;
+      }, "actual timely wait cancellation and operation-A release");
+      write("cancellation.json", cancellationProof);
       send("retry", "prompt", { message: "/fixture-command-retry" });
       assert.equal((await response("retry")).data.disposition, "handled");
       await settled(2);
@@ -510,6 +580,7 @@ export async function runPassiveCommandStop() {
         hostPid: host.pid,
         hostPin,
         workerPid,
+        cancellationProof,
         operationA: pending.operationId,
         operationB: frames[1].operationId,
         command: stop,
