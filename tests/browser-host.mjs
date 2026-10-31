@@ -373,6 +373,37 @@ try {
       assert.equal(blockedKey.ok, false, JSON.stringify({ name, blockedKey }));
       assert.match(blockedKey.error, /BROWSER_NOT_EDITABLE/);
     }
+    await clickFixture("Focus disabled top field");
+    const disabledTyping = await client.execute("type_text", {
+      browserTab: tab,
+      text: " unwanted",
+    });
+    assert.equal(disabledTyping.ok, false, JSON.stringify(disabledTyping));
+    const disabledKey = await client.execute("keypress", {
+      browserTab: tab,
+      keys: ["x"],
+    });
+    assert.equal(disabledKey.ok, false, JSON.stringify(disabledKey));
+    assert.match(disabledKey.error, /BROWSER_NOT_EDITABLE/);
+    const disabledNavigation = await client.execute("keypress", {
+      browserTab: tab,
+      keys: ["left"],
+    });
+    assert.equal(
+      disabledNavigation.ok,
+      true,
+      JSON.stringify(disabledNavigation),
+    );
+    const topMatches = await client.execute("find", {
+      browserTab: tab,
+      query: "ARIA disabled editor",
+    });
+    const top = topMatches.results.find((entry) => entry.role === "textbox");
+    assert.ok(top?.id, JSON.stringify(topMatches));
+    const topAfter = await client.execute("element_info", {
+      elementId: top.id,
+    });
+    assert.equal(topAfter.element.value, "aria-disabled text");
     await clickFixture("Report disabled values");
     const disabledValues = await client.execute("accessibility_tree", {
       browserTab: tab,
