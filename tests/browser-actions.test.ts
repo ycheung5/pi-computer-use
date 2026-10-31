@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { createInterface } from "node:readline";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import type {
@@ -6,6 +9,43 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { registerComputerUse } from "../src/extension.js";
+
+test("browser form fixture retains submission shape and resets independent delayed-event evidence", async () => {
+  const fixture = spawn(process.execPath, [
+    fileURLToPath(new URL("./browser-actions-server.mjs", import.meta.url)),
+  ]);
+  const closed = once(fixture, "close");
+  const lines = createInterface({ input: fixture.stdout });
+  try {
+    const [line] = await once(lines, "line");
+    const { url } = JSON.parse(line);
+    const state = async () => (await fetch(`${url}form/delayed/state`)).json();
+    const post = async (path: string, body = "") => {
+      const response = await fetch(`${url}${path}`, { method: "POST", body });
+      assert.equal(response.ok, true);
+    };
+    await fetch(`${url}form`);
+    assert.deepEqual(await state(), { starts: 0, ready: 0, submissions: 0 });
+    await post("form/delayed/start");
+    assert.deepEqual(await state(), { starts: 1, ready: 0, submissions: 0 });
+    await post("form/delayed/ready");
+    const payload = {
+      name: "Pi 中文 café 😀",
+      notes: "First line\n第二行 café 😀",
+      accepted: true,
+      choice: "beta",
+    };
+    await post("form/submit", JSON.stringify(payload));
+    assert.deepEqual(await (await fetch(`${url}form/state`)).json(), payload);
+    assert.deepEqual(await state(), { starts: 1, ready: 1, submissions: 1 });
+    await fetch(`${url}form`);
+    assert.deepEqual(await state(), { starts: 0, ready: 0, submissions: 0 });
+  } finally {
+    fixture.stdin.end();
+    await closed;
+    lines.close();
+  }
+});
 
 test("Pi exposes browser actions through the existing computer-use tools", async () => {
   const tools: ToolDefinition[] = [];

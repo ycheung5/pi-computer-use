@@ -250,9 +250,13 @@ async function checkBrowser() {
       (entry) =>
         entry.id &&
         entry.name?.includes(query) &&
-        ["spinbutton", "slider", "combobox", "Date", "date", "group"].includes(
+        (["spinbutton", "slider", "combobox", "Date", "date", "group"].includes(
           entry.role,
-        ),
+        ) ||
+          // Firefox's documented DOM outline maps this input to textbox.
+          (app === "firefox" &&
+            query === "ARIA read-only date" &&
+            entry.role === "textbox")),
     );
     assert.ok(target?.id, JSON.stringify({ query, matches }));
     assert.equal(
