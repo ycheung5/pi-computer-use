@@ -71,7 +71,7 @@ Deliver one installable Pi package with native computer-use tools, reference-equ
 56. As a user, I want three consecutive reset successes for required task/recovery scenarios, so that a single lucky run is not sufficient.
 57. As a contributor, I want stale documentation replaced during each fix, so that agents receive one current answer rather than conflicting notes.
 58. As a user, I want correctness and fewer interventions prioritized over latency and tokens, so that optimization preserves reliable behavior.
-59. As a user, I want observed native targets bound to a window lifetime, so that a stale reference cannot operate a replacement that reuses the same HWND and process ID.
+59. As a user, I want observed native targets bound to a window lifetime, so that expired or unverifiable observations are rejected instead of silently selecting a replacement with the same HWND and process ID.
 
 ## Implementation Decisions
 

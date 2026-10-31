@@ -13,6 +13,7 @@ Read the row matching the task; follow section links before reading whole docume
 | Pi interfaces and sources | [Pi extension research](pi-extension-research.md) (research context; current spec takes precedence over earlier proposals) |
 | Domain terminology | [Glossary](../GLOSSARY.md) |
 | Why behavior parity was chosen | [ADR 0001](adr/0001-preserve-reference-behavior.md) |
+| Stronger native window identity design | [Lifetime plan](implementation-plan.md#window-lifetime-design), [ADR 0002](adr/0002-window-lifetime-references.md) |
 | Publish or read issues | [Issue tracker](agents/issue-tracker.md), [triage labels](agents/triage-labels.md) |
 | What works, remaining outcomes, next work and cleanup decisions | [Delivery map](tickets.md#delivery-outcomes-and-ownership), [execution queue](tickets.md#execution-queue), [cleanup dispositions](tickets.md#cleanup-dispositions), [original obligations](tickets.md#original-issue-disposition) |
 | Worker setup, protocol and test evidence | [Runtime and validation](runtime.md) |

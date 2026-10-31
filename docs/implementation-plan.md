@@ -59,6 +59,18 @@ Every investigation or implementation change must reconcile the affected documen
 
 Current checkpoint (2026-10-31): audit/comparison tickets #24, #25, #29, #32, #33 and #34 are complete in their recorded scopes. Other tool comparisons and real-agent acceptance are partial. Targeted schema, guidance, input-protocol and browser-control repairs have already landed; final acceptance and optimization remain incomplete. Use the [execution queue](tickets.md#execution-queue) rather than restarting implementation or waiting for every unrelated comparison. Reuse existing fixtures; each new runner requires a named coverage gap. No new public test-only seam is planned.
 
+## Window lifetime design
+
+The user approved stronger tracking under #28. [ADR 0002](adr/0002-window-lifetime-references.md) is proposed for implementation review; current raw selectors remain unchanged until this work is delivered.
+
+Use the existing native bridge as the sole reference authority. One optional `windowRef` identifies an observed lifetime; HWND/PID/title and raw native-window IDs remain compatibility selectors. A supplied reference cannot be discarded or restamped internally. Conflicting selectors fail explicitly. Native-child restart expires its references; fresh observation is recovery, never automatic mutation replay.
+
+Bind cached UIA elements to the root reference and an immutable issued element ID, retaining RuntimeId as comparison metadata. Later observations must not overwrite an old reference with another root binding. Reuse the existing private WGC target handoff for stateless marker validation; OCR, snapshot images, waits, implicit targets and physical fallbacks must retain the originating reference.
+
+Missing markers, expiry, unknown epochs and access denial are lost proof, not confirmed disappearance. Validate before dispatch and at existing multi-step checks; already-dispatched effects and concurrent destruction after the final check cannot be undone or atomically excluded. Normal expiry/disposal removes only owned markers. Crash residue remains explicit; no property sweeper, broker, privilege bypass or new event thread is planned.
+
+Before production changes, independently review the owned-window marker probe and this interface. Then use existing public tool/worker and native-fixture seams to test binding/repeated use, real destruction/replacement, marker loss, native restart, two authorities, conflicting selectors, no fallback/replay, immutable root/element bindings, WGC delegation and snapshot/OCR/wait composition. Include a fixture pause before final validation and independent action counters. Actual identical-HWND reuse and verified UIPI denial remain distinct prerequisites; different handles or synthetic denial cannot be mislabeled as those cases. Measure added checks without fixed sleeps or extra model rounds.
+
 ## Completion criteria
 
 - Every reference capability has a documented implementation mapping and appropriate tests; experimental and unsupported cases are labeled honestly.
