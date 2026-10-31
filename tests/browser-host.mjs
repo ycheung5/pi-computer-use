@@ -304,6 +304,87 @@ try {
     (entry) => entry.role === "checkbox",
   );
   assert.equal(checkedResult?.checked, true, JSON.stringify(checkedAgain));
+  if (app !== "firefox") {
+    const clickFixture = async (query) => {
+      const foundButton = await client.execute("find", {
+        browserTab: tab,
+        query,
+      });
+      const button = foundButton.results.find(
+        (entry) => entry.role === "button" && entry.name === query,
+      );
+      assert.ok(button?.id, JSON.stringify(foundButton));
+      const clicked = await client.execute("click", { elementId: button.id });
+      assert.equal(clicked.ok, true, JSON.stringify(clicked));
+    };
+    for (const [kind, expected] of [
+      ["shadow", "shadow locked | shadow edit plus"],
+      ["frame", "frame locked | frame edit plus"],
+    ]) {
+      const title = kind === "shadow" ? "shadow" : "frame";
+      await clickFixture(`Focus ${title} readonly`);
+      const blocked = await client.execute("keypress", {
+        browserTab: tab,
+        keys: ["x"],
+      });
+      assert.equal(blocked.ok, false, JSON.stringify({ kind, blocked }));
+      assert.match(blocked.error, /BROWSER_NOT_EDITABLE/);
+      const blockedText = await client.execute("type_text", {
+        browserTab: tab,
+        text: " must not be inserted",
+      });
+      assert.equal(
+        blockedText.ok,
+        false,
+        JSON.stringify({ kind, blockedText }),
+      );
+      assert.match(blockedText.error, /BROWSER_NO_FOCUSED_FIELD/);
+      await clickFixture(`Focus ${title} editable`);
+      const typed = await client.execute("type_text", {
+        browserTab: tab,
+        text: " plus",
+      });
+      assert.equal(typed.ok, true, JSON.stringify({ kind, typed }));
+      await clickFixture(`Report ${title} values`);
+      const observed = await client.execute("accessibility_tree", {
+        browserTab: tab,
+      });
+      assert.match(
+        observed.text,
+        new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+      );
+    }
+    await clickFixture("Focus opaque frame field");
+    const ready = await client.execute("wait_for", {
+      browserTab: tab,
+      condition: "text",
+      query: "Opaque ready",
+      timeoutMs: 3000,
+    });
+    assert.equal(ready.verification, "observed", JSON.stringify(ready));
+    const opaqueText = await client.execute("type_text", {
+      browserTab: tab,
+      text: "not sent",
+    });
+    assert.equal(opaqueText.ok, false, JSON.stringify(opaqueText));
+    assert.match(opaqueText.error, /BROWSER_NO_FOCUSED_FIELD/);
+    const opaqueKey = await client.execute("keypress", {
+      browserTab: tab,
+      keys: ["x"],
+    });
+    assert.equal(opaqueKey.ok, true, JSON.stringify(opaqueKey));
+    const opaqueChanged = await client.execute("wait_for", {
+      browserTab: tab,
+      condition: "text",
+      query: "Opaque value: opaque editx",
+      timeoutMs: 3000,
+    });
+    assert.equal(
+      opaqueChanged.verification,
+      "observed",
+      JSON.stringify(opaqueChanged),
+    );
+  }
   const shot = await client.execute("screenshot", {
     browserTab: tab,
     maxWidth: 300,
