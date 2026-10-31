@@ -1126,7 +1126,7 @@ test("mixed SDK routing preserves owned images and rejects cross-channel or unce
   }
 });
 
-test("partial recovery requires genuine budget/read/use/submission chronology", async () => {
+test("partial recovery requires each observed field effect and genuine confirmation", async () => {
   const base = "http://127.0.0.1:1234/",
     tab = { id: "t123", url: base + "form" };
   let serial = 0;
@@ -1152,6 +1152,9 @@ test("partial recovery requires genuine budget/read/use/submission chronology", 
   const controls = [
     field("name", "Name", "textbox"),
     field("notes", "Notes", "textbox"),
+    field("accepted", "Accept terms", "checkbox"),
+    field("choice", "Choice", "combobox"),
+    field("beta", "Beta", "option"),
     field("submit", "Submit form", "button"),
   ];
   const restricted = [
@@ -1164,6 +1167,14 @@ test("partial recovery requires genuine budget/read/use/submission chronology", 
       readonly: true,
     }),
   ];
+  const facts = {
+    ...formReport(),
+    base,
+    oracle: {
+      ...formReport().oracle,
+      events: { submissions: 1, starts: 0, ready: 0 },
+    },
+  };
   const initial = pair(
     "set_value",
     { elementId: "new-tab", value: tab.url },
@@ -1178,153 +1189,252 @@ test("partial recovery requires genuine budget/read/use/submission chronology", 
       })),
     },
   );
-  const read = pair(
-    "find",
-    { browserTab: tab.id, query: "Name" },
-    { nodes: controls },
-  );
-  const edit = pair(
-    "set_value",
-    { elementId: "name", value: "Pi 中文 café 😀" },
-    {},
-  );
+  const read = (nodes = controls) =>
+    pair("find", { browserTab: tab.id, query: "Name" }, { nodes });
+  const effects = [
+    pair(
+      "set_value",
+      { elementId: "name", value: facts.oracle.payload.name },
+      {},
+    ),
+    pair(
+      "set_value",
+      { elementId: "notes", value: facts.oracle.payload.notes },
+      {},
+    ),
+    pair("invoke", { elementId: "accepted" }, {}),
+    pair("set_value", { elementId: "choice", value: "beta" }, {}),
+  ];
   const submit = pair("click", { elementId: "submit" }, {});
-  const facts = {
-    ...formReport(),
-    base,
-    oracle: {
-      ...formReport().oracle,
-      events: { submissions: 1, starts: 0, ready: 0 },
-    },
-  };
+  const confirmationName =
+    "Form confirmation: " + JSON.stringify(facts.oracle.payload);
   const confirmation = pair(
     "find",
     { browserTab: tab.id, query: "Form confirmation" },
-    {
-      nodes: [
-        ...restricted,
-        field(
-          "result",
-          "Form confirmation: " + JSON.stringify(facts.oracle.payload),
-          "status",
+    { nodes: [...restricted, field("result", confirmationName, "status")] },
+  );
+  const complete = [
+    ...initial,
+    ...read(),
+    ...effects.flat(),
+    ...submit,
+    ...confirmation,
+  ];
+  const accepted = async (audit: unknown, patch = {}) =>
+    (await verify("partial", { ...facts, audit, ...patch })).pass;
+  assert.equal(await accepted(complete), true);
+  assert.equal(
+    await accepted([
+      ...initial,
+      ...read([controls[0]!, controls[5]!]),
+      ...effects[0]!,
+      ...submit,
+      ...confirmation,
+    ]),
+    false,
+    "reviewer Name-only causal false pass",
+  );
+  for (let missing = 0; missing < 4; missing++) {
+    assert.equal(
+      await accepted([
+        ...initial,
+        ...read(),
+        ...effects.filter((_, i) => i !== missing).flat(),
+        ...submit,
+        ...confirmation,
+      ]),
+      false,
+      "missing field effect " + missing,
+    );
+    assert.equal(
+      await accepted([
+        ...initial,
+        ...read(controls.filter((_, i) => i !== missing)),
+        ...effects.flat(),
+        ...submit,
+        ...confirmation,
+      ]),
+      false,
+      "missing field observation " + missing,
+    );
+  }
+  for (let wrongRole = 0; wrongRole < 4; wrongRole++)
+    assert.equal(
+      await accepted([
+        ...initial,
+        ...read(
+          controls.map((node, i) =>
+            i === wrongRole ? { ...node, role: "text" } : node,
+          ),
         ),
-      ],
+        ...effects.flat(),
+        ...submit,
+        ...confirmation,
+      ]),
+      false,
+      "wrong field role " + wrongRole,
+    );
+  const progressive = [...initial];
+  for (let i = 0; i < 4; i++)
+    progressive.push(...read([controls[i]!]), ...effects[i]!);
+  progressive.push(...read([controls[5]!]), ...submit, ...confirmation);
+  assert.equal(await accepted(progressive), true);
+  const expanded = pair(
+    "accessibility_tree",
+    { browserTab: tab.id, maxNodes: 1200 },
+    { nodes: controls },
+  );
+  assert.equal(
+    await accepted([
+      ...initial,
+      ...expanded,
+      ...effects.flat(),
+      ...submit,
+      ...confirmation,
+    ]),
+    true,
+  );
+  const alternatives = [
+    ...effects[0]!,
+    ...pair("focus", { elementId: "notes" }, {}),
+    ...pair(
+      "type_text",
+      { browserTab: tab.id, text: facts.oracle.payload.notes },
+      {},
+    ),
+    ...pair("set_value", { elementId: "accepted", value: "true" }, {}),
+    ...pair("click", { elementId: "beta" }, {}),
+  ];
+  assert.equal(
+    await accepted([
+      ...initial,
+      ...read(),
+      ...alternatives,
+      ...submit,
+      ...confirmation,
+    ]),
+    true,
+  );
+  const keyboardChoice = [
+    ...initial,
+    ...read(),
+    ...effects.slice(0, 3).flat(),
+    ...pair("focus", { elementId: "choice" }, {}),
+    ...pair("keypress", { browserTab: tab.id, keys: ["enter"] }, {}),
+    ...submit,
+    ...confirmation,
+  ];
+  const unsupported = await verify("partial", {
+    ...facts,
+    audit: keyboardChoice,
+  });
+  assert.equal(unsupported.pass, false);
+  assert.ok(
+    unsupported.verifierLimitations.includes(
+      "keyboard field selection not covered by this verifier",
+    ),
+  );
+  const waited = pair(
+    "wait_for",
+    {
+      browserTab: tab.id,
+      condition: "element",
+      controlType: "status",
+      query: confirmationName,
+    },
+    {
+      condition: "element",
+      query: confirmationName,
+      verification: "observed",
     },
   );
-  const audit = [...initial, ...read, ...edit, ...submit, ...confirmation];
-  assert.equal((await verify("partial", { ...facts, audit })).pass, true);
-  const progressive = read.map((row) =>
-    "details" in row
-      ? { ...row, details: { ...row.details, nodes: [controls[0]] } }
-      : row,
-  );
-  assert.equal(
-    (
-      await verify("partial", {
-        ...facts,
-        audit: [
-          ...initial,
-          ...progressive,
-          ...edit,
-          ...pair(
-            "find",
-            { browserTab: tab.id, query: "Submit form" },
-            { nodes: controls },
-          ),
-          ...submit,
-          ...confirmation,
-        ],
-      })
-    ).pass,
-    true,
-  );
-  // Expanded accessibility reads are also valid recovery; no find-only procedure.
-  const expanded = read.map((row) => ({
-    ...row,
-    toolName: "windows_computer_use_accessibility_tree",
-    ...("details" in row
-      ? { details: { ...row.details, action: "accessibility_tree" } }
-      : { input: { browserTab: tab.id, maxNodes: 1200 } }),
-  }));
-  assert.equal(
-    (
-      await verify("partial", {
-        ...facts,
-        audit: [...initial, ...expanded, ...edit, ...submit, ...confirmation],
-      })
-    ).pass,
-    true,
-  );
+  const waitAudit = [
+    ...initial,
+    ...read(),
+    ...effects.flat(),
+    ...submit,
+    ...read(restricted),
+    ...waited,
+  ];
+  assert.equal(await accepted(waitAudit), true);
   const replaceDetails = (rows: typeof initial, patch: object) =>
     rows.map((row) =>
       "details" in row
         ? { ...row, details: { ...row.details, ...patch } }
         : row,
     );
+  for (const patch of [
+    { conclusive: false },
+    { found: false },
+    { timedOut: true },
+    { condition: "text" },
+  ])
+    assert.equal(
+      await accepted([
+        ...initial,
+        ...read(),
+        ...effects.flat(),
+        ...submit,
+        ...read(restricted),
+        ...replaceDetails(waited, patch),
+      ]),
+      false,
+    );
   for (const bad of [
-    [...read, ...edit, ...submit, ...confirmation],
-    [...read, ...edit, ...submit, ...initial, ...confirmation],
+    [...read(), ...effects.flat(), ...submit, ...confirmation],
     [
       ...replaceDetails(initial, { nodeCount: 499 }),
-      ...read,
-      ...edit,
+      ...read(),
+      ...effects.flat(),
       ...submit,
       ...confirmation,
     ],
     [
       ...initial,
-      ...replaceDetails(read, { nodes: [], query: "Name Notes Submit form" }),
-      ...edit,
+      ...pair(
+        "find",
+        {
+          browserTab: tab.id,
+          query: "Name Notes Accept terms Choice Submit form",
+        },
+        { nodes: [] },
+      ),
+      ...effects.flat(),
       ...submit,
       ...confirmation,
     ],
     [
       ...initial,
-      ...replaceDetails(read, { tab: { id: "t999", url: tab.url } }),
-      ...edit,
+      ...replaceDetails(read(), { tab: { id: "t999", url: tab.url } }),
+      ...effects.flat(),
       ...submit,
       ...confirmation,
     ],
-    [...initial, ...edit, ...read, ...submit, ...confirmation],
+    [...initial, ...effects.flat(), ...read(), ...submit, ...confirmation],
     [
       ...initial,
-      ...read,
-      ...pair("set_value", { elementId: "never-observed", value: "x" }, {}),
-      ...submit,
-      ...confirmation,
-    ],
-    [
-      ...initial,
-      ...read,
-      ...edit,
+      ...read(),
+      ...effects.flat(),
       ...submit,
       ...replaceDetails(confirmation, {
         nodes: restricted,
-        query: "Form confirmation: " + JSON.stringify(facts.oracle.payload),
+        query: confirmationName,
       }),
     ],
     [
       ...initial,
-      ...read,
-      ...edit,
+      ...read(),
+      ...effects.flat(),
       ...submit,
       ...replaceDetails(confirmation, {
         nodes: [
           ...restricted,
-          field(
-            "echo",
-            "Form confirmation: " + JSON.stringify(facts.oracle.payload),
-            "textbox",
-            { value: "echo" },
-          ),
+          field("echo", confirmationName, "textbox", { value: "echo" }),
         ],
       }),
     ],
   ])
-    assert.equal(
-      (await verify("partial", { ...facts, audit: bad })).pass,
-      false,
-    );
+    assert.equal(await accepted(bad), false);
   for (const patch of [
     {
       oracle: {
@@ -1335,8 +1445,5 @@ test("partial recovery requires genuine budget/read/use/submission chronology", 
     { effective: [{ ...effective[0], thinkingLevel: "high" }] },
     { cleanup: { ...facts.cleanup, processCount: 1 } },
   ])
-    assert.equal(
-      (await verify("partial", { ...facts, audit, ...patch })).pass,
-      false,
-    );
+    assert.equal(await accepted(complete, patch), false);
 });

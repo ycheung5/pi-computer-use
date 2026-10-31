@@ -621,7 +621,9 @@ function mixedStatusEvidence(d, request, known) {
 function partialRecovery(f) {
   const requests = new Map(),
     known = new Map(),
-    statuses = new Map();
+    statuses = new Map(),
+    effects = new Set(),
+    limitations = new Set();
   const reads = new Set([
     "find",
     "snapshot",
@@ -660,7 +662,7 @@ function partialRecovery(f) {
         args.value !== f.base + "form" ||
         d.tab?.url !== args.value
       )
-        return false;
+        return { pass: false, limitations: [] };
       tab = d.tab.id;
       partial =
         d.source === "browser-accessibility" &&
@@ -671,7 +673,7 @@ function partialRecovery(f) {
         !nodes.some(
           (n) => n.id && ["Name", "Notes", "Submit form"].includes(n.name),
         );
-      if (!partial) return false;
+      if (!partial) return { pass: false, limitations: [] };
       continue;
     }
     if (!partial || d.tab?.id !== tab || d.tab?.url !== f.base + "form")
@@ -696,7 +698,12 @@ function partialRecovery(f) {
       }
     }
     const node = known.get(args.elementId);
-    if (action === "focus") focused = node;
+    if (action === "focus" || (action === "click" && node?.role === "textbox"))
+      focused = node;
+    if (reads.has(action))
+      for (const candidate of nodes)
+        if (candidate.focused === true && known.has(candidate.id))
+          focused = candidate;
     if (
       ["set_value", "type_text", "click", "invoke", "keypress"].includes(action)
     ) {
@@ -704,24 +711,69 @@ function partialRecovery(f) {
         bad = true;
         continue;
       }
-      const target = node ?? (args.browserTab === tab ? focused : null);
+      // Browser type_text uses actual focus, not its optional elementId hint.
+      const target = action === "type_text" ? focused : node;
       if (
         ["set_value", "type_text"].includes(action) &&
-        ["Name", "Notes"].includes(target?.name) &&
-        target.role === "textbox"
+        target?.role === "textbox" &&
+        ["Name", "Notes"].includes(target.name)
+      ) {
+        const expected =
+          target.name === "Name" ? formExpected.name : formExpected.notes;
+        const text = action === "set_value" ? args.value : args.text;
+        if (
+          typeof text === "string" &&
+          text.length &&
+          (action === "set_value" ? text === expected : expected.includes(text))
+        )
+          effects.add(target.name);
+      }
+      if (action === "type_text" && !target)
+        limitations.add("typing target lacks observed focus proof");
+      if (
+        target?.name === "Accept terms" &&
+        target.role === "checkbox" &&
+        (["click", "invoke"].includes(action) ||
+          (action === "set_value" &&
+            /^(true|1|yes|on|checked)$/i.test(String(args.value).trim())))
       )
-        edited = true;
+        effects.add("terms");
+      if (
+        (target?.name === "Choice" &&
+          target.role === "combobox" &&
+          action === "set_value" &&
+          String(args.value).toLowerCase() === "beta") ||
+        (target?.name === "Beta" &&
+          target.role === "option" &&
+          ["click", "invoke"].includes(action))
+      )
+        effects.add("choice");
+      edited = effects.size === 4;
+      const enter =
+        action === "keypress" &&
+        args.keys?.some((key) => String(key).toLowerCase() === "enter");
       if (
         edited &&
+        [...known.values()].some(
+          (n) => n.name === "Submit form" && n.role === "button",
+        ) &&
         ((["click", "invoke"].includes(action) &&
           node?.name === "Submit form" &&
           node.role === "button") ||
-          (action === "keypress" &&
-            args.keys?.some((key) => String(key).toLowerCase() === "enter")))
+          enter)
       )
         submitted = true;
+      if (
+        action === "keypress" &&
+        !submitted &&
+        ["checkbox", "combobox", "option"].includes(focused?.role)
+      )
+        limitations.add(
+          "keyboard field selection not covered by this verifier",
+        );
+      if (action === "keypress") focused = undefined;
     }
-    if (submitted && reads.has(action))
+    if (submitted && (reads.has(action) || action === "wait_for"))
       for (const name of mixedStatusEvidence(d, request, statuses)) {
         if (!name.startsWith("Form confirmation: ")) continue;
         try {
@@ -735,16 +787,18 @@ function partialRecovery(f) {
         } catch {}
       }
   }
-  return (
-    partial &&
-    edited &&
-    submitted &&
-    confirmed &&
-    !bad &&
-    preserved.size === 2 &&
-    exact(f.oracle?.payload, formExpected) &&
-    exact(f.oracle?.events, { submissions: 1, starts: 0, ready: 0 })
-  );
+  return {
+    pass:
+      partial &&
+      edited &&
+      submitted &&
+      confirmed &&
+      !bad &&
+      preserved.size === 2 &&
+      exact(f.oracle?.payload, formExpected) &&
+      exact(f.oracle?.events, { submissions: 1, starts: 0, ready: 0 }),
+    limitations: [...limitations],
+  };
 }
 
 export function verifyOutcome(scenario, f) {
@@ -765,9 +819,12 @@ export function verifyOutcome(scenario, f) {
     f.cleanup?.profileEmpty === true &&
     f.cleanup.processCount === 0 &&
     f.cleanup.fixtureExited === true;
-  let outcome = false;
-  if (scenario === "partial") outcome = partialRecovery(f);
-  else if (scenario === "mixed") {
+  let outcome = false,
+    partialResult;
+  if (scenario === "partial") {
+    partialResult = partialRecovery(f);
+    outcome = partialResult.pass;
+  } else if (scenario === "mixed") {
     const native = f.native,
       code = native?.initial?.approve?.code,
       ids = new Set(),
@@ -1004,6 +1061,9 @@ export function verifyOutcome(scenario, f) {
       freshAction;
   }
   return {
+    ...(partialResult
+      ? { verifierLimitations: partialResult.limitations }
+      : {}),
     provenance: Boolean(provenance),
     settled,
     cleanup,
