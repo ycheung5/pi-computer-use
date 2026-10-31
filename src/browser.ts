@@ -2443,7 +2443,11 @@ export async function browse(
             )
               return false;
             if (control instanceof HTMLElement) control.focus();
-            return document.activeElement === control;
+            const root = control.getRootNode();
+            return (
+              (root instanceof Document || root instanceof ShadowRoot) &&
+              root.activeElement === control
+            );
           },
           undefined,
           signal,
