@@ -22,14 +22,14 @@ class OcrFixture : Form {
   PaintedOcrButton approve,ignore;
   string approveCode,ignoreCode;
   int approveCount,ignoreCount;
-  OcrFixture(string title,bool visual) {
+  OcrFixture(string title,bool visual,bool codesOnly) {
     Text=title; StartPosition=FormStartPosition.Manual; Location=new Point(160,180); ClientSize=new Size(600,360); BackColor=Color.White; ShowInTaskbar=false;
     visualAssociation=visual;
     if(visual) {
       var random=new Random(Guid.NewGuid().GetHashCode());approveCode=random.Next(1000,10000).ToString();
       do { ignoreCode=random.Next(1000,10000).ToString(); } while(ignoreCode==approveCode);
       bool approveFirst=random.Next(2)==0,approveTop=random.Next(2)==0;
-      approve=new PaintedOcrButton("APPROVE "+approveCode);ignore=new PaintedOcrButton("IGNORE "+ignoreCode);
+      approve=new PaintedOcrButton((codesOnly?"CODE ":"APPROVE ")+approveCode);ignore=new PaintedOcrButton((codesOnly?"CODE ":"IGNORE ")+ignoreCode);
       approve.SetBounds(random.Next(30,70),approveTop?random.Next(25,45):random.Next(205,225),500,100);
       ignore.SetBounds(random.Next(30,70),approveTop?random.Next(205,225):random.Next(25,45),500,100);
       approve.Click+=delegate { approveCount++; };ignore.Click+=delegate { ignoreCount++; };
@@ -56,7 +56,7 @@ class OcrFixture : Form {
     return "{\"client\":{\"x\":"+r.X+",\"y\":"+r.Y+",\"width\":"+r.Width+",\"height\":"+r.Height+"},\"minimized\":"+(form.WindowState==FormWindowState.Minimized ? "true" : "false")+",\"ink\":{\"x\":"+(r.X+left)+",\"y\":"+(r.Y+top)+",\"width\":"+(right-left+1)+",\"height\":"+(bottom-top+1)+"}}";
   }
   [STAThread] static void Main(string[] args) {
-    SetProcessDPIAware(); Application.EnableVisualStyles(); var form=new OcrFixture(args[0],args.Length>1&&args[1]=="visual-association");
+    SetProcessDPIAware(); Application.EnableVisualStyles(); var form=new OcrFixture(args[0],args.Length>1&&(args[1]=="visual-association"||args[1]=="code-association"),args.Length>1&&args[1]=="code-association");
     form.Shown+=delegate { Console.WriteLine(form.Handle.ToInt64()); Console.Out.Flush(); };
     var input=new Thread(delegate() { string line; while((line=Console.ReadLine())!=null) {
       string command=line; form.BeginInvoke((Action)delegate {

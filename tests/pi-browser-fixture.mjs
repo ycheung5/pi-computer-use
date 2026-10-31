@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
-export const scenarios = ["form", "advanced", "stale"];
+export const scenarios = ["form", "advanced", "stale", "mixed"];
 export async function formState(base) {
   const { nativeWorkerLaunch } = await import("../dist/launcher.js");
   const native = await nativeWorkerLaunch();
@@ -42,8 +42,54 @@ const safeRefusals =
 export default async function (pi) {
   const config = JSON.parse(process.env.PI_CU_TEST_SPEC ?? "null");
   const { base, scenario, upload, auditFile, journal } = config ?? {};
+  const nativeRoutes = new Set();
+  let nativeGuard, nativeBefore, nativeTrace;
   const audit = (e) =>
-    appendFileSync(auditFile, `${JSON.stringify(e)}\n`, { mode: 0o600 });
+    appendFileSync(
+      auditFile,
+      `${JSON.stringify(nativeTrace ? nativeTrace(e) : e)}\n`,
+      { mode: 0o600 },
+    );
+  if (config.native) {
+    const { createVisualGuard, visualBeforeHook, traceWithoutImages } =
+      await import("./pi-visual-fixture.mjs");
+    nativeTrace = traceWithoutImages;
+    nativeGuard = createVisualGuard(config.native.owned, () => {
+      const o = JSON.parse(
+        execFileSync(
+          config.native.owned.windowsNode,
+          [
+            "-e",
+            config.native.clientCode,
+            config.native.owned.pipeName,
+            "oracle",
+          ],
+          {
+            encoding: "utf8",
+            timeout: 15000,
+            stdio: ["ignore", "pipe", "ignore"],
+          },
+        ),
+      );
+      const expected = config.native.owned.identity;
+      if (
+        !o.ok ||
+        ["pid", "creation", "executable"].some(
+          (k) => o.identity?.[k] !== expected[k],
+        )
+      )
+        throw Error("owned native fixture unavailable");
+      return { ok: true, ...o.target };
+    });
+    nativeBefore = visualBeforeHook(
+      nativeGuard,
+      () =>
+        [journal, config.native.fixtureJournal].map((path) =>
+          JSON.parse(readFileSync(path, "utf8")),
+        ),
+      () => {},
+    );
+  }
   const { default: computerUse } = await import("../dist/extension.js");
   if (!/^http:\/\/127\.0\.0\.1:\d+\/$/.test(base ?? ""))
     throw Error("trusted fixture base required");
@@ -106,6 +152,26 @@ export default async function (pi) {
       );
     const n = e.toolName?.replace(/^windows_computer_use_/, ""),
       a = e.input;
+    if (
+      nativeGuard &&
+      a &&
+      (a.nativeWindowHandle !== undefined ||
+        a.processId !== undefined ||
+        a.windowRef !== undefined ||
+        a.windowTitle !== undefined ||
+        (typeof a.elementId === "string" &&
+          a.elementId !== "new-tab" &&
+          !observed.has(a.elementId) &&
+          ![...tabs].some((tab) => a.elementId === tab + ":address")))
+    ) {
+      if (state.stopped || state.haltWrites)
+        return deny("prior operation or effect uncertain");
+      if (a.browserTab !== undefined || observed.has(a.elementId))
+        return deny("conflicting native and browser references");
+      nativeRoutes.add(e.toolCallId);
+      return nativeBefore(e);
+    }
+
     if (state.stopped) return deny("operation was explicitly stopped");
     if (
       !e.toolName?.startsWith("windows_computer_use_") ||
@@ -268,7 +334,44 @@ export default async function (pi) {
     for (const node of observed.values())
       if (node.name === "Direct upload" && node.id) files.add(node.id);
   };
-  pi.on("tool_result", guarded(after));
+  pi.on("tool_result", (e) => {
+    if (!nativeRoutes.has(e.toolCallId)) return guarded(after)(e);
+    const safe = nativeGuard.after(e) ?? {
+      content: [
+        {
+          type: "text",
+          text: "SCOPED_FIXTURE_DENIED: native observation was not forwarded",
+        },
+      ],
+      details: {
+        ok: false,
+        error: "SCOPED_FIXTURE_DENIED: native observation was not forwarded",
+      },
+      isError: true,
+    };
+    try {
+      audit(
+        nativeTrace({
+          type: "guard_tool_result",
+          toolCallId: e.toolCallId,
+          toolName: e.toolName,
+          details: safe.details,
+          content: safe.content,
+          isError: safe.isError,
+        }),
+      );
+    } catch {
+      state.guardFault = true;
+    }
+    if (
+      safe.isError &&
+      /CANCEL|STOP|CLEANUP|CAPTURE_UNAVAILABLE/.test(
+        String(safe.details?.error),
+      )
+    )
+      state.haltWrites = true;
+    return safe;
+  });
   const wrapped = new Proxy(pi, {
     get(target, key) {
       if (key !== "registerTool") {
@@ -390,6 +493,12 @@ const second = {
   accepted: true,
   choice: "beta",
 };
+export const mixedExpected = {
+  name: "Mixed task 中文 café 😀",
+  notes: "Browser to native",
+  accepted: true,
+  choice: "beta",
+};
 const formExpected = {
   name: "Pi 中文 café 😀",
   notes: "First line\n第二行 café 😀",
@@ -401,6 +510,8 @@ export function brief(scenario, source) {
     advanced = `${source.url}advanced`;
   const safety =
     " Reobserve and use supported recovery after conclusive no-effect refusals. Do not replay uncertain effects. Stop on actual cancellation or uncertain cleanup. Use only the owned local fixture browser pages, without native input or clipboard.";
+  if (scenario === "mixed")
+    return `At ${form}, submit name “${mixedExpected.name}”, notes “${mixedExpected.notes}”, accept terms and choose Beta. The submitted form returns a confirmation code. In our owned native window HWND ${source.native.nativeWindowHandle}, PID ${source.native.processId}, title ${JSON.stringify(source.native.title)}, invoke the one neutral CODE button bearing that returned code exactly once and preserve the other button. Confirm the browser's native-completion acknowledgement and report the code. Use only this local browser tab and owned native window with public observed references. Native controls require semantic Invoke with fallbackClick:false and activate:false; snapshots must use captureWindow:true for owned-window images. No keyboard, pointer, clipboard, launch, other windows or desktop images. Reobserve after conclusive no-effect refusal; do not replay uncertain effects; stop on actual cancellation or unknown cleanup.`;
   if (scenario === "form")
     return `At ${form}, submit name “${formExpected.name}”, notes “${formExpected.notes}”, accept terms and choose Beta. Start the delayed result and verify “Delayed result ready”, preserving disabled/read-only fields.${safety}`;
   if (scenario === "advanced")
@@ -423,6 +534,88 @@ export function actualText(d) {
   return values.join("\n");
 }
 const exact = (a, b) => a && Object.keys(b).every((k) => a[k] === b[k]);
+// Status names come from owned server output, never editable values or unscoped page text.
+function mixedStatusEvidence(d, request, known) {
+  if (
+    d.action === "wait_for" ||
+    request?.toolName === "windows_computer_use_wait_for"
+  ) {
+    const args = request?.input;
+    return d.condition === "element" &&
+      d.verification === "observed" &&
+      d.found !== false &&
+      d.conclusive !== false &&
+      d.timedOut !== true &&
+      d.appear !== false &&
+      args?.appear !== false &&
+      (args?.condition ?? "element") === "element" &&
+      args?.controlType?.toLowerCase() === "status" &&
+      args.query === d.query
+      ? [d.query]
+      : [];
+  }
+  const names = [];
+  const editable = (n) =>
+    ["textbox", "searchbox", "combobox"].includes(
+      String(n.role).toLowerCase(),
+    ) ||
+    ["input", "textarea", "select"].includes(n.tag) ||
+    n.value !== undefined ||
+    n.editable === true ||
+    n.contenteditable === true;
+  const visit = (node, blocked) => {
+    if (!node) return;
+    blocked = blocked || editable(node);
+    if (
+      !blocked &&
+      node.role?.toLowerCase() === "status" &&
+      typeof node.name === "string"
+    ) {
+      names.push(node.name);
+      if (
+        typeof node.id === "string" &&
+        /^(?:Form confirmation|Native confirmation)/.test(node.name)
+      )
+        known.set(
+          node.id,
+          node.name.startsWith("Form confirmation") ? "pre" : "p",
+        );
+    }
+    for (const child of node.children ?? []) visit(child, blocked);
+  };
+  for (const nodes of [d.nodes, d.results, d.matches]) {
+    const ancestors = [];
+    for (const node of nodes ?? []) {
+      if (!Number.isFinite(node.depth)) ancestors.length = 0;
+      else
+        while (ancestors.length && ancestors.at(-1).depth >= node.depth)
+          ancestors.pop();
+      visit(
+        node,
+        ancestors.some((parent) => parent.editable),
+      );
+      if (Number.isFinite(node.depth))
+        ancestors.push({ depth: node.depth, editable: editable(node) });
+    }
+  }
+  visit(d.tree, false);
+  const element = d.element;
+  if (
+    element &&
+    known.get(element.id) === element.tag &&
+    request?.input?.elementId === element.id &&
+    !editable(element) &&
+    typeof element.text === "string"
+  )
+    names.push(
+      element.tag === "pre"
+        ? "Form confirmation: " + element.text
+        : element.text,
+    );
+  else visit(element, false);
+  return names;
+}
+
 export function verifyOutcome(scenario, f) {
   const provenance =
     f.effective?.length > 0 &&
@@ -442,7 +635,99 @@ export function verifyOutcome(scenario, f) {
     f.cleanup.processCount === 0 &&
     f.cleanup.fixtureExited === true;
   let outcome = false;
-  if (scenario === "form") {
+  if (scenario === "mixed") {
+    const native = f.native,
+      code = native?.initial?.approve?.code,
+      ids = new Set(),
+      pending = new Map(),
+      requests = new Map(),
+      statuses = new Map();
+    let codeObserved = false,
+      acknowledged = false,
+      invoked = 0,
+      causal = false;
+    const visit = (node) => {
+      if (!node) return;
+      if (
+        node.controlType === "Button" &&
+        node.name === "" &&
+        typeof node.id === "string"
+      )
+        ids.add(node.id);
+      for (const child of node.children ?? []) visit(child);
+    };
+    for (const e of f.audit ?? []) {
+      const d = e.details;
+      if (e.type === "guard_tool_call") requests.set(e.toolCallId, e);
+      if (
+        e.type === "guard_tool_call" &&
+        e.toolName === "windows_computer_use_invoke" &&
+        ids.has(e.input?.elementId)
+      )
+        pending.set(e.toolCallId, codeObserved);
+      if (e.type !== "guard_tool_result" || d?.ok !== true) continue;
+      if (
+        d.nativeWindowHandle === native?.owned?.nativeWindowHandle &&
+        d.processId === native?.owned?.processId
+      ) {
+        visit(d.tree);
+        visit(d.element);
+        for (const node of d.matches ?? []) visit(node);
+      }
+      if (
+        e.toolName === "windows_computer_use_invoke" &&
+        pending.has(e.toolCallId)
+      ) {
+        invoked++;
+        causal = pending.get(e.toolCallId) === true;
+      }
+      if (d.tab?.url === f.base + "form") {
+        const names = mixedStatusEvidence(
+          d,
+          requests.get(e.toolCallId),
+          statuses,
+        );
+        if (
+          names.some((name) => {
+            if (!name.startsWith("Form confirmation: ")) return false;
+            try {
+              return (
+                JSON.parse(name.slice("Form confirmation: ".length))
+                  .confirmationCode === code
+              );
+            } catch {
+              return false;
+            }
+          })
+        )
+          codeObserved = true;
+        if (
+          invoked === 1 &&
+          names.includes("Native confirmation complete: " + code)
+        )
+          acknowledged = true;
+      }
+    }
+    outcome =
+      typeof code === "string" &&
+      /^\d{4}$/.test(code) &&
+      native.initial.approve.count === 0 &&
+      native.initial.ignore.count === 0 &&
+      native.final?.approve?.code === code &&
+      native.final.approve.count === 1 &&
+      native.final.ignore.count === 0 &&
+      native.receipt?.issuedCode === code &&
+      native.receipt.confirmations === 1 &&
+      native.workerRetired === true &&
+      native.cleanup?.fixtureRetired === true &&
+      native.cleanup.folderRemoved === true &&
+      exact(f.oracle?.payload, mixedExpected) &&
+      f.oracle.events?.submissions === 1 &&
+      invoked === 1 &&
+      causal &&
+      acknowledged &&
+      new RegExp("\\b" + code + "\\b").test(f.finalReport ?? "");
+  } else if (scenario === "form") {
     const delayed = f.observations?.some((d) => {
       if (d.ok !== true) return false;
       if (d.action !== "wait_for")

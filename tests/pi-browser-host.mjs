@@ -144,7 +144,10 @@ async function live(selected, options) {
         timeoutMs,
         dir,
       };
-      let retention;
+      let retention,
+        nativePrepared,
+        nativeReady,
+        observedNativeWorkers = [];
       const retain = async (reason) => {
         if (retention) return retention;
         retention = new Promise(() => setInterval(() => {}, 60000));
@@ -177,12 +180,44 @@ async function live(selected, options) {
           "const fs=require('node:fs'),os=require('node:os'),p=require('node:path');console.log(JSON.stringify(fs.mkdtempSync(p.join(os.tmpdir(),'pi-model-profile-'))))",
         );
         ownership.profile = profile;
+        if (scenario === "mixed") {
+          for (const path of [
+            "tests/pi-visual-host.mjs",
+            "tests/pi-visual-fixture.mjs",
+            "tests/native-ocr.mjs",
+            "tests/ocr-fixture.cs",
+            "assets/accessibility.cs",
+            "assets/capture.cs",
+            "assets/window-references.cs",
+            "dist/capture.js",
+          ])
+            manifest[path] = await hash(join(root, path));
+          const { prepareOwnedVisualFixture } = await import(
+            "./pi-visual-host.mjs"
+          );
+          nativePrepared = prepareOwnedVisualFixture(native, root, true);
+          ownership.nativeFixtureChildPid = nativePrepared.server.pid;
+          await write("owner.json", ownership);
+          nativeReady = await nativePrepared.ready();
+          await write("native-fixture-owner.json", {
+            phase: "running",
+            expiresAt: Date.now() + 300000,
+          });
+        }
         const server = spawn(
           native.executable,
           [
             translate(join(root, "tests/browser-actions-server.mjs")),
             "edge",
             "false",
+            ...(nativeReady
+              ? [
+                  JSON.stringify({
+                    pipe: "\\\\.\\pipe\\" + nativeReady.owned.pipeName,
+                    identity: nativeReady.owned.identity,
+                  }),
+                ]
+              : []),
           ],
           { stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
         );
@@ -205,7 +240,9 @@ async function live(selected, options) {
         if (!/^http:\/\/127\.0\.0\.1:\d+\/$/.test(source.url))
           await retain("fixture-address-untrusted");
         ownership.fixtureUrl = source.url;
+        if (nativeReady) source.native = nativeReady.owned;
         ownership.phase = "running";
+        ownership.expiresAt = Date.now() + timeoutMs;
         await write("owner.json", ownership);
         const ownedState = () => {
           const prefix = profile.replaceAll("'", "''");
@@ -220,6 +257,15 @@ async function live(selected, options) {
           upload: source.upload,
           auditFile,
           journal,
+          ...(nativeReady
+            ? {
+                native: {
+                  owned: nativeReady.owned,
+                  clientCode: nativeReady.clientCode,
+                  fixtureJournal: join(dir, "native-fixture-owner.json"),
+                },
+              }
+            : {}),
         };
         const names = [
           "snapshot",
@@ -237,6 +283,7 @@ async function live(selected, options) {
           "screenshot",
           "close_window",
           "wait",
+          ...(nativeReady ? ["ocr"] : []),
         ]
           .map((n) => `windows_computer_use_${n}`)
           .join(",");
@@ -292,6 +339,14 @@ async function live(selected, options) {
           downloadName: source.downloadName,
           advancedObserved: {},
         };
+        if (nativeReady)
+          facts.native = {
+            owned: nativeReady.owned,
+            initial: nativeReady.initial,
+          };
+        const sanitize = nativeReady
+          ? (await import("./pi-visual-fixture.mjs")).traceWithoutImages
+          : (value) => value;
         let unsafe = false,
           stopped = false,
           parseError = false,
@@ -336,13 +391,15 @@ async function live(selected, options) {
           if (saved)
             await fs.appendFile(
               join(dir, "trace.jsonl"),
-              `${JSON.stringify(saved)}\n`,
+              `${JSON.stringify(sanitize(saved))}\n`,
               { mode: 0o600 },
             );
           if (event.type === "tool_execution_start") toolStarts++;
           if (event.type === "agent_settled")
             facts.lifecycle = { settled: true, aborted: event.aborted };
           if (event.type !== "tool_execution_end") continue;
+          if (nativePrepared && !observedNativeWorkers.length)
+            observedNativeWorkers = nativePrepared.queryWorkers();
           const d = event.result?.details;
           if (d) facts.observations.push(d);
           if (d?.cleanupConfirmed === false) unsafe = true;
@@ -401,6 +458,20 @@ async function live(selected, options) {
         )
           await retain("host-or-browser-cleanup-unconfirmed");
         facts.cleanup = state;
+        if (nativePrepared) {
+          const remainingWorkers = nativePrepared.queryWorkers();
+          if (!observedNativeWorkers.length || remainingWorkers.length)
+            await retain("mixed-native-worker-retirement-unconfirmed");
+          facts.native.workerRetired = true;
+          facts.native.workerCleanup = {
+            observedNativeWorkers,
+            remainingWorkers,
+          };
+          facts.native.final = nativeReady.ipc("oracle");
+          facts.native.receipt = win(
+            `fetch(${JSON.stringify(source.url + "mixed/receipt")}).then(r=>r.json()).then(v=>console.log(JSON.stringify(v)))`,
+          );
+        }
         try {
           facts.audit = (await fs.readFile(auditFile, "utf8"))
             .trim()
@@ -438,6 +509,17 @@ async function live(selected, options) {
         ]);
         if (closed?.[0] !== 0) await retain("fixture-exit-unconfirmed");
         lines.close();
+        if (nativePrepared) {
+          facts.native.cleanup = nativeReady.ipc("stop");
+          const retired = await Promise.race([
+            nativePrepared.closed,
+            new Promise((resolve) => setTimeout(() => resolve(null), 10000)),
+          ]);
+          if (!facts.native.cleanup.ok || retired?.[0] !== 0)
+            await retain("mixed-native-fixture-cleanup-unconfirmed");
+          nativePrepared.lines.close();
+          await write("native-fixture-owner.json", { phase: "settled" });
+        }
         facts.cleanup.fixtureExited = true;
         ownership.phase = "settled";
         await write("owner.json", ownership);
