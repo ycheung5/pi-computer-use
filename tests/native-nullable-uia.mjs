@@ -53,6 +53,7 @@ const hwnd = await new Promise((resolve, reject) => {
   });
   fixture.once("error", reject);
 });
+process.env.PI_CU_SETTINGS_FILE = join(folder, "settings.json");
 const client = new WorkerClient({
   launch: async () => ({
     executable: process.execPath,
@@ -60,6 +61,7 @@ const client = new WorkerClient({
     cwd: folder,
   }),
 });
+const targetArgs = () => ({ nativeWindowHandle: hwnd, processId: fixture.pid });
 try {
   const r = await client.execute("snapshot", {
     nativeWindowHandle: hwnd,
@@ -131,6 +133,131 @@ try {
     "incomplete role metadata must not prove disappearance",
   );
   assert.equal(absent.verification, "inconclusive");
+  if (process.argv.includes("--quiet-scroll")) {
+    await client.execute("operation_end", {});
+    const observe = (prefix) =>
+      new Promise((resolve, reject) => {
+        const receive = (line) => {
+          if (line.startsWith(prefix)) {
+            clearTimeout(timer);
+            lines.removeListener("line", receive);
+            resolve(line);
+          }
+        };
+        const timer = setTimeout(() => {
+          lines.removeListener("line", receive);
+          reject(new Error(`fixture did not report ${prefix}`));
+        }, 10000);
+        lines.on("line", receive);
+      });
+    const command = (text, prefix = text) => {
+      const reply = observe(prefix);
+      fixture.stdin.write(`${text}\n`);
+      return reply;
+    };
+    const operation = "owned-quiet-scroll";
+    // Observe the normal quiet path before testing interruption; no native wheel
+    // fallback is available on this owned provider, which exposes ScrollPattern.
+    const normal = await client.execute(
+      "scroll",
+      { ...targetArgs(), elementId: unknown.id, deltaY: 240 },
+      undefined,
+      operation,
+    );
+    assert.equal(normal.ok, true, JSON.stringify(normal));
+    assert.equal(normal.method, "uia_scroll");
+    assert.equal(normal.cleanupConfirmed, true);
+    const health = await client.execute("health", {}, undefined, operation);
+    assert.equal(
+      health.control.presentation.visible,
+      false,
+      "quiet dispatch does not announce physical control",
+    );
+    const initial = await command("scroll-state");
+    const initialCalls = Number(initial.split(":")[1]);
+    await command("scroll-hold", "scroll:armed");
+    const entered = observe("scroll:entered:");
+    const controller = new AbortController();
+    const pending = client.execute(
+      "scroll",
+      { ...targetArgs(), elementId: unknown.id, deltaY: 240 },
+      controller.signal,
+      operation,
+    );
+    const cancelled = assert.rejects(
+      pending,
+      /CANCELLED|owned scroll cancellation/,
+    );
+    await entered;
+    const held = await command("scroll-state");
+    assert.equal(held, `scroll-state:${initialCalls + 1}:${initialCalls}`);
+    controller.abort(new Error("owned scroll cancellation"));
+    await cancelled;
+    const competitor = new WorkerClient({
+      launch: async () => ({
+        executable: process.execPath,
+        args: [fileURLToPath(new URL("../dist/worker.js", import.meta.url))],
+        cwd: folder,
+      }),
+    });
+    try {
+      const busy = await competitor.execute(
+        "list_windows",
+        { maxWindows: 1 },
+        undefined,
+        "competing-quiet-scroll",
+      );
+      assert.equal(busy.ok, false, JSON.stringify(busy));
+      assert.match(busy.error, /COMPUTER_USE_BUSY/);
+      assert.equal(
+        await command("scroll-state"),
+        held,
+        "no subsequent call or settled effect while first provider call is held",
+      );
+      const settled = observe("scroll:settled");
+      await command("scroll-release", "scroll:release-ack");
+      await settled;
+      const ended = await client.execute(
+        "operation_end",
+        {},
+        undefined,
+        operation,
+      );
+      assert.equal(ended.ok, true, JSON.stringify(ended));
+      assert.equal(
+        await command("scroll-state"),
+        `scroll-state:${initialCalls + 1}:${initialCalls + 1}`,
+        "only the already-dispatched call may take effect; later steps never run",
+      );
+      const recovered = await competitor.execute(
+        "list_windows",
+        { maxWindows: 1 },
+        undefined,
+        "competing-quiet-scroll",
+      );
+      assert.equal(recovered.ok, true, JSON.stringify(recovered));
+      await competitor.execute(
+        "operation_end",
+        {},
+        undefined,
+        "competing-quiet-scroll",
+      );
+      console.log(
+        JSON.stringify({
+          ok: true,
+          check: "quiet ScrollPattern cancellation",
+          normalCalls: initialCalls,
+          quietPresentation: true,
+          inFlightEffect: 1,
+          subsequentCalls: 0,
+          ownershipRetainedUntilSettlement: true,
+          physicalInput: false,
+        }),
+      );
+    } finally {
+      await competitor.dispose();
+    }
+  }
   console.log(
     JSON.stringify({
       ok: true,
@@ -142,6 +269,7 @@ try {
     }),
   );
 } finally {
+  fixture.stdin.write("scroll-release\n");
   await client.dispose();
   fixture.stdin.end("\n");
   if (fixture.exitCode === null) fixture.kill();

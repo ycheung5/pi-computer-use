@@ -5,14 +5,30 @@ using System.Windows.Automation;
 using System.Windows.Automation.Provider;
 using System.Windows.Forms;
 
-class UnknownTypeControl : Control, IRawElementProviderSimple {
+class UnknownTypeControl : Control, IRawElementProviderSimple, IScrollProvider {
   public static int Mode;
   public static readonly ManualResetEvent Release = new ManualResetEvent(false);
   public static int Entries;
   public static int Active;
   public ProviderOptions ProviderOptions { get { return ProviderOptions.ServerSideProvider; } }
   public IRawElementProviderSimple HostRawElementProvider { get { return AutomationInteropProvider.HostProviderFromHandle(Handle); } }
-  public object GetPatternProvider(int id) { return null; }
+  public static int ScrollCalls,ScrollEffects,HoldScroll;
+  public static readonly ManualResetEvent ScrollRelease=new ManualResetEvent(false);
+  public object GetPatternProvider(int id) { return id==ScrollPatternIdentifiers.Pattern.Id?this:null; }
+  public bool HorizontallyScrollable {get{return true;}}
+  public bool VerticallyScrollable {get{return true;}}
+  public double HorizontalScrollPercent {get{return 0;}}
+  public double VerticalScrollPercent {get{return ScrollEffects;}}
+  public double HorizontalViewSize {get{return 10;}}
+  public double VerticalViewSize {get{return 10;}}
+  public void SetScrollPercent(double x,double y) {throw new NotSupportedException();}
+  public void Scroll(ScrollAmount x,ScrollAmount y) {
+    Interlocked.Increment(ref ScrollCalls);
+    Console.WriteLine("scroll:entered:"+x+":"+y);Console.Out.Flush();
+    if(Interlocked.Exchange(ref HoldScroll,0)==1)ScrollRelease.WaitOne(20000);
+    Interlocked.Increment(ref ScrollEffects);
+    Console.WriteLine("scroll:settled");Console.Out.Flush();
+  }
   public object GetPropertyValue(int id) {
     if (id == AutomationElementIdentifiers.ControlTypeProperty.Id) return 50040;
     if (id == AutomationElementIdentifiers.NameProperty.Id) {
@@ -57,6 +73,13 @@ class NullProviderFixture {
           UnknownTypeControl.Release.Reset();
           Interlocked.Exchange(ref UnknownTypeControl.Mode, line == "arm:fault" ? 1 : line == "arm:unavailable" ? 3 : 2);
           Console.WriteLine("armed"); Console.Out.Flush();
+        } else if(line=="scroll-hold") {
+          UnknownTypeControl.ScrollRelease.Reset();Interlocked.Exchange(ref UnknownTypeControl.HoldScroll,1);
+          Console.WriteLine("scroll:armed");Console.Out.Flush();
+        } else if(line=="scroll-release") {
+          UnknownTypeControl.ScrollRelease.Set();Console.WriteLine("scroll:release-ack");Console.Out.Flush();
+        } else if(line=="scroll-state") {
+          Console.WriteLine("scroll-state:"+UnknownTypeControl.ScrollCalls+":"+UnknownTypeControl.ScrollEffects);Console.Out.Flush();
         } else if (line == "child-handle") {
           form.BeginInvoke((Action)delegate { Console.WriteLine("child-handle:" + custom.Handle.ToInt64()); Console.Out.Flush(); });
         } else if (line == "release") {
@@ -68,6 +91,7 @@ class NullProviderFixture {
           Console.WriteLine("entries:" + UnknownTypeControl.Entries); Console.Out.Flush();
         } else break;
       }
+      UnknownTypeControl.ScrollRelease.Set();
       UnknownTypeControl.Release.Set();
       form.BeginInvoke((Action)delegate { form.Close(); });
     });

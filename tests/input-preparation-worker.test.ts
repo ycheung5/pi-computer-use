@@ -8,10 +8,18 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { WorkerClient } from "../src/client.js";
 
-test("real worker waits for a matching input preparation acknowledgment before native dispatch", {
-  skip: process.platform === "win32",
-  timeout: 15000,
-}, async () => {
+for (const action of ["click", "scroll"] as const)
+  test(
+    `real worker waits for a matching input preparation acknowledgment before native ${action} dispatch`,
+    { skip: process.platform === "win32", timeout: 15000 },
+    () => testInputBarrier(action),
+  );
+
+async function testInputBarrier(action: "click" | "scroll") {
+  const args =
+    action === "scroll"
+      ? { elementId: "uia:owned-scroller", deltaY: 240 }
+      : { x: 1, y: 1, dispatch: "foreground" };
   const root = await mkdtemp(join(tmpdir(), "pi-cu-input-barrier-"));
   const compiler = join(
     root,
@@ -29,7 +37,7 @@ test("real worker waits for a matching input preparation acknowledgment before n
   );
   await writeFile(
     fake,
-    `#!/usr/bin/env node\nconst {createInterface}=require('node:readline');const {appendFileSync}=require('node:fs');createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.cancel)return;if(r.action==='click'){appendFileSync(process.env.PI_CU_BARRIER_JOURNAL,'dispatch\\n');if(process.env.PI_CU_BARRIER_HOLD==='1')return;}console.log(JSON.stringify({id:r.id,result:{ok:true,action:r.action,listenerProcessId:process.pid,cleanupConfirmed:true}}));});\n`,
+    `#!/usr/bin/env node\nconst {createInterface}=require('node:readline');const {appendFileSync}=require('node:fs');createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.cancel)return;if(r.action==='click'||r.action==='scroll'){appendFileSync(process.env.PI_CU_BARRIER_JOURNAL,'dispatch\\n');if(process.env.PI_CU_BARRIER_HOLD==='1')return;}console.log(JSON.stringify({id:r.id,result:{ok:true,action:r.action,listenerProcessId:process.pid,cleanupConfirmed:process.env.PI_CU_BARRIER_HOLD!=='uncertain'}}));});\n`,
     { mode: 0o755 },
   );
   await writeFile(
@@ -82,7 +90,7 @@ test("real worker waits for a matching input preparation acknowledgment before n
   };
   try {
     child.stdin.write(
-      `${JSON.stringify({ id: 1, action: "click", args: { x: 1, y: 1, dispatch: "foreground" }, operationId: "barrier-test" })}\n`,
+      `${JSON.stringify({ id: 1, action, args, operationId: "barrier-test" })}\n`,
     );
     const preparation = await next();
     assert.equal(
@@ -105,7 +113,7 @@ test("real worker waits for a matching input preparation acknowledgment before n
     assert.equal(result.result.ok, true, JSON.stringify(result));
     assert.equal(await readFile(journal, "utf8"), "dispatch\n");
     child.stdin.write(
-      `${JSON.stringify({ id: 2, action: "click", args: { x: 1, y: 1, dispatch: "foreground" }, operationId: "barrier-test" })}\n`,
+      `${JSON.stringify({ id: 2, action, args, operationId: "barrier-test" })}\n`,
     );
     let delayed = await next();
     while (delayed.event !== "input_prepare") delayed = await next();
@@ -125,7 +133,7 @@ test("real worker waits for a matching input preparation acknowledgment before n
       "late acknowledgement must not dispatch",
     );
     child.stdin.write(
-      `${JSON.stringify({ id: 3, action: "click", args: { x: 1, y: 1, dispatch: "foreground" }, operationId: "race-operation" })}\n`,
+      `${JSON.stringify({ id: 3, action, args, operationId: "race-operation" })}\n`,
     );
     let racing = await next();
     while (racing.event !== "input_prepare") racing = await next();
@@ -141,7 +149,7 @@ test("real worker waits for a matching input preparation acknowledgment before n
     );
     if (!raced.result.ok) assert.match(raced.result.error, /STOPPED/);
     child.stdin.write(
-      `${JSON.stringify({ id: 4, action: "click", args: { x: 1, y: 1, dispatch: "foreground" }, operationId: "new-operation" })}\n`,
+      `${JSON.stringify({ id: 4, action, args, operationId: "new-operation" })}\n`,
     );
     let disconnected = await next();
     while (disconnected.event !== "input_prepare") disconnected = await next();
@@ -179,8 +187,8 @@ test("real worker waits for a matching input preparation acknowledgment before n
     });
     try {
       const click = await wrapped.execute(
-        "click",
-        { x: 1, y: 1, dispatch: "foreground" },
+        action,
+        args,
         undefined,
         "wrapped-operation",
       );
@@ -204,6 +212,46 @@ test("real worker waits for a matching input preparation acknowledgment before n
       `${journalAfterRace}dispatch\n`,
       "WorkerClient and the actual worker complete the private handshake",
     );
+    // Cleanup failure must cross the accessibility validation callback without
+    // clearing the outer worker's lease, even when the provider returned.
+    const uncertainEnv = {
+      ...wrappedEnv,
+      LOCALAPPDATA: join(root, "local-uncertain"),
+      PI_CU_SETTINGS_FILE: join(root, "settings-uncertain.json"),
+      PI_CU_BARRIER_HOLD: "uncertain",
+    };
+    const uncertain = new WorkerClient({
+      launch: async () => ({
+        executable: process.execPath,
+        args: [
+          "--import",
+          "tsx",
+          "--input-type=module",
+          "-e",
+          `Object.assign(process.env,${JSON.stringify(uncertainEnv)});${boot}`,
+        ],
+      }),
+    });
+    let uncertainPid = 0;
+    try {
+      uncertainPid = Number((await uncertain.execute("health", {})).processId);
+      const outcome = await uncertain.execute(
+        action,
+        args,
+        undefined,
+        "uncertain-operation",
+      );
+      assert.equal(outcome.ok, false, JSON.stringify(outcome));
+      assert.match(String(outcome.error), /INPUT_CLEANUP_UNCONFIRMED/);
+      await assert.rejects(uncertain.dispose(), /INPUT_CLEANUP_UNCONFIRMED/);
+    } finally {
+      // These are disposable protocol peers, with no physical input capability.
+      if (uncertainPid) {
+        try {
+          process.kill(uncertainPid, "SIGKILL");
+        } catch {}
+      }
+    }
     const crashEnv = {
       ...wrappedEnv,
       LOCALAPPDATA: join(root, "local3"),
@@ -224,8 +272,8 @@ test("real worker waits for a matching input preparation acknowledgment before n
       crashPid = Number(health.processId);
       assert.ok(crashPid > 0);
       const pending = crashed.execute(
-        "click",
-        { x: 1, y: 1, dispatch: "foreground" },
+        action,
+        args,
         undefined,
         "crash-operation",
       );
@@ -233,14 +281,14 @@ test("real worker waits for a matching input preparation acknowledgment before n
       for (let i = 0; i < 100; i++) {
         if (
           (await readFile(journal, "utf8")) ===
-          `${journalAfterRace}dispatch\ndispatch\n`
+          `${journalAfterRace}dispatch\ndispatch\ndispatch\n`
         )
           break;
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
       assert.equal(
         await readFile(journal, "utf8"),
-        `${journalAfterRace}dispatch\ndispatch\n`,
+        `${journalAfterRace}dispatch\ndispatch\ndispatch\n`,
         "fake native dispatch must start after ACK before crash",
       );
       process.kill(crashPid, "SIGKILL");
@@ -271,4 +319,4 @@ test("real worker waits for a matching input preparation acknowledgment before n
     ]).finally(() => clearTimeout(timer));
     await rm(root, { recursive: true, force: true });
   }
-});
+}
