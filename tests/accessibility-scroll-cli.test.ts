@@ -48,3 +48,30 @@ test("native scroll plan and refusal need no backend, build or Windows access", 
     rmSync(folder, { recursive: true, force: true });
   }
 });
+
+test("native Chromium UIA action plan names guarded actions without loading a backend", () => {
+  const folder = mkdtempSync(join(tmpdir(), "pi-chromium-actions-plan-"));
+  try {
+    const script = join(folder, "accessibility-comparison.mjs");
+    writeFileSync(script, readFileSync(source));
+    const plan = spawnSync(
+      process.execPath,
+      [script, "--native-chromium-only", "--plan"],
+      { encoding: "utf8" },
+    );
+    assert.equal(plan.status, 0, plan.stderr);
+    const report = JSON.parse(plan.stdout);
+    assert.equal(report.executed, false);
+    assert.equal(report.physicalInput, false);
+    assert.deepEqual(report.cases, [
+      "chromium.native-uia",
+      "chromium.set-value",
+      "chromium.focus",
+      "chromium.invoke",
+    ]);
+    assert.equal(report.fallback, false);
+    assert.deepEqual(readdirSync(folder), ["accessibility-comparison.mjs"]);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
