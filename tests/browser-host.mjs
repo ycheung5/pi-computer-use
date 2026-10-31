@@ -152,6 +152,28 @@ try {
       `${query} exposes ${property}`,
     );
   }
+  const ariaReadonlyMatches = await client.execute("find", {
+    browserTab: tab,
+    query: "ARIA read-only editor",
+  });
+  const ariaReadonly = ariaReadonlyMatches.results.find(
+    (entry) => entry.role === "textbox",
+  );
+  assert.ok(ariaReadonly?.id, JSON.stringify(ariaReadonlyMatches));
+  assert.equal(
+    (await client.execute("focus", { elementId: ariaReadonly.id })).ok,
+    true,
+  );
+  const rejectedInput = await client.execute("type_text", {
+    browserTab: tab,
+    text: " must not be inserted",
+  });
+  assert.equal(rejectedInput.ok, false, JSON.stringify(rejectedInput));
+  assert.match(rejectedInput.error, /BROWSER_NO_FOCUSED_FIELD/);
+  const ariaReadonlyAfter = await client.execute("element_info", {
+    elementId: ariaReadonly.id,
+  });
+  assert.equal(ariaReadonlyAfter.element.value, "aria-read-only text");
   const checkboxMatches = await client.execute("find", {
     browserTab: tab,
     query: "Checkbox with ignored readonly",

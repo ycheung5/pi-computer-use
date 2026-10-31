@@ -2332,6 +2332,7 @@ export async function browse(
               !control ||
               control.matches(":disabled") ||
               control.getAttribute("readonly") !== null ||
+              control.getAttribute("aria-readonly") === "true" ||
               control.closest('[aria-disabled="true"], [inert]')
             )
               return false;
