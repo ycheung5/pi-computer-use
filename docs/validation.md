@@ -440,6 +440,16 @@ npm run test:reference:capture -- /path/to/dsh-computer-use-win --scenario monit
 npm run test:reference:capture -- --verify-monitor-report=/path/to/capture-comparison.json
 ```
 
+### WGC handoff after screen-copy failure
+
+The owned same-target diagnostic in `/tmp/pi-cu-wgc6-same-fixture/` reproduced the original failure on both unchanged `ad28859` and lifetime candidate `c926c32`: rejected blank PrintWindow pixels were followed by an unhandled `Graphics.CopyFromScreen` Win32 exception, preventing the existing WGC handoff. Direct existing-helper capture of that same black window behind its unchanged magenta cover returned actual black pixels and independent DWM frame geometry. That diagnostic is the pre-repair failure; direct delegation alone did not prove automatic fallback.
+
+Repair `56eeea4` / diagnostic retention `963cf43` catches only that final visible-window screen-copy Win32 failure, preserves it as `nativeCaptureError`, and allows the existing private target to reach WGC without inventing native pixels. Other identity, cancellation and cleanup errors do not satisfy the failed-stage discriminator. Existing `native-capture.mjs` black-window checks now compare automatic results to the fixture's independent DWM frame/origin and unchanged frame/input tick; foreground 0 remains unavailable evidence.
+
+The missing-helper control in `/tmp/pi-cu-wgc6-repair/missing-helper-results.json` passed through the actual public worker using a disposable package copy missing only `assets/wgc.cs`. Source/package/lock/compiled capture hashes matched its recorded candidate. The result was `ok:false`, `SCREEN_REGION_CAPTURE_FAILED`, the original invalid-handle diagnostic, a separate `NATIVE_RESOURCE_MISSING` WGC error, and no image/private handoff. The same owned HWND/PID and frame `(30,40,320,200)` persisted with unchanged input tick; all eight recorded fixture/worker/helper/console PIDs were independently absent after disposal. Images were not stored. Two preceding collector setup failures (Windows copy of a Linux dependency symlink, then malformed UNC URL) are retained separately and are not product failures or capture evidence.
+
+Portable checks passed 135 tests with one skipped, plus build. Successful automatic WGC with a real lifetime reference remains pending integration of the independently accepted lifetime implementation; this checkpoint does not claim that acceptance, full capture coverage or closure of #6.
+
 ## Paired browser-form comparison
 
 Run `npm run test:browser:comparison -- /path/to/dsh-computer-use-win edge 3` from WSL2 under the shared live-test lock. The command relays to the private Windows Node, uses the same explicit installed executable for both engines, and runs the existing local browser-actions server's form route. It creates isolated headless profiles and disposable settings; no physical pointer/keyboard, clipboard or daily profile is used. `PI_CU_RELEASE_OUTPUT` retains `browser-comparison.json`, including nonzero-result evidence through the WSL relay.
