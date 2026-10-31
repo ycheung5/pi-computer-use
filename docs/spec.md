@@ -71,6 +71,7 @@ Deliver one installable Pi package with native computer-use tools, reference-equ
 56. As a user, I want three consecutive reset successes for required task/recovery scenarios, so that a single lucky run is not sufficient.
 57. As a contributor, I want stale documentation replaced during each fix, so that agents receive one current answer rather than conflicting notes.
 58. As a user, I want correctness and fewer interventions prioritized over latency and tokens, so that optimization preserves reliable behavior.
+59. As a user, I want observed native targets bound to a window lifetime, so that a stale reference cannot operate a replacement that reuses the same HWND and process ID.
 
 ## Implementation Decisions
 
@@ -93,6 +94,7 @@ Deliver one installable Pi package with native computer-use tools, reference-equ
 - Provide a small documentation index with task-specific section links. Requirements, delivery sequence, terminology and rationale each have a distinct source of truth; load only the documentation needed for the current task.
 
 - Follow reference behavior until evidence establishes a gap or a necessary Pi adaptation. Research source, history, tests and model-visible guidance before changing mechanisms; classify each material departure and record its evidence/disposition.
+- The user approved stronger window-lifetime tracking beyond the reference's raw HWND/PID checks. Design and validate lifetime-bound window references under #28 before choosing the mechanism and caller interface. Explicitly distinguish compatibility selectors from stronger references; lost identity proof must not silently retarget a replacement or bypass Windows access restrictions.
 - Keep previous fixes provisional during the audit. In particular, isolate Unicode batching, event construction, pacing and newline handling before treating the 50 ms workaround as necessary. Audit clipboard, activation/restoration and generic tool descriptions similarly.
 - Extend existing fixtures and paired comparison infrastructure rather than introducing a new framework or public test-only API. Investigate supported host interfaces before promising unattended model-driven execution.
 - Do not add a separate planner, elaborate recovery controller or fixed production retry/time budget. Runner watchdogs bound tests without altering production policy.

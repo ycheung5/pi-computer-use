@@ -10,6 +10,12 @@ An environment where Pi runs directly on Windows and controls that Windows deskt
 **WSL2 host**:
 An environment where Pi runs inside Windows Subsystem for Linux 2 and controls the associated Windows desktop.
 
+**Window lifetime**:
+The period from a native window's creation until its destruction. A replacement window has a different lifetime even when the operating system reuses its numeric handle.
+
+**Window reference**:
+An observed identity bound to one window lifetime. A reference to an ended lifetime does not identify its replacement.
+
 **Feature parity**:
 Coverage of the agreed reference capabilities, including desktop and browser automation, settings, indicators and emergency stopping; experimental capabilities retain their experimental status.
 
