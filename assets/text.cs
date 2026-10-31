@@ -52,6 +52,7 @@ partial class WindowsBridge {
     UIntPtr before,after,ignored;
     if(SendMessageTimeout(focus,0xE,UIntPtr.Zero,IntPtr.Zero,2,500,out before)==IntPtr.Zero)throw new InvalidOperationException("BACKGROUND_READ_UNCONFIRMED: no text sent");
     CheckWindowReference(window);
+    BeginWindowDispatch();
     // Never retry a refused/uncertain EM_REPLACESEL through physical input.
     if(ControlText(focus,0xC2,new UIntPtr(1),text,2,1000,out ignored)==IntPtr.Zero)throw new InvalidOperationException("TEXT_DISPATCH_UNCONFIRMED: edit may have received partial text; observe before retrying");
     string value=NativeTextValue(focus);bool lengthKnown=SendMessageTimeout(focus,0xE,UIntPtr.Zero,IntPtr.Zero,2,500,out after)!=IntPtr.Zero;
@@ -83,7 +84,7 @@ partial class WindowsBridge {
     if(checkFocus && TextFocus(window,false)!=expectedFocus)throw new InvalidOperationException("TARGET_FOCUS_CHANGED: no more text sent");
   }
   static void KeyEvent(HeldKey key,bool release) {
-    if(!release)NotifyPhysicalInput(true);
+    if(!release){BeginWindowDispatch();NotifyPhysicalInput(true);}
     PointerInput input=new PointerInput{Type=1,Data=new InputUnion{Keyboard=new KeyboardInput{Key=key.Key,Scan=key.Scan,Flags=key.Flags | (release?2U:0U),Extra=OwnedInputMarker}}};
     if(SendInput(1,new PointerInput[]{input},Marshal.SizeOf(typeof(PointerInput)))!=1)throw new InvalidOperationException("KEY_DISPATCH_UNCONFIRMED: partial input must not be replayed");
   }
@@ -158,7 +159,7 @@ partial class WindowsBridge {
         if(!args.ContainsKey("windowRef") && !args.ContainsKey("windowTitle") && !args.ContainsKey("processId") && !args.ContainsKey("nativeWindowHandle"))throw new InvalidOperationException("BACKGROUND_TARGET_REQUIRED");
         string characters=action=="type_text"?text:Convert.ToString(((IList)args["keys"])[0]);
         IntPtr recipient=TextFocus(window);if(recipient==IntPtr.Zero)recipient=window;AssertWritableText(recipient);
-        foreach(char character in characters) {CheckWindowReference(window);if(!IsWindow(window) || WindowOwner(window)!=owner || WindowOwner(recipient)!=owner)throw new InvalidOperationException("TARGET_IDENTITY_CHANGED");if(!ControlPost(recipient,0x102,new IntPtr(character),new IntPtr(1)))throw new InvalidOperationException("TEXT_DISPATCH_UNCONFIRMED: some WM_CHAR messages may have been delivered; never replay");}
+        foreach(char character in characters) {CheckWindowReference(window);if(!IsWindow(window) || WindowOwner(window)!=owner || WindowOwner(recipient)!=owner)throw new InvalidOperationException("TARGET_IDENTITY_CHANGED");BeginWindowDispatch();if(!ControlPost(recipient,0x102,new IntPtr(character),new IntPtr(1)))throw new InvalidOperationException("TEXT_DISPATCH_UNCONFIRMED: some WM_CHAR messages may have been delivered; never replay");}
         result["method"]="postmessage-wmchar";result["verification"]="unconfirmed";result["verified"]=false;result["inputTargetHandle"]=window.ToInt64();result["inputTargetProcessId"]=owner;return result;
       }
       if(TextOption(args,"_cancelEvent","").Length==0)throw new InvalidOperationException("WCU_NEEDS_INPUT: physical text/key input requires independent stopping");
@@ -171,9 +172,9 @@ partial class WindowsBridge {
         Dictionary<string,object> activation=new Dictionary<string,object>();
         if(!ManagementActivate(window,owner,activation) || GetForegroundWindow()!=window){activation["foregroundAtRefusal"]=ManagementForegroundRelationship(GetForegroundWindow(),window,owner);result["activationDiagnostic"]=activation;throw new InvalidOperationException("TARGET_ACTIVATION_REFUSED");}
       }
-      if(args.ContainsKey("_elementId")){CheckWindowReference(window);main.SetFocus();}
-      else if(action=="type_text" && TextOption(args,"focusMode","preserve")=="main") {main=MainTextControl(window);CheckWindowReference(window);main.SetFocus();result["focusedControl"]=main.Current.ControlType.ProgrammaticName;}
-      if(action=="type_text" && TextFocus(window,false)==IntPtr.Zero) {IntPtr remembered=TextFocus(window);if(remembered!=IntPtr.Zero){CheckWindowReference(window);AutomationElement.FromHandle(remembered).SetFocus();}}
+      if(args.ContainsKey("_elementId")){CheckWindowReference(window);BeginWindowDispatch();main.SetFocus();}
+      else if(action=="type_text" && TextOption(args,"focusMode","preserve")=="main") {main=MainTextControl(window);CheckWindowReference(window);BeginWindowDispatch();main.SetFocus();result["focusedControl"]=main.Current.ControlType.ProgrammaticName;}
+      if(action=="type_text" && TextFocus(window,false)==IntPtr.Zero) {IntPtr remembered=TextFocus(window);if(remembered!=IntPtr.Zero){CheckWindowReference(window);BeginWindowDispatch();AutomationElement.FromHandle(remembered).SetFocus();}}
       IntPtr expectedFocus=TextFocus(window,false);if(action=="type_text")AssertWritableText(expectedFocus);
       TextCheck(cancel,listener,window,owner,expectedFocus,action=="type_text",interaction);
       if(action=="type_text")RememberTextFocus(window,expectedFocus);

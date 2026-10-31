@@ -87,6 +87,7 @@ async function observation(
       {
         includeInvisible: true,
         maxWindows: 4096,
+        _metadataOnly: true,
         ...(args.windowRef === undefined
           ? {}
           : {

@@ -138,7 +138,19 @@ export async function screenshot(
           { ...target, maxWidth },
           signal,
         );
-        if (composited.ok) return composited;
+        if (composited.ok) {
+          if (result.windowRefUnavailable !== undefined) {
+            composited.windowRefUnavailable = result.windowRefUnavailable;
+            if (
+              composited.screenshot &&
+              typeof composited.screenshot === "object"
+            )
+              (
+                composited.screenshot as Record<string, unknown>
+              ).windowRefUnavailable = result.windowRefUnavailable;
+          }
+          return composited;
+        }
         if (/WINDOW_REFERENCE/.test(String(composited.error)))
           return composited;
         failure = String(composited.error);

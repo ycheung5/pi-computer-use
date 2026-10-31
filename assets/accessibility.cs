@@ -175,6 +175,7 @@ partial class WindowsBridge {
     if(node.ContainsKey("children")) foreach(object child in (List<object>)node["children"]) { FindMatches((Dictionary<string,object>)child,query,control,matches,maximum); if(matches.Count>=maximum) break; }
   }
   static object ObserveAccessibility(string action, Dictionary<string,object> args) {
+    if(args.ContainsKey("windowRef") && TextOption(args,"scope","active_window")=="desktop")throw new InvalidOperationException("WINDOW_REFERENCE_CONFLICT: desktop observation cannot use a window reference");
     PruneElements(); bool full=TextOption(args,"detailLevel","compact")=="full" || action=="find";
     if(action=="element_info") {
       IntPtr owner; AutomationElement element;

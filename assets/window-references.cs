@@ -9,6 +9,18 @@ partial class WindowsBridge {
   static long referenceSequence,elementSequence;
   static readonly Dictionary<string,WindowReference> windowReferences=new Dictionary<string,WindowReference>();
   static WindowReference currentReference;
+  static bool windowDispatchAttempted;
+  static void BeginWindowDispatch(){CheckReferenceBeforeDispatch();windowDispatchAttempted=true;}
+  static void FinishWindowReference(Dictionary<string,object> payload){
+    if(currentReference==null)return;
+    if(!CurrentReferenceIntact()){
+      payload["ok"]=false;payload.Remove("inputRequired");payload["dispatchAttempted"]=windowDispatchAttempted;
+      string warning=windowDispatchAttempted?"WINDOW_REFERENCE_LOST_AFTER_DISPATCH: app effects may have occurred; observe before further action; never replay":"WINDOW_REFERENCE_LOST: lifetime proof is unavailable; observe again";
+      if(payload.ContainsKey("cleanupConfirmed") && !Convert.ToBoolean(payload["cleanupConfirmed"]))payload["identityWarning"]=warning;else payload["error"]=warning;
+      if(windowDispatchAttempted){payload["effectsUncertain"]=true;if(!payload.ContainsKey("verification"))payload["verification"]="unconfirmed";}
+    }
+    payload["windowRef"]=currentReference.Id;
+  }
   static bool CurrentReferenceIntact() {return currentReference==null || WindowMarker.Matches(currentReference.Window,currentReference.Owner,currentReference.Marker);}
   static void CheckReferenceBeforeDispatch() {if(currentReference!=null)CheckWindowReference(currentReference.Window);}
   static void CheckWindowReference(IntPtr window) {
@@ -17,7 +29,8 @@ partial class WindowsBridge {
   static WindowReference ResolveWindowReference(Dictionary<string,object> args) {
     if(!args.ContainsKey("windowRef"))return null;
     string id=Convert.ToString(args["windowRef"]);WindowReference entry;
-    if(!windowReferences.TryGetValue(id,out entry) || entry.Seen<DateTime.UtcNow.AddMinutes(-5))throw new InvalidOperationException("STALE_WINDOW_REFERENCE: unknown or expired reference; observe again");
+    if(!windowReferences.TryGetValue(id,out entry))throw new InvalidOperationException("STALE_WINDOW_REFERENCE: unknown or expired reference; observe again");
+    if(entry.Seen<DateTime.UtcNow.AddMinutes(-5)){WindowMarker.Remove(entry.Window,entry.Owner,entry.Marker);windowReferences.Remove(id);throw new InvalidOperationException("STALE_WINDOW_REFERENCE: reference expired; observe again");}
     if(!WindowMarker.Matches(entry.Window,entry.Owner,entry.Marker))throw new InvalidOperationException("WINDOW_REFERENCE_LOST: lifetime proof is unavailable; observe again");
     if((args.ContainsKey("nativeWindowHandle") && Convert.ToInt64(args["nativeWindowHandle"])!=entry.Window.ToInt64()) || (args.ContainsKey("processId") && Convert.ToUInt32(args["processId"])!=entry.Owner) || (args.ContainsKey("windowTitle") && WindowTitle(entry.Window).IndexOf(Convert.ToString(args["windowTitle"]),StringComparison.OrdinalIgnoreCase)<0))throw new InvalidOperationException("WINDOW_REFERENCE_CONFLICT: selectors disagree with the observed lifetime");
     if(TextOption(args,"scope","")=="desktop" || args.ContainsKey("browserTab"))throw new InvalidOperationException("WINDOW_REFERENCE_CONFLICT: window reference cannot target desktop or browser channel");
@@ -25,6 +38,7 @@ partial class WindowsBridge {
   }
   static object ObserveReferencePresence(Dictionary<string,object> args) {
     WindowReference entry;string id=Convert.ToString(args["windowRef"]);
+    if(windowReferences.TryGetValue(id,out entry) && ((args.ContainsKey("nativeWindowHandle") && Convert.ToInt64(args["nativeWindowHandle"])!=entry.Window.ToInt64()) || (args.ContainsKey("processId") && Convert.ToUInt32(args["processId"])!=entry.Owner)))throw new InvalidOperationException("WINDOW_REFERENCE_CONFLICT: selectors disagree with the observed lifetime");
     if(windowReferences.TryGetValue(id,out entry) && entry.Seen>=DateTime.UtcNow.AddMinutes(-5) && !IsWindow(entry.Window))return new Dictionary<string,object>{{"ok",true},{"action","list_windows"},{"referencePresent",false},{"windows",new List<object>()}};
     entry=ResolveWindowReference(args);
     return new Dictionary<string,object>{{"ok",true},{"action","list_windows"},{"referencePresent",true},{"windows",new List<object>()}};

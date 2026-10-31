@@ -100,7 +100,7 @@ partial class WindowsBridge {
     string name=element.Current.ClassName;
     bool button=element.Current.ControlType==ControlType.Button || element.Current.ControlType==ControlType.CheckBox || element.Current.ControlType==ControlType.RadioButton;
     if(!button || !(name.Equals("Button",StringComparison.OrdinalIgnoreCase) || name.StartsWith("WindowsForms10.BUTTON",StringComparison.OrdinalIgnoreCase)))return false;
-    CheckReferenceBeforeDispatch();
+    BeginWindowDispatch();
     if(!ControlPost(handle,0xF5,IntPtr.Zero,IntPtr.Zero))throw new InvalidOperationException("NATIVE_DISPATCH_FAILED: button message was refused");
     UIntPtr ignored;SendMessageTimeout(handle,0,UIntPtr.Zero,IntPtr.Zero,2,500,out ignored);return true;
   }
@@ -110,9 +110,9 @@ partial class WindowsBridge {
     if(!(name.Equals("Edit",StringComparison.OrdinalIgnoreCase) || name.StartsWith("WindowsForms10.EDIT",StringComparison.OrdinalIgnoreCase) || name.StartsWith("RichEdit",StringComparison.OrdinalIgnoreCase)))return false;
     if((ControlStyle(handle,-16).ToInt64() & 0x800)!=0)throw new InvalidOperationException("READ_ONLY: control does not accept value changes");
     UIntPtr ignored;
-    CheckReferenceBeforeDispatch();
+    BeginWindowDispatch();
     if(SendMessageTimeout(handle,0xB1,UIntPtr.Zero,new IntPtr(-1),2,500,out ignored)==IntPtr.Zero)throw new InvalidOperationException("NATIVE_DISPATCH_FAILED: edit selection was not confirmed");
-    CheckReferenceBeforeDispatch();
+    BeginWindowDispatch();
     if(ControlText(handle,0xC2,new UIntPtr(1),value,2,1000,out ignored)==IntPtr.Zero)throw new InvalidOperationException("NATIVE_DISPATCH_FAILED: edit message was not confirmed");
     return true;
   }
@@ -135,8 +135,8 @@ partial class WindowsBridge {
       int delta=axis==0?x:y;if(delta==0)continue;
       uint message=axis==0?0x114U:0x115U;int count=axis==0?countX:countY;
       uint command=(delta>0?1U:0U)+(byPage?2U:0U);
-      for(int step=0;step<count;step++) { check();UIntPtr dispatched;if(SendMessageTimeout(handle,message,new UIntPtr(command),IntPtr.Zero,2,500,out dispatched)==IntPtr.Zero)throw new InvalidOperationException("NATIVE_DISPATCH_UNCONFIRMED: scroll handler did not complete; observe before retrying");check(); }
-      check();UIntPtr completed;SendMessageTimeout(handle,message,new UIntPtr(8),IntPtr.Zero,2,500,out completed);
+      for(int step=0;step<count;step++) { check();BeginWindowDispatch();UIntPtr dispatched;if(SendMessageTimeout(handle,message,new UIntPtr(command),IntPtr.Zero,2,500,out dispatched)==IntPtr.Zero)throw new InvalidOperationException("NATIVE_DISPATCH_UNCONFIRMED: scroll handler did not complete; observe before retrying");check(); }
+      check();BeginWindowDispatch();UIntPtr completed;SendMessageTimeout(handle,message,new UIntPtr(8),IntPtr.Zero,2,500,out completed);
     }
     UIntPtr ignored;SendMessageTimeout(handle,0,UIntPtr.Zero,IntPtr.Zero,2,500,out ignored);
     result["after"]=ScrollPosition(handle);result["method"]="native_scroll";return true;
@@ -155,8 +155,8 @@ partial class WindowsBridge {
           result["before"]=new Dictionary<string,object>{{"vertical",scroll.Current.VerticalScrollPercent},{"horizontal",scroll.Current.HorizontalScrollPercent}};
           ScrollAmount vertical=y>0?(byPage?ScrollAmount.LargeIncrement:ScrollAmount.SmallIncrement):(byPage?ScrollAmount.LargeDecrement:ScrollAmount.SmallDecrement);
           ScrollAmount horizontal=x>0?(byPage?ScrollAmount.LargeIncrement:ScrollAmount.SmallIncrement):(byPage?ScrollAmount.LargeDecrement:ScrollAmount.SmallDecrement);
-          for(int step=0;step<countY;step++){check();scroll.Scroll(ScrollAmount.NoAmount,vertical);check();}
-          for(int step=0;step<countX;step++){check();scroll.Scroll(horizontal,ScrollAmount.NoAmount);check();}
+          for(int step=0;step<countY;step++){check();BeginWindowDispatch();scroll.Scroll(ScrollAmount.NoAmount,vertical);check();}
+          for(int step=0;step<countX;step++){check();BeginWindowDispatch();scroll.Scroll(horizontal,ScrollAmount.NoAmount);check();}
           result["after"]=new Dictionary<string,object>{{"vertical",scroll.Current.VerticalScrollPercent},{"horizontal",scroll.Current.HorizontalScrollPercent}};result["method"]="uia_scroll";return;
         }
       }
@@ -179,22 +179,22 @@ partial class WindowsBridge {
       PruneElements();element=ResolveObservedElement(TextOption(args,"elementId",""),args,out window);popups=ControlPopups(WindowOwner(window),window);
       if(!element.Current.IsEnabled)throw new InvalidOperationException("ELEMENT_DISABLED: control is disabled");
       object raw;check();
-      if(action=="focus") {ForgetTextFocus();CheckReferenceBeforeDispatch();element.SetFocus();RememberTextFocus(window,new IntPtr(element.Current.NativeWindowHandle));result["method"]="uia_focus";}
+      if(action=="focus") {ForgetTextFocus();BeginWindowDispatch();element.SetFocus();RememberTextFocus(window,new IntPtr(element.Current.NativeWindowHandle));result["method"]="uia_focus";}
       else if(action=="set_value") {
         if(element.TryGetCurrentPattern(ValuePattern.Pattern,out raw) && ((ValuePattern)raw).Current.IsReadOnly)throw new InvalidOperationException("READ_ONLY: control does not accept value changes");
         if(NativeValue(element,TextOption(args,"value","")))result["method"]="native_edit";
-        else if(element.TryGetCurrentPattern(ValuePattern.Pattern,out raw)) {CheckReferenceBeforeDispatch();((ValuePattern)raw).SetValue(TextOption(args,"value",""));result["method"]="uia_value";}
+        else if(element.TryGetCurrentPattern(ValuePattern.Pattern,out raw)) {BeginWindowDispatch();((ValuePattern)raw).SetValue(TextOption(args,"value",""));result["method"]="uia_value";}
         else throw new InvalidOperationException(Option(args,"fallbackType",true)?"WCU_NEEDS_INPUT: value pattern unavailable; guarded typing required":"UNSUPPORTED_PATTERN: value pattern unavailable");
       } else if(action=="scroll") ControlScroll(element,window,NumberOption(args,"deltaX",0),NumberOption(args,"deltaY",480),result,check);
       else {
         string requested=TextOption(args,"action","default");
-        if(requested=="scroll_into_view") {if(!element.TryGetCurrentPattern(ScrollItemPattern.Pattern,out raw))throw new InvalidOperationException("UNSUPPORTED_PATTERN: ScrollItem unavailable");CheckReferenceBeforeDispatch();((ScrollItemPattern)raw).ScrollIntoView();result["method"]="uia_scroll_into_view";}
-        else if(requested=="expand" || requested=="collapse") {if(!element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern,out raw))throw new InvalidOperationException("UNSUPPORTED_PATTERN: ExpandCollapse unavailable");ExpandCollapsePattern expand=(ExpandCollapsePattern)raw;ExpandCollapseState desired=requested=="expand"?ExpandCollapseState.Expanded:ExpandCollapseState.Collapsed;if(expand.Current.ExpandCollapseState!=desired){CheckReferenceBeforeDispatch();if(requested=="expand")expand.Expand();else expand.Collapse();}result["method"]="uia_"+requested;}
+        if(requested=="scroll_into_view") {if(!element.TryGetCurrentPattern(ScrollItemPattern.Pattern,out raw))throw new InvalidOperationException("UNSUPPORTED_PATTERN: ScrollItem unavailable");BeginWindowDispatch();((ScrollItemPattern)raw).ScrollIntoView();result["method"]="uia_scroll_into_view";}
+        else if(requested=="expand" || requested=="collapse") {if(!element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern,out raw))throw new InvalidOperationException("UNSUPPORTED_PATTERN: ExpandCollapse unavailable");ExpandCollapsePattern expand=(ExpandCollapsePattern)raw;ExpandCollapseState desired=requested=="expand"?ExpandCollapseState.Expanded:ExpandCollapseState.Collapsed;if(expand.Current.ExpandCollapseState!=desired){BeginWindowDispatch();if(requested=="expand")expand.Expand();else expand.Collapse();}result["method"]="uia_"+requested;}
         else if(NativeButton(element))result["method"]="native_button";
-        else if(element.TryGetCurrentPattern(InvokePattern.Pattern,out raw)){CheckReferenceBeforeDispatch();((InvokePattern)raw).Invoke();result["method"]="uia_invoke";}
-        else if(element.TryGetCurrentPattern(TogglePattern.Pattern,out raw)){CheckReferenceBeforeDispatch();((TogglePattern)raw).Toggle();result["method"]="uia_toggle";}
-        else if(element.TryGetCurrentPattern(SelectionItemPattern.Pattern,out raw)){CheckReferenceBeforeDispatch();((SelectionItemPattern)raw).Select();result["method"]="uia_select";}
-        else if(element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern,out raw)){CheckReferenceBeforeDispatch();((ExpandCollapsePattern)raw).Expand();result["method"]="uia_expand";}
+        else if(element.TryGetCurrentPattern(InvokePattern.Pattern,out raw)){BeginWindowDispatch();((InvokePattern)raw).Invoke();result["method"]="uia_invoke";}
+        else if(element.TryGetCurrentPattern(TogglePattern.Pattern,out raw)){BeginWindowDispatch();((TogglePattern)raw).Toggle();result["method"]="uia_toggle";}
+        else if(element.TryGetCurrentPattern(SelectionItemPattern.Pattern,out raw)){BeginWindowDispatch();((SelectionItemPattern)raw).Select();result["method"]="uia_select";}
+        else if(element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern,out raw)){BeginWindowDispatch();((ExpandCollapsePattern)raw).Expand();result["method"]="uia_expand";}
         else {
           // A semantic invoke is not permission to bypass a read-only control.
           // The pointer click path has no semantic action option and can still

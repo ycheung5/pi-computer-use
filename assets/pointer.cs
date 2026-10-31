@@ -16,6 +16,7 @@ partial class WindowsBridge {
   [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
   [DllImport("user32.dll")] static extern uint GetDoubleClickTime();
   static void PointerSend(uint flags,int data) {
+    if((flags & (2U|8U|32U|0x800U|0x1000U))!=0)BeginWindowDispatch();
     PointerInput item=new PointerInput {Type=0,Data=new InputUnion { Mouse=new MouseInput { Flags=flags,Data=unchecked((uint)data),Extra=OwnedInputMarker }}};
     if(SendInput(1,new PointerInput[]{item},Marshal.SizeOf(typeof(PointerInput)))!=1)throw new InvalidOperationException("INPUT_DISPATCH_UNCONFIRMED: Windows rejected input; observe before retrying");
   }
@@ -108,6 +109,7 @@ partial class WindowsBridge {
     for(int i=0;i<count;i++) {
       CheckWindowReference(window);
       if(!IsWindow(window) || !IsWindow(recipient) || WindowOwner(recipient)!=WindowOwner(window))throw new InvalidOperationException("TARGET_IDENTITY_CHANGED");
+      BeginWindowDispatch();
       if(!ControlPost(recipient,i==0?down:down+2,new IntPtr(key),packed) || !ControlPost(recipient,down+1,IntPtr.Zero,packed))throw new InvalidOperationException("BACKGROUND_DISPATCH_UNCONFIRMED: partial message delivery; observe before retrying");
     }
     result["method"]="background_messages";result["verification"]="unconfirmed";result["verificationNote"]="Messages posted; recipient processing and effects are unverified.";return true;
@@ -185,7 +187,7 @@ partial class WindowsBridge {
             if(cancel.WaitOne(0) || pointerListener.HasExited)throw new InvalidOperationException("COMPUTER_USE_STOPPED");
             if(!IsWindow(window) || WindowOwner(window)!=owner)throw new InvalidOperationException("TARGET_IDENTITY_CHANGED: source changed during drag");
           } else PointerCheck(cancel,window,owner,p,true,action!="move" || Option(args,"activate",false));
-          NotifyPhysicalInput(true);
+          BeginWindowDispatch();NotifyPhysicalInput(true);
           if(!InteractionGuard.Move(p.X,p.Y))throw new InvalidOperationException("POINTER_MOVE_FAILED");
           moved=true;last=p;interaction.Check();
           if(action=="drag" && i>0) {

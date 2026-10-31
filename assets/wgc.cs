@@ -130,6 +130,7 @@ class WgcBridge {
             }
             byte[] png;
             using (MemoryStream memory = new MemoryStream()) { output.Save(memory, ImageFormat.Png); png = memory.ToArray(); }
+            ValidateMarker(args,window,owner);
             return new Dictionary<string, object> {
               { "ok", true }, { "action", "screenshot" }, {"windowRef",args.ContainsKey("_windowMarker") && args["_windowMarker"] is Dictionary<string,object>?((Dictionary<string,object>)args["_windowMarker"])["windowRef"]:null}, { "screenshot", new Dictionary<string, object> {
                 { "base64", Convert.ToBase64String(png) }, { "mimeType", "image/png" }, { "bytes", png.Length },

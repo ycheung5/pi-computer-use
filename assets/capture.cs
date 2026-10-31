@@ -110,6 +110,7 @@ partial class WindowsBridge {
   }
 
   static object CaptureScreenshot(Dictionary<string, object> args) {
+    if(args.ContainsKey("windowRef") && TextOption(args,"scope","active_window")=="desktop")throw new InvalidOperationException("WINDOW_REFERENCE_CONFLICT: desktop capture cannot use a window reference");
     bool desktopScope = Convert.ToString(args["scope"]) == "desktop";
     int maximum = Convert.ToInt32(args["maxWidth"]);
     Rectangle desktop = SystemInformation.VirtualScreen;
@@ -127,7 +128,7 @@ partial class WindowsBridge {
       WindowReference binding=ObserveWindowReference(target,referenceMetadata);if(binding!=null){currentReference=binding;referenceMetadata["windowRef"]=binding.Id;}
       GetWindowThreadProcessId(target, out owner);CheckWindowReference(target);
       object requestedActivation;
-      if (args.TryGetValue("activate", out requestedActivation) && Convert.ToBoolean(requestedActivation) && !SetForegroundWindow(target)) warnings.Add("WINDOW_ACTIVATION_REFUSED: Windows did not bring the target to foreground");
+      if (args.TryGetValue("activate", out requestedActivation) && Convert.ToBoolean(requestedActivation)){BeginWindowDispatch();if(!SetForegroundWindow(target))warnings.Add("WINDOW_ACTIVATION_REFUSED: Windows did not bring the target to foreground");}
       bounds = WindowCaptureBounds(target);
       if (!IsIconic(target) && IsWindowVisible(target) && bounds.Width > 0 && bounds.Height > 0) {
         if (ClearCaptureRegion(target, bounds, desktop)) {
