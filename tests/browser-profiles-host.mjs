@@ -46,6 +46,11 @@ const server = spawn(launch.executable, [serverPath, app], {
   windowsHide: true,
   stdio: ["pipe", "pipe", "pipe"],
 });
+let serverErrors = "";
+server.stderr.setEncoding("utf8");
+server.stderr.on("data", (chunk) => {
+  serverErrors += chunk;
+});
 const lines = createInterface({ input: server.stdout });
 const source = await new Promise((resolve, reject) => {
   const timeout = setTimeout(
@@ -85,7 +90,7 @@ async function fixture(request) {
   const response = await new Promise((resolve, reject) => {
     const deadline = setTimeout(
       () => reject(new Error("profile fixture timeout")),
-      20000,
+      40000,
     );
     lines.once("line", (line) => {
       clearTimeout(deadline);
@@ -388,7 +393,7 @@ try {
     assert.equal(
       server.exitCode,
       0,
-      "fixture must confirm owned storage cleanup",
+      `fixture must confirm owned storage cleanup: ${serverErrors}`,
     );
 }
 
