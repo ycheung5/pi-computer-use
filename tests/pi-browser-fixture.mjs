@@ -443,18 +443,26 @@ export function verifyOutcome(scenario, f) {
     let alertTab = null,
       alertHandled = false;
     for (const d of f.observations ?? []) {
-      if (d.ok !== true || d.tab?.url !== `${f.base}advanced`) continue;
-      if (d.dialog?.type === "alert" && typeof d.tab.id === "string") {
+      if (d.ok !== true || typeof d.tab?.id !== "string") continue;
+      if (alertTab && d.tab.id === alertTab) {
+        if (
+          d.tab.url === `${f.base}advanced` &&
+          d.action === "keypress" &&
+          ["accepted", "dismissed"].includes(d.handledDialog)
+        ) {
+          alertHandled = true;
+          alertTab = null;
+        } else if (
+          d.dialog?.type !== "alert" ||
+          d.tab.url !== `${f.base}advanced`
+        ) {
+          alertTab = null;
+        }
+      }
+      if (d.tab.url === `${f.base}advanced` && d.dialog?.type === "alert") {
         alertTab = d.tab.id;
         alertHandled = false;
       }
-      if (
-        alertTab &&
-        d.action === "keypress" &&
-        d.tab.id === alertTab &&
-        ["accepted", "dismissed"].includes(d.handledDialog)
-      )
-        alertHandled = true;
     }
     const completed = new Map(
       (f.downloads ?? [])

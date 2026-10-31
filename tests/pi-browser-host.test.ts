@@ -197,6 +197,58 @@ test("advanced acceptance deduplicates download metadata and requires the actual
     downloads: [file, file],
   };
   assert.equal((await verify("advanced", facts)).pass, true);
+  for (const intervening of [
+    [
+      {
+        ok: true,
+        action: "accessibility_tree",
+        tab: { id: "t1", url: "http://127.0.0.1:1234/advanced" },
+        text: "Advanced browser fixture",
+      },
+      {
+        ok: true,
+        action: "click",
+        tab: { id: "t1", url: "http://127.0.0.1:1234/advanced" },
+        dialog: { type: "prompt" },
+      },
+    ],
+    [
+      {
+        ok: true,
+        action: "click",
+        tab: { id: "t1", url: "http://127.0.0.1:1234/advanced" },
+        dialog: { type: "prompt" },
+      },
+    ],
+    [
+      {
+        ok: true,
+        action: "set_value",
+        tab: { id: "t1", url: "http://127.0.0.1:1234/child" },
+      },
+      {
+        ok: true,
+        action: "click",
+        tab: { id: "t1", url: "http://127.0.0.1:1234/advanced" },
+        dialog: { type: "prompt" },
+      },
+    ],
+  ])
+    assert.equal(
+      (
+        await verify("advanced", {
+          ...facts,
+          observations: [
+            facts.observations[0],
+            ...intervening,
+            facts.observations[1],
+          ],
+        })
+      ).pass,
+      false,
+      "accepting a later prompt cannot certify the earlier alert",
+    );
+
   assert.equal(
     (
       await verify("advanced", {
@@ -453,7 +505,7 @@ for (const mode of ["query-failure", "deadline"]) {
             PI_CU_FAKE_ROOT: folder,
             PI_CU_FAKE_QUERIES: queries,
             PI_CU_RELEASE_OUTPUT: output,
-            PI_CU_TEST_TIMEOUT_MS: "250",
+            PI_CU_TEST_TIMEOUT_MS: mode === "deadline" ? "250" : "10000",
           },
           stdio: ["ignore", "pipe", "pipe"],
         },
