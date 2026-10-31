@@ -149,16 +149,18 @@ try {
       false,
       "old tab must not silently target the replacement browser",
     );
+    assert.match(String(stale.error), /STALE_BROWSER_REFERENCE/);
     assert.equal(next.profile.path, first.profile.path);
     assert.equal((await call(host, "health")).processId, workerPid);
     await close(host);
     const cleanup = await run(launch.executable, [
       "--input-type=module",
       "-e",
-      `import{readdir,access}from'node:fs/promises';for(const id of process.argv.slice(2).map(Number)){try{process.kill(id,0)}catch(error){if(error.code==='ESRCH')continue;throw error}throw new Error('OWNED_BROWSER_STILL_ALIVE:'+id)}try{await access(process.argv[1]+'.lock');throw new Error('PROFILE_LOCK_RETAINED')}catch(error){if(error.code!=='ENOENT')throw error}await access(process.argv[1]);console.log(JSON.stringify({oldAndNewRootsAbsent:true,keptProfilePresent:true,lockAbsent:true}))`,
+      `import{access}from'node:fs/promises';for(const id of process.argv.slice(2).map(Number)){try{process.kill(id,0)}catch(error){if(error.code==='ESRCH')continue;throw error}throw new Error('OWNED_BROWSER_STILL_ALIVE:'+id)}try{await access(process.argv[1]+'.lock');throw new Error('PROFILE_LOCK_RETAINED')}catch(error){if(error.code!=='ENOENT')throw error}await access(process.argv[1]);console.log(JSON.stringify({browserAndWorkerRootsAbsent:true,keptProfilePresent:true,lockAbsent:true}))`,
       next.profile.path,
       String(first.processId),
       String(next.processId),
+      String(workerPid),
     ]);
     reconnectReport = {
       ok: true,
