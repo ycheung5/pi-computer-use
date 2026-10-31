@@ -262,6 +262,23 @@ One later target-bound run recorded a partial `taskkill` warning as unconfirmed 
 
 Collector development failures were kept distinct from engine findings: the initial smoke emitted only a summary, then durable artifact collection was added; an unsupported `find.detailLevel` argument and an assumed identical `matches` field were corrected as test defects. An early reference-focus failure was retracted when the `Focused`-only oracle was corrected. Earlier logs/artifacts remain separate from the final baseline rather than being silently overwritten.
 
+### Native Chromium UIA action acceptance
+
+The existing collector adds a bounded `--native-chromium-only` mode for discovery/find/info plus native `focus`, `set_value` and `invoke`. `--plan` works without builds/backends or Windows access; the portable CLI regression first failed on backend import, then passed. There is no production change or new runner. The owned page reports actual DOM value, logical active control and click count over loopback HTTP, including periodic read-only reporting so ValuePattern does not have to fire an input/change event. These reports never fill/focus/click controls. No browser-protocol input, clipboard action or native physical fallback is used; value and invoke explicitly disable their fallbacks and require actual UIA method names.
+
+One serialized paired run on fresh owned Edge profiles/pages passed **all eight checks**: discovery/find/info, logical button→editor focus, exact Unicode value and exactly one invocation per engine. Both initial receipts reported `browser fixture text`, body focus and zero clicks. Pi wrote `Native UIA pi 中文 café 😀` using `uia_value` and invoked using `uia_invoke`; DSH wrote the corresponding reference string using `ValuePattern` and invoked using `Invoke`. Each page reported exactly its intended value and a click-count change 0→1. Native input ticks were unchanged. Foreground HWND was unavailable (0 before/after), so these logical-action passes do **not** prove foreground restoration or the broader #10.2 guard criterion. Pointer coordinates were not observed.
+
+Independent review tightened the collector to assert initial body focus and unchanged native input ticks for each action, retaining the observed effects even if that assertion fails. These assertions were checked against the retained raw paired outcomes and portable checks; no equivalent live run was repeated. Cleanup now skips `taskkill` for an already-exited owned root, so a recorded stale PID is not reused as termination authority. The original live-source hash remains in `source-provenance.json`; the review-only changes are recorded separately in `review-assertions.json`.
+
+The collector confirmed controller/fixture/browser-root exit and temporary-directory cleanup. Raw report and calls: `/tmp/pi-cu-native-chromium-live/paired/accessibility-comparison.json` and `paired.log`. An initial successful action run reused one browser between engines; it is retained in `initial-shared-state/` but is not credited as reset-fixture comparison. The corrected run uses independent profiles plus run-tagged receipts, and verifies initial state before actions. Existing earlier failures remain in their original evidence sections. Native Chromium scrolling/other provider actions, actual inaccessible roots and true same-process HWND reuse are not exercised; #28 stays open.
+
+Reproduce after build under the shared live-test lock:
+
+```sh
+npm run benchmark:accessibility -- /path/to/dsh-computer-use-win --native-chromium-only --plan
+npm run benchmark:accessibility -- /path/to/dsh-computer-use-win --native-chromium-only
+```
+
 ### Agent tasks
 
 These are outcome briefs, not step-by-step tool scripts. Supply identical goals and disposable starting states to each host. Agent tests may re-observe, scroll, refresh stale references, handle fixture dialogs and choose supported alternative methods. Explicit method-specific diagnostic tests retain their method constraint.
