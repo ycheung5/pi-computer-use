@@ -11,6 +11,7 @@ import { computerUseHost } from "./native-host.mjs";
 
 const run = promisify(execFile);
 const app = process.argv[2] ?? "edge";
+const startupFailure = process.argv.includes("--startup-failure");
 process.env.PI_CU_BROWSER_APP = app;
 process.env.PI_CU_BROWSER_VISIBLE = process.argv.includes("--headless")
   ? "false"
@@ -23,7 +24,12 @@ if (process.platform !== "win32")
   serverPath = (await run("wslpath", ["-w", serverPath])).stdout.trim();
 const server = spawn(
   launch.executable,
-  [serverPath, app, process.env.PI_CU_BROWSER_VISIBLE],
+  [
+    serverPath,
+    app,
+    process.env.PI_CU_BROWSER_VISIBLE,
+    ...(startupFailure ? ["--startup-failure"] : []),
+  ],
   {
     windowsHide: true,
     stdio: ["pipe", "pipe", "pipe"],
@@ -43,7 +49,12 @@ const source = await new Promise((resolve, reject) => {
 });
 const url = source.url;
 process.env.PI_CU_SETTINGS_FILE = source.settings;
-process.env.WSLENV = `${process.env.WSLENV ?? ""}:PI_CU_SETTINGS_FILE:PI_CU_BROWSER_EXECUTABLE`;
+if (startupFailure) {
+  process.env.PI_CU_BROWSER_EXECUTABLE = source.startupFailure.executable;
+  process.env.PI_CU_STARTUP_FAILURE_PID = source.startupFailure.pidFile;
+  process.env.PI_CU_BROWSER_PROFILE_ROOT = source.startupFailure.profileRoot;
+}
+process.env.WSLENV = `${process.env.WSLENV ?? ""}:PI_CU_SETTINGS_FILE:PI_CU_BROWSER_EXECUTABLE:PI_CU_STARTUP_FAILURE_PID:PI_CU_BROWSER_PROFILE_ROOT`;
 const host = computerUseHost();
 registerComputerUse(host.api);
 const client = {
@@ -89,7 +100,7 @@ const foreground = async () => {
     ])
   ).stdout.trim();
 };
-try {
+async function checkBrowser() {
   const before = await foreground();
   const opened = await client.execute("set_value", {
     elementId: "new-tab",
@@ -547,11 +558,74 @@ try {
       isolated: true,
     }),
   );
+}
+
+let startupCleanupSafe = false;
+let startupResult;
+try {
+  if (startupFailure) {
+    const health = await client.execute("health", {});
+    const failed = await client.execute("set_value", {
+      elementId: "new-tab",
+      value: url,
+    });
+    assert.equal(failed.ok, false);
+    assert.match(failed.error, /42/);
+    assert.match(failed.error, /BROWSER_PROFILE_RETAINED/);
+    const listing = await client.execute("list_windows", {});
+    assert.deepEqual(listing.browserLane.browsers, []);
+    const script = `const fs=require('node:fs');const pid=Number(fs.readFileSync(process.argv[1],'utf8'));let alive=true;try{process.kill(pid,0)}catch(e){if(e.code==='ESRCH')alive=false;else throw e}const entries=fs.readdirSync(process.argv[2],{recursive:true});console.log(JSON.stringify({pid,alive,retained:entries.some(x=>String(x).endsWith('owner.json'))}));`;
+    const observed = JSON.parse(
+      (
+        await run(launch.executable, [
+          "-e",
+          script,
+          source.startupFailure.pidFile,
+          source.startupFailure.profileRoot,
+        ])
+      ).stdout,
+    );
+    assert.equal(
+      observed.alive,
+      false,
+      "the deliberately failing executable has exited",
+    );
+    assert.equal(
+      observed.retained,
+      true,
+      "uncertain launch storage is reported and retained",
+    );
+    await client.dispose();
+    await run(launch.executable, [
+      "-e",
+      "try{process.kill(Number(process.argv[1]),0);process.exitCode=1}catch(e){if(e.code!=='ESRCH')throw e}",
+      String(health.processId),
+    ]);
+    startupCleanupSafe = true;
+    startupResult = {
+      ok: true,
+      app,
+      host: process.platform,
+      startupFailure: true,
+      failedExecutableExited: true,
+      workerExited: true,
+      profileRetainedHonestly: true,
+    };
+  } else await checkBrowser();
 } finally {
+  if (startupFailure && !startupCleanupSafe) server.stdin.write("retain\n");
   await client.dispose();
   lines.close();
   server.stdin.end();
   const timer = setTimeout(() => server.kill(), 3000);
   await once(server, "close").catch(() => undefined);
   clearTimeout(timer);
+  if (startupCleanupSafe)
+    await run(launch.executable, [
+      "-e",
+      "if(require('node:fs').existsSync(process.argv[1]))process.exitCode=1",
+      source.startupFailure.profileRoot,
+    ]);
 }
+if (startupResult)
+  console.log(JSON.stringify({ ...startupResult, ownedProfileRemoved: true }));

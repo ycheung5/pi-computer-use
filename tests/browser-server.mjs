@@ -1,5 +1,6 @@
 // Dedicated local browser fixture; no external requests or user profiles.
 
+import { execFileSync } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -16,6 +17,30 @@ await writeFile(
   }),
 );
 
+let startupFailure;
+if (process.argv.includes("--startup-failure")) {
+  const source = join(directory, "startup-failure.cs");
+  const executable = join(directory, "startup-failure.exe");
+  const pidFile = join(directory, "startup-failure.pid");
+  const profileRoot = join(directory, "profiles");
+  await writeFile(
+    source,
+    'using System; using System.IO; using System.Diagnostics; class StartupFailure { static int Main() { File.WriteAllText(Environment.GetEnvironmentVariable("PI_CU_STARTUP_FAILURE_PID"), Process.GetCurrentProcess().Id.ToString()); return 42; } }',
+  );
+  execFileSync(
+    join(
+      process.env.WINDIR,
+      "Microsoft.NET",
+      "Framework64",
+      "v4.0.30319",
+      "csc.exe",
+    ),
+    ["/nologo", `/out:${executable}`, source],
+    { windowsHide: true },
+  );
+  startupFailure = { executable, pidFile, profileRoot };
+}
+
 const server = createServer((request, response) => {
   response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
   response.end(
@@ -29,12 +54,17 @@ server.listen(0, "127.0.0.1", () =>
     JSON.stringify({
       url: `http://127.0.0.1:${server.address().port}/`,
       settings,
+      startupFailure,
     }),
   ),
 );
 process.stdin.resume();
+let retainDirectory = false;
+process.stdin.on("data", () => {
+  retainDirectory = true;
+});
 process.stdin.on("end", () =>
   server.close(async () => {
-    await rm(directory, { recursive: true, force: true });
+    if (!retainDirectory) await rm(directory, { recursive: true, force: true });
   }),
 );
