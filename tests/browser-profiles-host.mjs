@@ -521,7 +521,7 @@ async function verifyDisposal() {
         app,
         before,
         after,
-        fixtureStorageRemoved: true,
+        fixtureCleanup,
         physicalInput: false,
       }),
     );
