@@ -44,6 +44,9 @@ export class WorkerClient {
   private inputActive = false;
   private retirementFailure: Error | undefined;
   private retirement: Promise<void> | undefined;
+  private shutdownChanged:
+    | ((phase: "started" | "complete" | "failed", error?: string) => void)
+    | undefined;
   private readonly lifetime = new AbortController();
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -106,7 +109,24 @@ export class WorkerClient {
                 active?: boolean;
                 requestId?: number;
                 token?: string;
+                phase?: string;
+                error?: string;
               };
+              if (response.event === "shutdown_state") {
+                if (
+                  this.child === child &&
+                  (response.phase === "started" ||
+                    response.phase === "complete" ||
+                    response.phase === "failed")
+                )
+                  this.shutdownChanged?.(
+                    response.phase,
+                    typeof response.error === "string"
+                      ? response.error.slice(0, 2048)
+                      : undefined,
+                  );
+                continue;
+              }
               if (response.event === "input_prepare") {
                 const pending = Number.isSafeInteger(response.requestId)
                   ? this.pending.get(Number(response.requestId))
@@ -204,7 +224,13 @@ export class WorkerClient {
     if (confirmedExit) {
       this.child = undefined;
       this.failure = undefined;
-      this.retirementFailure = undefined;
+      // Process death is not an acknowledgement that its resources were freed.
+      if (
+        !this.retirementFailure?.message.startsWith(
+          "WORKER_CLEANUP_UNCONFIRMED:",
+        )
+      )
+        this.retirementFailure = undefined;
     } else this.failure = error;
     for (const [id, pending] of this.pending) {
       this.pending.delete(id);
@@ -318,15 +344,26 @@ export class WorkerClient {
       throw new Error(
         "INPUT_CLEANUP_UNCONFIRMED: active input prevents bridge retirement",
       );
+    if (this.retirementFailure) throw this.retirementFailure;
     if (this.retirement) return this.retirement;
     const child = this.child;
     if (!child) return;
     this.fail(child, new Error(reason));
     this.retirement = new Promise<void>((resolve, reject) => {
       let forced: ReturnType<typeof setTimeout> | undefined;
-      const timer = setTimeout(() => {
+      let timer: ReturnType<typeof setTimeout>;
+      let started = false;
+      let complete = false;
+      let settled = false;
+      const fail = (error: Error) => {
+        settled = true;
+        clearTimeout(timer);
+        clearTimeout(forced);
+        reject(error);
+      };
+      const expire = () => {
         if (this.inputActive || this.options.canTerminate?.() === false) {
-          reject(
+          fail(
             new Error(
               "INPUT_CLEANUP_UNCONFIRMED: active input prevents bridge retirement",
             ),
@@ -336,17 +373,58 @@ export class WorkerClient {
         child.kill();
         forced = setTimeout(
           () =>
-            reject(
+            fail(
               new Error(
                 "WORKER_RETIRE_FAILED: child exit was not confirmed; desktop ownership must stay held",
               ),
             ),
           1000,
         );
-      }, this.options.shutdownMs ?? 1000);
+      };
+      const arm = (milliseconds: number) => {
+        clearTimeout(timer);
+        timer = setTimeout(expire, milliseconds);
+      };
+      this.shutdownChanged = (phase, error) => {
+        if (settled) return;
+        if (phase === "started" && !started) {
+          started = true;
+          // Resource cleanup is an operation, not an idle exit. Give it the
+          // existing execution budget; fast completion adds no fixed delay.
+          arm(this.options.timeoutMs ?? 30_000);
+        } else if (started && phase === "complete" && !complete) {
+          complete = true;
+          arm(this.options.shutdownMs ?? 1000);
+        } else if (started && phase === "failed") {
+          fail(
+            new Error(
+              `WORKER_CLEANUP_UNCONFIRMED: ${error ?? "worker resource cleanup failed"}`,
+            ),
+          );
+        }
+      };
+      arm(this.options.shutdownMs ?? 1000);
       child.once("close", () => {
         clearTimeout(timer);
         clearTimeout(forced);
+        if (settled) return;
+        if (this.inputActive || this.options.canTerminate?.() === false) {
+          fail(
+            new Error(
+              "INPUT_CLEANUP_UNCONFIRMED: input owner exited without release",
+            ),
+          );
+          return;
+        }
+        if (started && !complete) {
+          fail(
+            new Error(
+              "WORKER_CLEANUP_UNCONFIRMED: worker exited before shutdown completed",
+            ),
+          );
+          return;
+        }
+        settled = true;
         resolve();
       });
       child.stdin.end();
@@ -358,6 +436,7 @@ export class WorkerClient {
         error instanceof Error ? error : new Error(String(error));
       throw error;
     } finally {
+      this.shutdownChanged = undefined;
       this.retirement = undefined;
     }
   }

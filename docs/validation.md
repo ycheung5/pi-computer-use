@@ -436,6 +436,19 @@ The #16 tool deliverable and transferred #15 criteria are accounted for separate
 
 The launch-failure executable is an owned .NET fixture that records its PID and exits 42 without launching children. The public result reports `BROWSER_PROFILE_RETAINED` and no browser session. Independent process checks prove the fixture and worker exited before test-only storage removal; removal is checked afterward. Unknown launch ownership remains conservatively retained in production. Earlier fixture `taskkill` and staging failures remain recorded; this acceptance does not erase them. No physical input, daily profile, real-model result or unrestricted application coverage is inferred.
 
+### Cooperative worker cleanup control
+
+A 2026-10-31 no-input Edge lifecycle pinned the actual worker process handle before disposal and independently observed its Windows exit code. Each fresh profile had a positive command-line-prefix control matching eight owned browser processes before disposal; subsequent scoped samples found no matching live processes.
+
+| Candidate / existing shutdown exit grace | Disposal return | Worker exit | Temporary profile |
+| --- | --- | --- | --- |
+| Before correction, default 1000 ms | 435 ms | 0 | Empty |
+| Before correction, deliberately short 1 ms | 285 ms | 1 | Retained across 15 seconds of samples |
+| Before correction, ample 10000 ms | 430 ms | 0 | Empty |
+| Cooperative protocol, 20 ms exit grace | 417 ms | 0 | Empty |
+
+The short control proves premature retirement can produce the residue class. It does not establish whether the earlier 1003 ms disposal was forced; that historical exit signal was not observed. The repair uses shutdown-start/complete/failure notifications and the existing operation deadline, rather than a fixed wait. Red/green WorkerClient cases reproduced incomplete cleanup beyond exit grace, repeated-disposal retention and lost uncertainty after process exit. Additional regressions cover cooperative timeout, out-of-order notices/silent-peer bounds and physical input-state precedence; the existing stop/replacement test remains unchanged and passes. Controlled workers only emitted messages; no native input or clipboard access occurred. The live post-correction sample found worker exit 0, no matching live browser processes and empty profile storage. Local controlled evidence is `/tmp/pi-cu-dispose18-live/control-{1000,1,10000,20}.json`. Profile sign-in/live-orphan and broader release obligations remain open.
+
 ## Pointer comparison preparation
 
 Historical preparation boundary; see the later [dedicated-session evidence](#dedicated-physical-comparison-evidence).

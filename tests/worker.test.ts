@@ -60,6 +60,116 @@ test("session disposal cancels runtime provisioning without launching a late wor
   assert.equal(receivedSignal?.aborted, true);
 });
 
+test("disposal lets announced resource cleanup complete before retiring its worker", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "pi-cu-shutdown-"));
+  const receipt = join(folder, "cleaned");
+  const peer = `const fs=require('node:fs');const input=require('node:readline').createInterface({input:process.stdin});
+input.on('line',line=>{const r=JSON.parse(line);process.stdout.write(JSON.stringify({id:r.id,result:{ok:true,action:r.action,processId:process.pid}})+'\\n')});
+input.on('close',()=>{process.stdout.write(JSON.stringify({event:'shutdown_state',phase:'started'})+'\\n');setTimeout(()=>{fs.writeFileSync(process.argv[1],'resources released');process.stdout.write(JSON.stringify({event:'shutdown_state',phase:'complete'})+'\\n')},100)});`;
+  const worker = new WorkerClient({
+    shutdownMs: 20,
+    timeoutMs: 1000,
+    launch: async () => ({
+      executable: process.execPath,
+      args: ["-e", peer, receipt],
+    }),
+  });
+  try {
+    const health = await worker.execute("health", {});
+    await worker.dispose();
+    assert.equal(await readFile(receipt, "utf8"), "resources released");
+    assert.throws(() => process.kill(Number(health.processId), 0), /ESRCH/);
+  } finally {
+    await worker.dispose();
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test("failed resource cleanup stays retained across repeated disposal", async () => {
+  const peer = `const input=require('node:readline').createInterface({input:process.stdin});
+input.on('line',line=>{const r=JSON.parse(line);process.stdout.write(JSON.stringify({id:r.id,result:{ok:true,action:r.action,processId:process.pid}})+'\\n')});
+input.on('close',()=>{for(const phase of ['started','failed'])process.stdout.write(JSON.stringify({event:'shutdown_state',phase,error:'owned resource still live'})+'\\n');setInterval(()=>{},1000)});`;
+  const worker = new WorkerClient({
+    shutdownMs: 20,
+    launch: async () => ({ executable: process.execPath, args: ["-e", peer] }),
+  });
+  const health = await worker.execute("health", {});
+  try {
+    await assert.rejects(worker.dispose(), /WORKER_CLEANUP_UNCONFIRMED/);
+    await assert.rejects(worker.dispose(), /WORKER_CLEANUP_UNCONFIRMED/);
+    assert.doesNotThrow(() => process.kill(Number(health.processId), 0));
+    process.kill(Number(health.processId));
+    const deadline = Date.now() + 1000;
+    for (;;) {
+      try {
+        process.kill(Number(health.processId), 0);
+      } catch (error) {
+        assert.equal((error as NodeJS.ErrnoException).code, "ESRCH");
+        break;
+      }
+      assert.ok(Date.now() < deadline, "the synthetic peer exited");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await assert.rejects(worker.dispose(), /WORKER_CLEANUP_UNCONFIRMED/);
+  } finally {
+    // This peer only emits protocol messages; it never performs native input.
+    try {
+      process.kill(Number(health.processId));
+    } catch {}
+  }
+});
+
+test("unfinished cooperative cleanup reports uncertainty within its execution budget", async () => {
+  const peer = `const input=require('node:readline').createInterface({input:process.stdin});
+input.on('line',line=>{const r=JSON.parse(line);process.stdout.write(JSON.stringify({id:r.id,result:{ok:true,action:r.action,processId:process.pid}})+'\\n')});
+input.on('close',()=>{process.stdout.write(JSON.stringify({event:'shutdown_state',phase:'started'})+'\\n');setInterval(()=>{},1000)});`;
+  const worker = new WorkerClient({
+    shutdownMs: 20,
+    timeoutMs: 500,
+    launch: async () => ({ executable: process.execPath, args: ["-e", peer] }),
+  });
+  const health = await worker.execute("health", {});
+  await assert.rejects(worker.dispose(), /WORKER_CLEANUP_UNCONFIRMED/);
+  assert.throws(() => process.kill(Number(health.processId), 0), /ESRCH/);
+});
+
+test("out-of-order shutdown notices leave silent-peer retirement bounded", async () => {
+  const peer = `const send=phase=>process.stdout.write(JSON.stringify({event:'shutdown_state',phase})+'\\n');const input=require('node:readline').createInterface({input:process.stdin});
+input.on('line',line=>{const r=JSON.parse(line);send('started');process.stdout.write(JSON.stringify({id:r.id,result:{ok:true,action:r.action,processId:process.pid}})+'\\n')});
+input.on('close',()=>{send('complete');send('invalid');setInterval(()=>{},1000)});`;
+  const worker = new WorkerClient({
+    shutdownMs: 20,
+    timeoutMs: 5000,
+    launch: async () => ({ executable: process.execPath, args: ["-e", peer] }),
+  });
+  const health = await worker.execute("health", {});
+  await Promise.race([
+    worker.dispose(),
+    new Promise((_, reject) =>
+      setTimeout(
+        () =>
+          reject(new Error("silent-peer retirement exceeded its exit grace")),
+        1000,
+      ),
+    ),
+  ]);
+  assert.throws(() => process.kill(Number(health.processId), 0), /ESRCH/);
+});
+
+test("shutdown completion never substitutes for physical-input release", async () => {
+  const peer = `const input=require('node:readline').createInterface({input:process.stdin});
+input.on('line',line=>{const r=JSON.parse(line);process.stdout.write(JSON.stringify({id:r.id,result:{ok:true,action:r.action,processId:process.pid}})+'\\n')});
+input.on('close',()=>{for(const event of [{event:'shutdown_state',phase:'started'},{event:'input_state',active:true},{event:'shutdown_state',phase:'complete'}])process.stdout.write(JSON.stringify(event)+'\\n')});`;
+  const active: boolean[] = [];
+  const worker = new WorkerClient({
+    onInputState: (state) => active.push(state),
+    launch: async () => ({ executable: process.execPath, args: ["-e", peer] }),
+  });
+  await worker.execute("health", {});
+  await assert.rejects(worker.dispose(), /INPUT_CLEANUP_UNCONFIRMED/);
+  assert.deepEqual(active, [true]);
+});
+
 test("failed startup is reported and a later call can launch a replacement", async () => {
   let attempt = 0;
   const worker = new WorkerClient({

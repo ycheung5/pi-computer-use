@@ -674,6 +674,9 @@ input.on("line", (line) => {
 });
 input.on("close", () => {
   clearInterval(presentationPoll);
+  process.stdout.write(
+    `${JSON.stringify({ event: "shutdown_state", phase: "started" })}\n`,
+  );
   void queue
     .then(async () => {
       await stopping;
@@ -683,9 +686,15 @@ input.on("close", () => {
       await disposeOcr();
       await stopListener.dispose();
       await disposeOwnership();
+      process.stdout.write(
+        `${JSON.stringify({ event: "shutdown_state", phase: "complete" })}\n`,
+      );
     })
     .catch((error) => {
       // Keep native handles and ownership alive if safe exit cannot be proved.
       process.stderr.write(`CLEANUP_UNCONFIRMED: ${String(error)}\n`);
+      process.stdout.write(
+        `${JSON.stringify({ event: "shutdown_state", phase: "failed", error: String(error) })}\n`,
+      );
     });
 });
