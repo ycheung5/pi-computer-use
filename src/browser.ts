@@ -2513,6 +2513,23 @@ export async function browse(
                 ? String(node.value)
                 : undefined,
           link: node instanceof HTMLAnchorElement ? node.href : undefined,
+          ...("disabled" in node ||
+          node.closest('[aria-disabled="true"], [inert]')
+            ? {
+                disabled:
+                  node.matches(":disabled") ||
+                  node.closest('[aria-disabled="true"], [inert]') !== null,
+              }
+            : {}),
+          ...("readOnly" in node || node.hasAttribute("aria-readonly")
+            ? {
+                readonly:
+                  ("readOnly" in node &&
+                    (node as HTMLInputElement | HTMLTextAreaElement)
+                      .readOnly) ||
+                  node.getAttribute("aria-readonly") === "true",
+              }
+            : {}),
         })),
         signal,
       );

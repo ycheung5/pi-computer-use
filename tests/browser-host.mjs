@@ -131,6 +131,25 @@ try {
   const info = await client.execute("element_info", { elementId: input.id });
   assert.equal(info.ok, true, JSON.stringify(info));
   assert.equal(info.element.value, "fixture text");
+  assert.equal(info.element.disabled, false);
+  assert.equal(info.element.readonly, false);
+  for (const [query, property] of [
+    ["Disabled editor", "disabled"],
+    ["Read-only editor", "readonly"],
+  ]) {
+    const matches = await client.execute("find", { browserTab: tab, query });
+    const target = matches.results.find((entry) => entry.role === "textbox");
+    assert.ok(target?.id, JSON.stringify(matches));
+    const detail = await client.execute("element_info", {
+      elementId: target.id,
+    });
+    assert.equal(detail.ok, true, JSON.stringify(detail));
+    assert.equal(
+      detail.element[property],
+      true,
+      `${query} exposes ${property}`,
+    );
+  }
   const shot = await client.execute("screenshot", {
     browserTab: tab,
     maxWidth: 300,
