@@ -388,7 +388,30 @@ The existing Pi native capture and OCR regressions also passed against the exten
 
 The original overly specific minimized assertion required Pi's fallback flag from both engines. It was replaced with the semantic oracle above and a fixture-reported minimized-state check. The retained reference caption result still fails that broader oracle; the test adjustment did not erase the observation. No production capture/OCR code was changed.
 
-The original #7 OCR/literal-query/mapping criterion is supported by these named native/scaled fixtures; this does not certify every display layout or pixel-perfect recognition. Remaining capture/OCR acceptance includes: (1) 100/150/200% mixed-DPI layouts, negative-origin monitors and changed primary/display layout; (2) missing-language/WinRT availability and protected/elevated surfaces on suitable installations; (3) cancellation during active recognition, helper retirement and recovery, since existing OCR checks only pre-abort; and (4) physical visual targeting. The user now grants standing idle-test authorization for scoped disposable targets in the current session. Actual fixture isolation and environment prerequisites still apply; #6/#7/#21 retain these broader obligations.
+The original #7 OCR/literal-query/mapping criterion is supported by these named native/scaled fixtures; this does not certify every display layout or pixel-perfect recognition. Remaining capture/OCR acceptance includes: (1) 150/200% and mixed-DPI layouts, changed primary/display layout, plus negative-origin OCR (the screenshot-only 100% two-monitor slice below is now covered); (2) missing-language/WinRT availability and protected/elevated surfaces on suitable installations; (3) cancellation during active recognition, helper retirement and recovery, since existing OCR checks only pre-abort; and (4) physical visual targeting. The user now grants standing idle-test authorization for scoped disposable targets in the current session. Actual fixture isolation and environment prerequisites still apply; #6/#7/#21 retain these broader obligations.
+
+### Current negative-origin screenshot mapping
+
+The existing `test:reference:capture` collector adds only the focused `--scenario monitor-placements` selection; `--plan` lists it without backend imports, Windows calls or fixture files. Its portable plan regression first failed on a missing backend import and then passed. The owned capture fixture gains private NOACTIVATE/NOZORDER/NOSIZE placement IPC and physical Win32 window/client oracles under a temporary per-monitor-aware thread context. No production capture code, public tool parameter or display setting changed. The fixture's window remains system-DPI-aware; these results cover only the measured 96-DPI setup.
+
+One serialized run passed **all 12 captures**: primary, negative-X secondary and monitor-boundary placement, native and reduced-width PNG, for each engine. Fresh fixture metadata rechecked primary `(0,0,1920,1080)` and secondary `(-1920,0,1920,1080)`, both 96×96 DPI, with respective work areas `(0,0,1920,1032)` and `(-1920,0,1920,1032)`. The metadata audit identifies these as DISPLAY33/34. Only the owned 320×200 fixture moved; its HWND/PID, size, requested physical position and combined-desktop containment were independently verified before capture.
+
+| Placement | Observed origin, both engines | Native / scaled PNG | Actual capture |
+| --- | --- | --- | --- |
+| Primary | `(87,80)` | `306×193` / `80×50` | PrintWindow; known green center |
+| Negative-X secondary | `(-1833,80)` | `306×193` / `80×50` | PrintWindow; known green center |
+| Across x=0 boundary | `(-153,80)` | `306×193` / `80×50` | PrintWindow; bounds extend across x=0 |
+
+Decoded pixels, physical client geometry, origins and both scale axes support the scoped mappings; screen-region uncertainty could not pass as known fixture content. Input ticks were unchanged during placement/capture. Foreground was unavailable (0 before/after), so unchanged samples do not prove foreground restoration. No input, OCR or desktop-scope capture ran. Images stayed in memory; artifacts retain only owned geometry, known pixel samples, sanitized tool outcomes, actual source hashes and metadata. Existing #29 failures were not rerun or reclassified.
+
+`/tmp/pi-cu-capture6-live/capture-comparison.json` and `paired.log` retain all 12 raw outcomes; `/tmp/pi-cu-capture6-monitors.json` retains the separate metadata audit. After controller/fixture disposal, a separate OS process query required every recorded Pi-worker, reference-controller and fixture root PID to be absent; all four were absent and temporary-directory cleanup succeeded. Query failure, missing/duplicate process rows or any live recorded root would fail cleanup and retain artifacts. This establishes those recorded root exits, not universal descendant cleanup.
+
+150%, 200%, mixed-DPI transitions and actual display/primary/topology changes remain unexercised: this desktop exposes two 100% monitors, and no global setting was changed. Application movement and PNG resizing do not replace those cases. #6 stays open, with manual/setup obligations remaining under #21. Inspect the focused plan and run only under the shared live-test lock:
+
+```sh
+npm run test:reference:capture -- /path/to/dsh-computer-use-win --scenario monitor-placements --plan
+npm run test:reference:capture -- /path/to/dsh-computer-use-win --scenario monitor-placements
+```
 
 ## Paired browser-form comparison
 

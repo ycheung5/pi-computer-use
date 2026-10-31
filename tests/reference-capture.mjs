@@ -10,9 +10,39 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { inflateSync } from "node:zlib";
-import { WorkerClient } from "../dist/client.js";
-import { nativeWorkerLaunch } from "../dist/launcher.js";
-import { ReferenceClient, referenceResult } from "./reference-client.mjs";
+
+const selectedScenario = process.argv.includes("--scenario")
+  ? process.argv[process.argv.indexOf("--scenario") + 1]
+  : undefined;
+const selectedEngine = process.argv.includes("--engine")
+  ? process.argv[process.argv.indexOf("--engine") + 1]
+  : undefined;
+if (
+  selectedScenario === "monitor-placements" &&
+  process.argv.includes("--plan")
+) {
+  console.log(
+    JSON.stringify({
+      executed: false,
+      physicalInput: false,
+      ocr: false,
+      globalDisplayChanges: false,
+      placements: ["primary", "negative-x", "boundary"],
+      maxWidths: [0, 80],
+      engines: ["reference", "pi"],
+    }),
+  );
+  process.exit(0);
+}
+const [
+  { WorkerClient },
+  { nativeWorkerLaunch },
+  { ReferenceClient, referenceResult },
+] = await Promise.all([
+  import("../dist/client.js"),
+  import("../dist/launcher.js"),
+  import("./reference-client.mjs"),
+]);
 
 assert.ok(process.argv[2], "Pass the pinned reference checkout");
 if (process.platform === "linux") {
@@ -57,13 +87,8 @@ const compiler = join(
 );
 const cases = [],
   fixtures = [];
+const ownedRoots = new Set();
 let ref, worker, lastResult, haltReason;
-const selectedScenario = process.argv.includes("--scenario")
-  ? process.argv[process.argv.indexOf("--scenario") + 1]
-  : undefined;
-const selectedEngine = process.argv.includes("--engine")
-  ? process.argv[process.argv.indexOf("--engine") + 1]
-  : undefined;
 const safeMetadata = (metadata) =>
   JSON.parse(
     JSON.stringify(metadata, (key, value) =>
@@ -164,6 +189,7 @@ async function fixture(kind = "capture", black = false) {
     { cwd: folder, stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
   );
   fixtures.push(child);
+  if (selectedScenario === "monitor-placements") ownedRoots.add(child.pid);
   const lines = createInterface({ input: child.stdout });
   const queue = [],
     pending = [];
@@ -253,7 +279,15 @@ function captureObservation(result) {
   };
 }
 async function sample(engine, scenario, body) {
-  if (selectedScenario && selectedScenario !== scenario) return;
+  if (
+    selectedScenario &&
+    selectedScenario !== scenario &&
+    !(
+      selectedScenario === "monitor-placements" &&
+      scenario.startsWith("monitor-")
+    )
+  )
+    return;
   const row = { engine, scenario, status: "fail", cause: "unknown" };
   const start = performance.now();
   lastResult = undefined;
@@ -296,6 +330,7 @@ async function verifyCapture(engine, f, maxWidth, color) {
   const observation = {
     oracle,
     expectedCenter: color,
+    result: safeMetadata(result.metadata),
     ...seen,
     contentVerified: !seen.occludedPossible,
   };
@@ -389,6 +424,134 @@ async function verifyOcr(engine, f, maxWidth) {
   }
   return observation;
 }
+async function monitorPlacements(engine) {
+  const f = await fixture();
+  try {
+    const layout = JSON.parse(await f.command("layout"));
+    const primary = layout.find((m) => m.primary),
+      left = layout.find(
+        (m) =>
+          m.bounds.x < 0 && m.bounds.x + m.bounds.width === primary?.bounds.x,
+      );
+    if (
+      !primary ||
+      !left ||
+      [primary, left].some((m) => m.dpiX !== 96 || m.dpiY !== 96)
+    ) {
+      cases.push({
+        engine,
+        scenario: "monitor-prerequisites",
+        status: "blocked",
+        cause: "environment",
+        observation: { layout },
+        error:
+          "This fixture slice needs adjacent primary and negative-X monitors at96 DPI; other DPI/topology cases remain unexercised",
+      });
+      return;
+    }
+    const initial = JSON.parse(await f.command("oracle"));
+    const top = Math.max(primary.workArea.y, left.workArea.y) + 80;
+    const placements = [
+      ["primary", primary.workArea.x + 80, primary.workArea.y + 80],
+      ["negative-x", left.workArea.x + 80, left.workArea.y + 80],
+      [
+        "boundary",
+        primary.bounds.x - Math.floor(initial.window.width / 2),
+        top,
+      ],
+    ];
+    for (const [placement, x, y] of placements) {
+      const before = JSON.parse(await f.command("oracle"));
+      const placed = JSON.parse(await f.command(`place:${x}:${y}`));
+      const setup = { layout, placement, requested: { x, y }, before, placed };
+      const w = placed.window,
+        contains = (monitor) =>
+          w.x >= monitor.bounds.x &&
+          w.y >= monitor.bounds.y &&
+          w.x + w.width <= monitor.bounds.x + monitor.bounds.width &&
+          w.y + w.height <= monitor.bounds.y + monitor.bounds.height;
+      const visible =
+        placement === "boundary"
+          ? w.x >= left.bounds.x &&
+            w.x + w.width <= primary.bounds.x + primary.bounds.width &&
+            w.y >= Math.max(left.bounds.y, primary.bounds.y) &&
+            w.y + w.height <=
+              Math.min(
+                left.bounds.y + left.bounds.height,
+                primary.bounds.y + primary.bounds.height,
+              )
+          : contains(placement === "primary" ? primary : left);
+      if (
+        !visible ||
+        placed.window.width !== before.window.width ||
+        placed.window.height !== before.window.height ||
+        placed.window.x !== x ||
+        placed.window.y !== y ||
+        placed.nativeWindowHandle !== f.target.nativeWindowHandle ||
+        placed.processId !== f.target.processId ||
+        placed.foregroundHandle !== before.foregroundHandle ||
+        placed.lastInputTick !== before.lastInputTick
+      ) {
+        cases.push({
+          engine,
+          scenario: `monitor-${placement}-placement`,
+          status: "blocked",
+          cause: "fixture-placement",
+          observation: setup,
+          error:
+            "Owned nonactivating placement or identity not independently confirmed",
+        });
+        continue;
+      }
+      for (const maxWidth of [0, 80]) {
+        await sample(
+          engine,
+          `monitor-${placement}-${maxWidth === 0 ? "native" : "scaled"}`,
+          async () => {
+            let observation = { setup };
+            try {
+              observation = {
+                ...(await verifyCapture(engine, f, maxWidth, [20, 150, 80])),
+                setup,
+              };
+              observation.after = JSON.parse(await f.command("oracle"));
+              assert.equal(
+                observation.occludedPossible,
+                false,
+                "Unknown screen-region content is not known fixture capture",
+              );
+              assert.equal(
+                observation.after.lastInputTick,
+                placed.lastInputTick,
+              );
+              assert.equal(
+                observation.after.foregroundHandle,
+                placed.foregroundHandle,
+              );
+              if (placement === "primary") assert.ok(observation.origin.x >= 0);
+              else
+                assert.ok(
+                  observation.origin.x < 0,
+                  "Actual screenshot origin must be negative",
+                );
+              if (placement === "boundary")
+                assert.ok(
+                  observation.bounds.x + observation.bounds.width > 0,
+                  "Fixture capture spans the real monitor boundary",
+                );
+              return observation;
+            } catch (error) {
+              error.observation = { ...observation, ...error.observation };
+              throw error;
+            }
+          },
+        );
+      }
+    }
+  } finally {
+    await f.close();
+  }
+}
 const artifacts = {};
 for (const [name, path] of Object.entries({
   referenceServer: join(reference, "mcp", "server.mjs"),
@@ -422,6 +585,10 @@ try {
     }),
     timeoutMs: 60000,
   });
+  if (selectedScenario === "monitor-placements") {
+    ownedRoots.add(ref.child.pid);
+    ownedRoots.add(Number((await worker.execute("health", {})).processId));
+  }
   for (const engine of ["reference", "pi"].filter(
     (name) => !selectedEngine || name === selectedEngine,
   )) {
@@ -441,6 +608,10 @@ try {
         "ocr-minimized",
       ])
         await sample(engine, scenario, () => {});
+      continue;
+    }
+    if (selectedScenario === "monitor-placements") {
+      await monitorPlacements(engine);
       continue;
     }
     const f = await fixture();
@@ -636,20 +807,73 @@ try {
     } catch (e) {
       errors.push(String(e));
     }
+  let processes;
+  if (selectedScenario === "monitor-placements") {
+    try {
+      const ids = Array.from(ownedRoots);
+      assert.ok(
+        ids.length >= 2 &&
+          ids.every((id) => Number.isSafeInteger(id) && id > 0),
+        "Owned controller identities unavailable",
+      );
+      const code = `$ErrorActionPreference='Stop';$rows=@(foreach($identity in @(${ids.join(",")})){try{$p=[Diagnostics.Process]::GetProcessById($identity);@{pid=$identity;absent=$p.HasExited};$p.Dispose()}catch [ArgumentException]{@{pid=$identity;absent=$true}}});ConvertTo-Json -InputObject $rows -Compress`;
+      const probe = spawnSync(
+        join(
+          process.env.WINDIR,
+          "System32",
+          "WindowsPowerShell",
+          "v1.0",
+          "powershell.exe",
+        ),
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-EncodedCommand",
+          Buffer.from(code, "utf16le").toString("base64"),
+        ],
+        { encoding: "utf8", windowsHide: true, timeout: 15000 },
+      );
+      assert.equal(probe.status, 0, probe.stderr);
+      processes = JSON.parse(probe.stdout);
+      assert.ok(Array.isArray(processes));
+      assert.equal(
+        processes.length,
+        ids.length,
+        "Process enumeration must cover every recorded owned root",
+      );
+      assert.ok(
+        processes.every((p) => ids.includes(p.pid) && p.absent === true) &&
+          new Set(processes.map((p) => p.pid)).size === ids.length,
+        "Recorded owned fixture/controller root still exists; retain artifacts",
+      );
+    } catch (error) {
+      errors.push(String(error));
+    }
+  }
   if (!errors.length)
     try {
       await rm(folder, { recursive: true, force: true });
     } catch (e) {
       errors.push(String(e));
     }
-  cleanup = { confirmed: errors.length === 0, errors };
+  cleanup = {
+    confirmed: errors.length === 0,
+    errors,
+    ...(processes ? { processes } : {}),
+  };
 }
 const report = {
   ok:
     cases.length > 0 &&
     cases.every((row) => row.status === "pass") &&
     cleanup.confirmed,
-  scope: "Owned passive fixture screenshot/OCR comparison only",
+  scope:
+    selectedScenario === "monitor-placements"
+      ? "Owned same-DPI primary/negative-X/boundary screenshot mapping only"
+      : "Owned passive fixture screenshot/OCR comparison only",
+  ...(selectedScenario === "monitor-placements"
+    ? { unexercised: ["150%", "200%", "mixed-DPI", "changed-primary/topology"] }
+    : {}),
   physicalInput: false,
   artifacts,
   versions: {
