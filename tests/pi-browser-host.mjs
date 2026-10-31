@@ -219,7 +219,14 @@ async function live(selected, options) {
                 ]
               : []),
           ],
-          { stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
+          {
+            stdio: ["pipe", "pipe", "pipe"],
+            windowsHide: true,
+            env: {
+              ...process.env,
+              PI_CU_PARTIAL_FIXTURE: scenario === "partial" ? "1" : "0",
+            },
+          },
         );
         server.stderr.resume();
         ownership.fixtureChildPid = server.pid;

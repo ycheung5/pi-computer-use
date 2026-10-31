@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
-export const scenarios = ["form", "advanced", "stale", "mixed"];
+export const scenarios = ["form", "advanced", "stale", "mixed", "partial"];
 export async function formState(base) {
   const { nativeWorkerLaunch } = await import("../dist/launcher.js");
   const native = await nativeWorkerLaunch();
@@ -514,6 +514,8 @@ export function brief(scenario, source) {
     return `At ${form}, submit name “${mixedExpected.name}”, notes “${mixedExpected.notes}”, accept terms and choose Beta. The submitted form returns a confirmation code. In our owned native window HWND ${source.native.nativeWindowHandle}, PID ${source.native.processId}, title ${JSON.stringify(source.native.title)}, invoke the one neutral CODE button bearing that returned code exactly once and preserve the other button. Confirm the browser's native-completion acknowledgement and report the code. Use only this local browser tab and owned native window with public observed references. Native controls require semantic Invoke with fallbackClick:false and activate:false; snapshots must use captureWindow:true for owned-window images. No keyboard, pointer, clipboard, launch, other windows or desktop images. Reobserve after conclusive no-effect refusal; do not replay uncertain effects; stop on actual cancellation or unknown cleanup.`;
   if (scenario === "form")
     return `At ${form}, submit name “${formExpected.name}”, notes “${formExpected.notes}”, accept terms and choose Beta. Start the delayed result and verify “Delayed result ready”, preserving disabled/read-only fields.${safety}`;
+  if (scenario === "partial")
+    return `At ${form}, submit name “${formExpected.name}”, notes “${formExpected.notes}”, accept terms and choose Beta. Verify the submission and preserve disabled/read-only fields.${safety}`;
   if (scenario === "advanced")
     return `At ${advanced}, visit ${source.url}child, verify its identity and return to the advanced document. Answer its prompt “fixture answer 中文”, reject confirmation and dismiss the alert. Upload only ${source.upload} through Upload fixture; download the fixture once and report its completed owned file path. Verify the outcomes.${safety}`;
   return `At ${form}, submit a first form: name “${first.name}”, notes “${first.notes}”, terms accepted, Alpha. In the same tab visit ${advanced} and answer its prompt “continue 中文”. Return to a fresh ${form} and submit name “${second.name}”, notes “${second.notes}”, terms accepted, Beta. Verify both submissions and prompt response; preserve disabled/read-only fields. A controlled document refresh may occur.${safety}`;
@@ -616,6 +618,135 @@ function mixedStatusEvidence(d, request, known) {
   return names;
 }
 
+function partialRecovery(f) {
+  const requests = new Map(),
+    known = new Map(),
+    statuses = new Map();
+  const reads = new Set([
+    "find",
+    "snapshot",
+    "accessibility_tree",
+    "element_info",
+  ]);
+  let tab,
+    partial = false,
+    edited = false,
+    submitted = false,
+    confirmed = false,
+    bad = false,
+    focused;
+  const preserved = new Set();
+  for (const e of f.audit ?? []) {
+    if (e.type === "guard_tool_call") {
+      requests.set(e.toolCallId, e);
+      continue;
+    }
+    const request = requests.get(e.toolCallId),
+      d = e.details;
+    if (e.type !== "guard_tool_result" || !request || d?.ok !== true) continue;
+    const action = request.toolName?.replace(/^windows_computer_use_/, ""),
+      args = request.input ?? {};
+    const nodes = [
+      ...(d.nodes ?? []),
+      ...(d.matches ?? []),
+      ...(d.results ?? []),
+      ...(d.element ? [d.element] : []),
+    ];
+    if (action === "set_value" && args.elementId === "new-tab") {
+      if (
+        partial ||
+        edited ||
+        submitted ||
+        args.value !== f.base + "form" ||
+        d.tab?.url !== args.value
+      )
+        return false;
+      tab = d.tab.id;
+      partial =
+        d.source === "browser-accessibility" &&
+        d.nodeCount === 500 &&
+        d.nodes?.length === 500 &&
+        d.truncated === true &&
+        d.truncationReason === "budget" &&
+        !nodes.some(
+          (n) => n.id && ["Name", "Notes", "Submit form"].includes(n.name),
+        );
+      if (!partial) return false;
+      continue;
+    }
+    if (!partial || d.tab?.id !== tab || d.tab?.url !== f.base + "form")
+      continue;
+    if (reads.has(action)) {
+      for (const node of nodes) {
+        if (typeof node.id === "string") known.set(node.id, node);
+        if (
+          submitted &&
+          node.name === "Disabled field" &&
+          node.disabled === true &&
+          node.value === "Disabled value"
+        )
+          preserved.add("disabled");
+        if (
+          submitted &&
+          node.name === "Read-only field" &&
+          node.readonly === true &&
+          node.value === "Read-only value"
+        )
+          preserved.add("readonly");
+      }
+    }
+    const node = known.get(args.elementId);
+    if (action === "focus") focused = node;
+    if (
+      ["set_value", "type_text", "click", "invoke", "keypress"].includes(action)
+    ) {
+      if (!known.size || (args.elementId && !node)) {
+        bad = true;
+        continue;
+      }
+      const target = node ?? (args.browserTab === tab ? focused : null);
+      if (
+        ["set_value", "type_text"].includes(action) &&
+        ["Name", "Notes"].includes(target?.name) &&
+        target.role === "textbox"
+      )
+        edited = true;
+      if (
+        edited &&
+        ((["click", "invoke"].includes(action) &&
+          node?.name === "Submit form" &&
+          node.role === "button") ||
+          (action === "keypress" &&
+            args.keys?.some((key) => String(key).toLowerCase() === "enter")))
+      )
+        submitted = true;
+    }
+    if (submitted && reads.has(action))
+      for (const name of mixedStatusEvidence(d, request, statuses)) {
+        if (!name.startsWith("Form confirmation: ")) continue;
+        try {
+          if (
+            exact(
+              JSON.parse(name.slice("Form confirmation: ".length)),
+              formExpected,
+            )
+          )
+            confirmed = true;
+        } catch {}
+      }
+  }
+  return (
+    partial &&
+    edited &&
+    submitted &&
+    confirmed &&
+    !bad &&
+    preserved.size === 2 &&
+    exact(f.oracle?.payload, formExpected) &&
+    exact(f.oracle?.events, { submissions: 1, starts: 0, ready: 0 })
+  );
+}
+
 export function verifyOutcome(scenario, f) {
   const provenance =
     f.effective?.length > 0 &&
@@ -635,7 +766,8 @@ export function verifyOutcome(scenario, f) {
     f.cleanup.processCount === 0 &&
     f.cleanup.fixtureExited === true;
   let outcome = false;
-  if (scenario === "mixed") {
+  if (scenario === "partial") outcome = partialRecovery(f);
+  else if (scenario === "mixed") {
     const native = f.native,
       code = native?.initial?.approve?.code,
       ids = new Set(),

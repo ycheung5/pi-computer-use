@@ -30,7 +30,13 @@ test("real-browser plan works without a build, dependencies, credentials or chil
     );
     const plan = JSON.parse(result.stdout);
     assert.equal(plan.mode, "plan");
-    assert.deepEqual(plan.scenarios, ["form", "advanced", "stale", "mixed"]);
+    assert.deepEqual(plan.scenarios, [
+      "form",
+      "advanced",
+      "stale",
+      "mixed",
+      "partial",
+    ]);
     assert.deepEqual(plan.requested, {
       provider: "openai",
       model: "gpt-6.1-sol",
@@ -1118,4 +1124,219 @@ test("mixed SDK routing preserves owned images and rejects cross-channel or unce
   } finally {
     await rm(folder, { recursive: true, force: true });
   }
+});
+
+test("partial recovery requires genuine budget/read/use/submission chronology", async () => {
+  const base = "http://127.0.0.1:1234/",
+    tab = { id: "t123", url: base + "form" };
+  let serial = 0;
+  const pair = (action: string, input: object, details: object) => {
+    const toolCallId = String(++serial),
+      toolName = "windows_computer_use_" + action;
+    return [
+      { type: "guard_tool_call", toolCallId, toolName, input },
+      {
+        type: "guard_tool_result",
+        toolCallId,
+        toolName,
+        details: { ok: true, action, tab, ...details },
+      },
+    ];
+  };
+  const field = (id: string, name: string, role: string, extra = {}) => ({
+    id,
+    name,
+    role,
+    ...extra,
+  });
+  const controls = [
+    field("name", "Name", "textbox"),
+    field("notes", "Notes", "textbox"),
+    field("submit", "Submit form", "button"),
+  ];
+  const restricted = [
+    field("disabled", "Disabled field", "textbox", {
+      value: "Disabled value",
+      disabled: true,
+    }),
+    field("readonly", "Read-only field", "textbox", {
+      value: "Read-only value",
+      readonly: true,
+    }),
+  ];
+  const initial = pair(
+    "set_value",
+    { elementId: "new-tab", value: tab.url },
+    {
+      source: "browser-accessibility",
+      nodeCount: 500,
+      truncated: true,
+      truncationReason: "budget",
+      nodes: Array.from({ length: 500 }, (_, i) => ({
+        role: "paragraph",
+        name: "Context row " + i,
+      })),
+    },
+  );
+  const read = pair(
+    "find",
+    { browserTab: tab.id, query: "Name" },
+    { nodes: controls },
+  );
+  const edit = pair(
+    "set_value",
+    { elementId: "name", value: "Pi 中文 café 😀" },
+    {},
+  );
+  const submit = pair("click", { elementId: "submit" }, {});
+  const facts = {
+    ...formReport(),
+    base,
+    oracle: {
+      ...formReport().oracle,
+      events: { submissions: 1, starts: 0, ready: 0 },
+    },
+  };
+  const confirmation = pair(
+    "find",
+    { browserTab: tab.id, query: "Form confirmation" },
+    {
+      nodes: [
+        ...restricted,
+        field(
+          "result",
+          "Form confirmation: " + JSON.stringify(facts.oracle.payload),
+          "status",
+        ),
+      ],
+    },
+  );
+  const audit = [...initial, ...read, ...edit, ...submit, ...confirmation];
+  assert.equal((await verify("partial", { ...facts, audit })).pass, true);
+  const progressive = read.map((row) =>
+    "details" in row
+      ? { ...row, details: { ...row.details, nodes: [controls[0]] } }
+      : row,
+  );
+  assert.equal(
+    (
+      await verify("partial", {
+        ...facts,
+        audit: [
+          ...initial,
+          ...progressive,
+          ...edit,
+          ...pair(
+            "find",
+            { browserTab: tab.id, query: "Submit form" },
+            { nodes: controls },
+          ),
+          ...submit,
+          ...confirmation,
+        ],
+      })
+    ).pass,
+    true,
+  );
+  // Expanded accessibility reads are also valid recovery; no find-only procedure.
+  const expanded = read.map((row) => ({
+    ...row,
+    toolName: "windows_computer_use_accessibility_tree",
+    ...("details" in row
+      ? { details: { ...row.details, action: "accessibility_tree" } }
+      : { input: { browserTab: tab.id, maxNodes: 1200 } }),
+  }));
+  assert.equal(
+    (
+      await verify("partial", {
+        ...facts,
+        audit: [...initial, ...expanded, ...edit, ...submit, ...confirmation],
+      })
+    ).pass,
+    true,
+  );
+  const replaceDetails = (rows: typeof initial, patch: object) =>
+    rows.map((row) =>
+      "details" in row
+        ? { ...row, details: { ...row.details, ...patch } }
+        : row,
+    );
+  for (const bad of [
+    [...read, ...edit, ...submit, ...confirmation],
+    [...read, ...edit, ...submit, ...initial, ...confirmation],
+    [
+      ...replaceDetails(initial, { nodeCount: 499 }),
+      ...read,
+      ...edit,
+      ...submit,
+      ...confirmation,
+    ],
+    [
+      ...initial,
+      ...replaceDetails(read, { nodes: [], query: "Name Notes Submit form" }),
+      ...edit,
+      ...submit,
+      ...confirmation,
+    ],
+    [
+      ...initial,
+      ...replaceDetails(read, { tab: { id: "t999", url: tab.url } }),
+      ...edit,
+      ...submit,
+      ...confirmation,
+    ],
+    [...initial, ...edit, ...read, ...submit, ...confirmation],
+    [
+      ...initial,
+      ...read,
+      ...pair("set_value", { elementId: "never-observed", value: "x" }, {}),
+      ...submit,
+      ...confirmation,
+    ],
+    [
+      ...initial,
+      ...read,
+      ...edit,
+      ...submit,
+      ...replaceDetails(confirmation, {
+        nodes: restricted,
+        query: "Form confirmation: " + JSON.stringify(facts.oracle.payload),
+      }),
+    ],
+    [
+      ...initial,
+      ...read,
+      ...edit,
+      ...submit,
+      ...replaceDetails(confirmation, {
+        nodes: [
+          ...restricted,
+          field(
+            "echo",
+            "Form confirmation: " + JSON.stringify(facts.oracle.payload),
+            "textbox",
+            { value: "echo" },
+          ),
+        ],
+      }),
+    ],
+  ])
+    assert.equal(
+      (await verify("partial", { ...facts, audit: bad })).pass,
+      false,
+    );
+  for (const patch of [
+    {
+      oracle: {
+        ...facts.oracle,
+        events: { submissions: 2, starts: 0, ready: 0 },
+      },
+    },
+    { effective: [{ ...effective[0], thinkingLevel: "high" }] },
+    { cleanup: { ...facts.cleanup, processCount: 1 } },
+  ])
+    assert.equal(
+      (await verify("partial", { ...facts, audit, ...patch })).pass,
+      false,
+    );
 });

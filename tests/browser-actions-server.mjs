@@ -19,6 +19,7 @@ await writeFile(
     browserSignIn: false,
   }),
 );
+const partial = process.env.PI_CU_PARTIAL_FIXTURE === "1";
 const mixedConfig = process.argv[4] ?? process.env.PI_CU_MIXED_FIXTURE;
 const mixed = mixedConfig ? JSON.parse(mixedConfig) : null;
 let issuedCode = null,
@@ -78,19 +79,20 @@ let formSubmission = null;
 let formEvents = { starts: 0, ready: 0, submissions: 0 };
 const formHtml = `<!doctype html><meta charset="utf-8"><title>Paired browser form fixture</title>
 <h1>Paired browser form fixture</h1>
+${partial ? Array.from({ length: 200 }, (_, i) => `<p>Context row ${i + 1}</p>`).join("") : ""}
 <form id="form"><label>Name<input id="name"></label>
 <label>Notes<textarea id="notes"></textarea></label>
 <label>Accept terms<input id="accepted" type="checkbox"></label>
 <label>Choice<select id="choice"><option value="alpha">Alpha</option><option value="beta">Beta</option></select></label>
 <label>Disabled field<input disabled value="Disabled value"></label>
 <label>Read-only field<input readonly value="Read-only value"></label>
-<button>Submit form</button></form><pre id="result"${mixed ? ' role="status" aria-label="Form confirmation pending"' : ""}>Not submitted</pre>
+<button>Submit form</button></form><pre id="result"${mixed || partial ? ' role="status" aria-label="Form confirmation pending"' : ""}>Not submitted</pre>
 <button id="delayedButton" onclick="delayed.textContent='Pending';fetch('/form/delayed/start',{method:'POST'}).then(()=>setTimeout(()=>fetch('/form/delayed/ready',{method:'POST'}).then(()=>delayed.textContent='Delayed result ready'),300))">Start delayed result</button>
 <p id="delayed">Not started</p><div style="height:1600px"></div><p>Form bottom marker</p>
 <script>form.addEventListener('submit',async event=>{event.preventDefault();
 const payload={name:document.getElementById('name').value,notes:notes.value,accepted:accepted.checked,choice:choice.value};
 const response=await fetch('/form/submit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
-result.textContent=JSON.stringify(await response.json());${mixed ? 'result.setAttribute("aria-label","Form confirmation: "+result.textContent);' : ""}});</script>${mixed ? `<p id="nativeAcknowledgement" role="status" aria-label="Native confirmation pending">Native confirmation pending</p><script>async function pollNative(){try{const s=await(await fetch('/mixed/state')).json();nativeAcknowledgement.textContent=s.acknowledgement;nativeAcknowledgement.setAttribute("aria-label",s.acknowledgement);}finally{setTimeout(pollNative,300)}}pollNative()</script>` : ""}`;
+result.textContent=JSON.stringify(await response.json());${mixed || partial ? 'result.setAttribute("aria-label","Form confirmation: "+result.textContent);' : ""}});</script>${mixed ? `<p id="nativeAcknowledgement" role="status" aria-label="Native confirmation pending">Native confirmation pending</p><script>async function pollNative(){try{const s=await(await fetch('/mixed/state')).json();nativeAcknowledgement.textContent=s.acknowledgement;nativeAcknowledgement.setAttribute("aria-label",s.acknowledgement);}finally{setTimeout(pollNative,300)}}pollNative()</script>` : ""}`;
 const downloadName = `pi-advanced-${randomUUID()}.txt`;
 let advancedState = { upload: null, uploadRequests: 0, downloads: 0 };
 const advancedHtml = `<!doctype html><meta charset="utf-8"><title>Advanced browser fixture</title>
