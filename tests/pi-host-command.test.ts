@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -231,4 +231,76 @@ test("command settlement requires actual timely wait cancellation and released o
       "observed",
       JSON.stringify(changed),
     );
+});
+
+test("command host selector plans safely without a build or child-command PATH", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const folder = await mkdtemp(join(tmpdir(), "pi-command-plan-"));
+  try {
+    for (const file of [
+      "pi-host-stop.mjs",
+      "pi-host-command.mjs",
+      "pi-host-stop-containment.mjs",
+      "pi-host-stop-outcome.mjs",
+      "stop-busy-coordination.mjs",
+      "pi-visual-host.mjs",
+      "pi-visual-fixture.mjs",
+    ])
+      await copyFile(new URL(file, import.meta.url), join(folder, file));
+    const runner = join(folder, "pi-host-stop.mjs");
+    const planned = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [runner, "command", "--command-host", "wsl", "--plan"],
+        { encoding: "utf8", env: { ...process.env, PATH: "" } },
+      ),
+    );
+    assert.equal(planned.mode, "plan");
+    assert.equal(planned.commandHost, "wsl");
+    assert.equal(planned.physicalInput, false);
+    assert.deepEqual(planned.tools, ["health", "wait"]);
+    for (const args of [
+      ["--command-host", "linux", "--plan"],
+      ["--command-host"],
+      ["--plan", "--extensions"],
+    ])
+      assert.throws(() =>
+        execFileSync(process.execPath, [runner, "command", ...args], {
+          stdio: "ignore",
+        }),
+      );
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test("Linux host identities use proc start/executable and confirmed absence", {
+  skip: process.platform !== "linux",
+}, async () => {
+  const { linuxOwner, linuxOwnerAbsent } = await helper();
+  assert.equal(typeof linuxOwner, "function");
+  const child = spawn(
+    process.execPath,
+    ["-e", "console.log('ready');process.stdin.resume()"],
+    { stdio: ["pipe", "pipe", "pipe"] },
+  );
+  const closed = once(child, "close");
+  child.stderr.resume();
+  try {
+    await once(child.stdout, "data");
+    const identity = linuxOwner(child.pid);
+    assert.equal(identity.domain, "linux");
+    assert.equal(identity.pid, child.pid);
+    assert.equal(identity.parent, process.pid);
+    assert.ok(identity.startTicks && identity.executable);
+    assert.equal(linuxOwnerAbsent(identity), false);
+    child.stdin.end();
+    await closed;
+    assert.equal(linuxOwnerAbsent(identity), true);
+  } finally {
+    if (child.exitCode === null) {
+      child.stdin.end();
+      await closed;
+    }
+  }
 });

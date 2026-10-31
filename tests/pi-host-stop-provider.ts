@@ -48,7 +48,12 @@ export default async function provider(pi: ExtensionAPI): Promise<void> {
           throw Error("REAL_WINDOWS_WORKER_REQUIRED");
         return {
           ...real,
-          args: ["--import", commandObserver(config.trace), ...real.args],
+          ...(config.workerCwd ? { cwd: config.workerCwd } : {}),
+          args: [
+            "--import",
+            commandObserver(config.workerTrace ?? config.trace),
+            ...real.args,
+          ],
         };
       },
     });

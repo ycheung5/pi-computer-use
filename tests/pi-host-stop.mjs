@@ -13,8 +13,20 @@ import { observeReleased, waitForStart } from "./stop-busy-coordination.mjs";
 
 const selectedMode = process.argv[2] ?? "esc";
 if (selectedMode === "command") {
-  const { runPassiveCommandStop } = await import("./pi-host-command.mjs");
-  await runPassiveCommandStop();
+  const { runPassiveCommandStop, commandOptions } = await import(
+    "./pi-host-command.mjs"
+  );
+  const options = commandOptions(process.argv.slice(3));
+  if (options.plan)
+    console.log(
+      JSON.stringify({
+        mode: "plan",
+        commandHost: options.commandHost,
+        physicalInput: false,
+        tools: ["health", "wait"],
+      }),
+    );
+  else await runPassiveCommandStop(options.commandHost);
 } else {
   assert.equal(process.platform, "win32");
   assert.equal(

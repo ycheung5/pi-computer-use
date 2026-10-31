@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { release, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -15,7 +15,7 @@ export function commandObserver(file) {
   const source = `import {appendFileSync} from 'node:fs';import {StringDecoder} from 'node:string_decoder';
 let sequence=0,fault=false;const file=${JSON.stringify(file)};
 const record=row=>{try{appendFileSync(file,JSON.stringify({sequence:++sequence,pid:process.pid,time:Date.now(),monotonicMs:performance.now(),fault,...row})+'\\n',{mode:0o600});}catch{fault=true;}};
-record({kind:'ready',executable:process.execPath,worker:process.argv[1]});
+record({kind:'ready',executable:process.execPath,worker:process.argv[1],cwd:process.cwd(),settingsFile:process.env.PI_CU_SETTINGS_FILE});
 const decoder={input:new StringDecoder('utf8'),output:new StringDecoder('utf8')},buffer={input:'',output:''};
 const observe=(kind,chunk)=>{try{buffer[kind]+=typeof chunk==='string'?chunk:decoder[kind].write(chunk);let end;while((end=buffer[kind].indexOf('\\n'))>=0){const line=buffer[kind].slice(0,end);buffer[kind]=buffer[kind].slice(end+1);const r=JSON.parse(line),d=r.result;record({kind,id:r.id,action:r.action,operationId:r.operationId,milliseconds:r.args?.milliseconds,stop:r.stop,cancel:r.cancel,event:r.event,phase:r.phase,result:d?{ok:d.ok,action:d.action,error:d.error,processId:d.processId,released:d.released}:undefined});}if(buffer[kind].length>65536){fault=true;record({kind:'fault',error:'oversized protocol frame'});}}catch{fault=true;record({kind:'fault',error:'malformed protocol frame'});}};
 const emit=process.stdin.emit;process.stdin.emit=function(...args){if(args[0]==='data')observe('input',args[1]);return Reflect.apply(emit,this,args);};
@@ -121,9 +121,85 @@ export function assessCommandSettlement(pending, rows) {
   return { status: "observed", elapsedMs, response, acknowledgment };
 }
 
+export function commandOptions(args) {
+  let commandHost = "windows",
+    plan = false;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--plan") plan = true;
+    else if (args[i] === "--command-host") {
+      commandHost = args[++i];
+      assert.ok(
+        ["windows", "wsl"].includes(commandHost),
+        "command host must be windows or wsl",
+      );
+    } else throw Error("unknown passive command option");
+  }
+  return { commandHost, plan };
+}
+export function linuxOwner(pid) {
+  assert.ok(Number.isSafeInteger(pid) && pid > 0);
+  const stat = readFileSync(`/proc/${pid}/stat`, "utf8"),
+    fields = stat.slice(stat.lastIndexOf(")") + 2).split(/\s+/);
+  assert.match(fields[19] ?? "", /^\d+$/);
+  return {
+    domain: "linux",
+    pid,
+    parent: Number(fields[1]),
+    startTicks: fields[19],
+    executable: readlinkSync(`/proc/${pid}/exe`),
+  };
+}
+export function linuxOwnerAbsent(identity) {
+  try {
+    readFileSync(`/proc/${identity.pid}/stat`, "utf8");
+    return false;
+  } catch (error) {
+    if (error.code === "ENOENT") return true;
+    throw error;
+  }
+}
+function linuxDescendants(pin) {
+  assert.deepEqual(linuxOwner(pin.pid), pin, "Linux host identity changed");
+  const rows = [],
+    pending = [pin.pid];
+  for (const pid of pending) {
+    let row;
+    try {
+      row = linuxOwner(pid);
+    } catch (error) {
+      if (
+        error.code === "ENOENT" &&
+        pid !== pin.pid &&
+        linuxOwnerAbsent({ pid })
+      )
+        continue;
+      throw error;
+    }
+    rows.push(row);
+    const children = readFileSync(
+      `/proc/${pid}/task/${pid}/children`,
+      "utf8",
+    ).trim();
+    if (children)
+      for (const child of children.split(/\s+/)) {
+        const value = Number(child);
+        assert.ok(Number.isSafeInteger(value) && value > 0);
+        pending.push(value);
+      }
+  }
+  return rows;
+}
+function mappedPath(path, mode) {
+  const result = spawnSync("wslpath", [mode, path], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
+}
+
 function ps(script) {
   const r = spawnSync(
-    "powershell.exe",
+    process.platform === "linux"
+      ? "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+      : "powershell.exe",
     [
       "-NoProfile",
       "-NonInteractive",
@@ -140,12 +216,14 @@ function ps(script) {
 }
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export async function runPassiveCommandStop() {
+export async function runPassiveCommandStop(commandHost = "windows") {
+  const wsl = commandHost === "wsl";
   assert.equal(
     process.platform,
-    "win32",
-    "command mode currently covers the native Windows host only",
+    wsl ? "linux" : "win32",
+    "command host selector/platform conflict",
   );
+  if (wsl) assert.match(release(), /microsoft.*wsl2/i, "WSL2 required");
   const root = fileURLToPath(new URL("../", import.meta.url));
   const cli = join(
     dirname(
@@ -189,8 +267,46 @@ export async function runPassiveCommandStop() {
     stopShortcut: "",
   });
   await mkdir(join(dir, "agent"));
-  const { compileNative } = await import("../dist/native.js");
-  const ownership = await compileNative(["ownership.cs"], []);
+  const windowsDir = wsl ? mappedPath(dir, "-w") : dir;
+  let ownership, preflight;
+  if (!wsl) {
+    const { compileNative } = await import("../dist/native.js");
+    ownership = await compileNative(["ownership.cs"], []);
+  } else {
+    const { nativeWorkerLaunch } = await import("../dist/launcher.js");
+    const real = await nativeWorkerLaunch();
+    assert.match(real.executable, /[\\/]node\.exe$/i);
+    const module = mappedPath(
+      fileURLToPath(new URL("../dist/native.js", import.meta.url)),
+      "-w",
+    );
+    const code = `import{pathToFileURL}from'node:url';const{compileNative}=await import(pathToFileURL(${JSON.stringify(module)}).href);const launch=await compileNative(['ownership.cs'],[]);console.log(JSON.stringify({launch,pid:process.pid,executable:process.execPath}));`;
+    const result = spawnSync(
+      real.executable,
+      ["--input-type", "module", "-e", code],
+      { encoding: "utf8", timeout: 40000 },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    preflight = JSON.parse(result.stdout);
+    ownership = preflight.launch;
+    assert.equal(
+      preflight.executable.toLowerCase(),
+      mappedPath(real.executable, "-w").toLowerCase(),
+    );
+    assert.deepEqual(
+      ps(
+        `$p=Get-CimInstance Win32_Process -Filter 'ProcessId = ${preflight.pid}' -ErrorAction Stop;$rows=@();if($null -ne $p){$rows+=@(@{pid=$p.ProcessId;creation=$p.CreationDate.ToUniversalTime().ToString('o');executable=$p.ExecutablePath})};ConvertTo-Json -Compress -InputObject @($rows)`,
+      ),
+      [],
+      "Windows compiler preflight must exit before Pi host starts",
+    );
+  }
+  const windowsWorker = wsl
+    ? mappedPath(
+        fileURLToPath(new URL("../dist/worker.js", import.meta.url)),
+        "-w",
+      )
+    : fileURLToPath(new URL("../dist/worker.js", import.meta.url));
   const hashes = {};
   for (const file of [
     "tests/pi-host-stop.mjs",
@@ -213,7 +329,11 @@ export async function runPassiveCommandStop() {
     .update(await readFile(cli))
     .digest("hex");
   hashes.ownershipHelper = createHash("sha256")
-    .update(await readFile(ownership.executable))
+    .update(
+      await readFile(
+        wsl ? mappedPath(ownership.executable, "-u") : ownership.executable,
+      ),
+    )
     .digest("hex");
   owner();
   const host = spawn(
@@ -246,12 +366,28 @@ export async function runPassiveCommandStop() {
         ...process.env,
         PI_OFFLINE: "1",
         PI_CODING_AGENT_DIR: join(dir, "agent"),
-        PI_CU_SETTINGS_FILE: settings,
+        PI_CU_SETTINGS_FILE: wsl ? "settings.json" : settings,
+        ...(wsl
+          ? {
+              WSLENV: [
+                ...(process.env.WSLENV ?? "")
+                  .split(":")
+                  .filter(
+                    (value) =>
+                      value && value.split("/")[0] !== "PI_CU_SETTINGS_FILE",
+                  ),
+                "PI_CU_SETTINGS_FILE",
+              ].join(":"),
+            }
+          : {}),
         PI_CU_HOST_STOP_COMMAND: JSON.stringify({
           dir,
           journal,
           trace,
           fixtureTrace,
+          ...(wsl
+            ? { workerCwd: dir, workerTrace: mappedPath(trace, "-w") }
+            : {}),
         }),
       },
     },
@@ -333,18 +469,21 @@ export async function runPassiveCommandStop() {
         );
       const toolEnds = () =>
         events.filter((e) => e.type === "tool_execution_end");
-      const hostPin = ps(
-        `$p=Get-CimInstance Win32_Process -Filter 'ProcessId = ${host.pid}' -ErrorAction Stop;if($null -eq $p){throw 'owned host absent'};@{pid=$p.ProcessId;parent=$p.ParentProcessId;creation=$p.CreationDate.ToUniversalTime().ToString('o');executable=$p.ExecutablePath}|ConvertTo-Json -Compress`,
-      );
+      const hostPin = wsl
+        ? linuxOwner(host.pid)
+        : ps(
+            `$p=Get-CimInstance Win32_Process -Filter 'ProcessId = ${host.pid}' -ErrorAction Stop;if($null -eq $p){throw 'owned host absent'};@{pid=$p.ProcessId;parent=$p.ParentProcessId;creation=$p.CreationDate.ToUniversalTime().ToString('o');executable=$p.ExecutablePath}|ConvertTo-Json -Compress`,
+          );
       assert.equal(hostPin.parent, process.pid);
       assert.equal(
         hostPin.executable.toLowerCase(),
         process.execPath.toLowerCase(),
       );
-      assert.ok(hostPin.creation);
+      assert.ok(wsl ? hostPin.startTicks : hostPin.creation);
+      let windowsRootPin;
       const descendants = () =>
         ps(
-          `$root=Get-CimInstance Win32_Process -Filter 'ProcessId = ${host.pid}' -ErrorAction Stop;if($null -eq $root -or $root.CreationDate.ToUniversalTime().ToString('o') -ne '${hostPin.creation}'){throw 'owned host changed'};$pending=@(${host.pid});$rows=@();$seen=@();for($i=0;$i -lt $pending.Count;$i++){foreach($p in @(Get-CimInstance Win32_Process -Filter ('ProcessId='+$pending[$i]) -ErrorAction Stop)){if($seen -notcontains $p.ProcessId){$seen+=@($p.ProcessId);$rows+=@(@{pid=$p.ProcessId;parent=$p.ParentProcessId;creation=$p.CreationDate.ToUniversalTime().ToString('o');executable=$p.ExecutablePath;name=$p.Name});foreach($c in @(Get-CimInstance Win32_Process -Filter ('ParentProcessId='+$p.ProcessId) -ErrorAction Stop)){$pending+=@($c.ProcessId)}}}};ConvertTo-Json -Compress -Depth 4 -InputObject @($rows)`,
+          `$root=Get-CimInstance Win32_Process -Filter 'ProcessId = ${wsl ? windowsRootPin.pid : host.pid}' -ErrorAction Stop;if($null -eq $root -or $root.CreationDate.ToUniversalTime().ToString('o') -ne '${wsl ? windowsRootPin.creation : hostPin.creation}'){throw 'owned Windows root changed'};$pending=@(${wsl ? windowsRootPin.pid : host.pid});$rows=@();$seen=@();for($i=0;$i -lt $pending.Count;$i++){foreach($p in @(Get-CimInstance Win32_Process -Filter ('ProcessId='+$pending[$i]) -ErrorAction Stop)){if($seen -notcontains $p.ProcessId){$seen+=@($p.ProcessId);$rows+=@(@{pid=$p.ProcessId;parent=$p.ParentProcessId;creation=$p.CreationDate.ToUniversalTime().ToString('o');executable=$p.ExecutablePath;name=$p.Name});foreach($c in @(Get-CimInstance Win32_Process -Filter ('ParentProcessId='+$p.ProcessId) -ErrorAction Stop)){$pending+=@($c.ProcessId)}}}};ConvertTo-Json -Compress -Depth 4 -InputObject @($rows)`,
         );
       send("commands", "get_commands");
       const commands = await response("commands");
@@ -366,6 +505,10 @@ export async function runPassiveCommandStop() {
       );
       const workerPid = health.result?.details?.processId;
       assert.ok(Number.isSafeInteger(workerPid) && workerPid > 0);
+      if (wsl)
+        windowsRootPin = ps(
+          `$p=Get-CimInstance Win32_Process -Filter 'ProcessId = ${workerPid}' -ErrorAction Stop;if($null -eq $p){throw 'Windows worker absent'};@{pid=$p.ProcessId;creation=$p.CreationDate.ToUniversalTime().ToString('o');executable=$p.ExecutablePath}|ConvertTo-Json -Compress`,
+        );
       const waitStart = await until(
         () =>
           events.find(
@@ -391,6 +534,10 @@ export async function runPassiveCommandStop() {
       assert.equal(typeof pending.operationId, "string");
       assert.equal(pending.pid, workerPid);
       assert.equal(observer()[0].pid, workerPid);
+      if (wsl) {
+        assert.equal(observer()[0].cwd.toLowerCase(), windowsDir.toLowerCase());
+        assert.equal(observer()[0].settingsFile, "settings.json");
+      }
       const identities = await until(() => {
         const rows = descendants();
         const helper = rows.find(
@@ -400,11 +547,13 @@ export async function runPassiveCommandStop() {
         );
         return helper && rows;
       }, "owned ownership helper");
-      assert.ok(
-        identities
-          .find((r) => r.pid === host.pid)
-          ?.executable?.toLowerCase() === process.execPath.toLowerCase(),
-      );
+      if (!wsl)
+        assert.ok(
+          identities
+            .find((r) => r.pid === host.pid)
+            ?.executable?.toLowerCase() === process.execPath.toLowerCase(),
+        );
+      const linuxIdentities = wsl ? linuxDescendants(hostPin) : [];
       assert.ok(
         identities
           .find((r) => r.pid === workerPid)
@@ -422,6 +571,7 @@ export async function runPassiveCommandStop() {
         pending,
         waitStart,
         identities,
+        linuxIdentities,
         held,
         claim:
           "received wait request, owned mutex held and no response; not timer-scheduling instrumentation",
@@ -514,6 +664,16 @@ export async function runPassiveCommandStop() {
           [...identities, ...descendants()].map((row) => [row.pid, row]),
         ).values(),
       ];
+      const allLinuxIdentities = wsl
+        ? [
+            ...new Map(
+              [...linuxIdentities, ...linuxDescendants(hostPin)].map((row) => [
+                row.pid,
+                row,
+              ]),
+            ).values(),
+          ]
+        : [];
       assertActive();
       host.stdin.end();
       let shutdownTimer;
@@ -536,6 +696,10 @@ export async function runPassiveCommandStop() {
         `$ids=@(${allIdentities.map((r) => r.pid).join(",")});$rows=@();foreach($id in $ids){$p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$id) -ErrorAction Stop;if($null -ne $p){$rows+=@(@{pid=$p.ProcessId;creation=$p.CreationDate.ToUniversalTime().ToString('o');executable=$p.ExecutablePath})}};ConvertTo-Json -Compress -InputObject @($rows)`,
       );
       assert.deepEqual(remaining, []);
+      const linuxRemaining = allLinuxIdentities.filter(
+        (row) => !linuxOwnerAbsent(row),
+      );
+      assert.deepEqual(linuxRemaining, []);
       const finalObserver = observer();
       assert.equal(finalObserver[0].pid, workerPid);
       assert.equal(
@@ -546,9 +710,7 @@ export async function runPassiveCommandStop() {
       );
       assert.equal(
         finalObserver[0].worker.toLowerCase(),
-        fileURLToPath(
-          new URL("../dist/worker.js", import.meta.url),
-        ).toLowerCase(),
+        windowsWorker.toLowerCase(),
       );
       assert.ok(
         finalObserver.some(
@@ -575,7 +737,21 @@ export async function runPassiveCommandStop() {
       write("events.json", events);
       write("result.json", {
         ok: true,
+        commandHost,
         hostVersion: version,
+        pathMapping: {
+          hostCwd: dir,
+          workerLaunchCwd: wsl ? dir : "unchanged launcher cwd",
+          workerCwd: wsl ? windowsDir : "unchanged launcher cwd",
+          hostSettings: wsl ? "settings.json" : settings,
+          workerSettings: wsl ? "settings.json" : settings,
+          workerTrace: wsl ? mappedPath(trace, "-w") : trace,
+          windowsWorker,
+          settingsForwarding: wsl
+            ? "child-only WSLENV PI_CU_SETTINGS_FILE, relative without path translation"
+            : "unchanged native environment",
+        },
+        preflight,
         hashes,
         hostPid: host.pid,
         hostPin,
@@ -588,10 +764,13 @@ export async function runPassiveCommandStop() {
         settlements: events.filter((e) => e.type === "agent_settled"),
         observedIdentities: allIdentities,
         remaining,
+        observedLinuxIdentities: allLinuxIdentities,
+        linuxRemaining,
         physicalInput: false,
         isolatedSettingsRemoved: true,
-        scope:
-          "actual native Windows Pi RPC/registered command with scripted provider; not physical/WSL/DSH/real-model acceptance",
+        scope: wsl
+          ? "actual WSL2 Pi RPC/registered command and real Windows worker with scripted provider; not physical/DSH/real-model acceptance"
+          : "actual native Windows Pi RPC/registered command with scripted provider; not physical/WSL/DSH/real-model acceptance",
       });
       write("owner.json", { phase: "complete", cleanupAuthorized: true });
       console.log(JSON.stringify({ ok: true, dir, physicalInput: false }));
