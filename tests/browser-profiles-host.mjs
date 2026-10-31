@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 
 const run = promisify(execFile);
 const app = process.argv[2] ?? "edge";
+const liveOrphanMode = process.argv.includes("--live-orphan");
 const reconnect = process.argv.includes("--reconnect");
 const disposeOnly = process.argv.includes("--dispose-only");
 const cleanupControlMode = process.argv.includes("--cleanup-control");
@@ -14,6 +15,15 @@ assert.ok(
   ["edge", "chrome", "firefox"].includes(app),
   "Use edge, chrome or firefox",
 );
+if (liveOrphanMode)
+  assert.ok(
+    app === "edge" &&
+      !reconnect &&
+      !disposeOnly &&
+      !cleanupControlMode &&
+      !process.argv.includes("--temporary-crash"),
+    "Live-orphan mode requires Edge and no other scenario",
+  );
 if (disposeOnly)
   assert.ok(
     app === "firefox" &&
@@ -29,17 +39,19 @@ if (reconnect)
   );
 if (process.argv.includes("--plan")) {
   assert.ok(
-    reconnect || cleanupControlMode || disposeOnly,
+    reconnect || cleanupControlMode || disposeOnly || liveOrphanMode,
     "Use --plan with --reconnect, --cleanup-control or --dispose-only",
   );
   console.log(
     JSON.stringify({
       executed: false,
-      mode: disposeOnly
-        ? "temporary-profile-disposal"
-        : cleanupControlMode
-          ? "missing-lease-cleanup-control"
-          : "same-worker-reconnect",
+      mode: liveOrphanMode
+        ? "controlled-live-browser-dead-lease-owner"
+        : disposeOnly
+          ? "temporary-profile-disposal"
+          : cleanupControlMode
+            ? "missing-lease-cleanup-control"
+            : "same-worker-reconnect",
       app,
       physicalInput: false,
       dailyProfile: false,
@@ -61,7 +73,12 @@ if (process.platform !== "win32")
   serverPath = (await run("wslpath", ["-w", serverPath])).stdout.trim();
 const server = spawn(
   launch.executable,
-  [serverPath, app, ...(disposeOnly ? ["--dispose-only"] : [])],
+  [
+    serverPath,
+    app,
+    ...(disposeOnly ? ["--dispose-only"] : []),
+    ...(liveOrphanMode ? ["--live-orphan"] : []),
+  ],
   {
     windowsHide: true,
     stdio: ["pipe", "pipe", "pipe"],
@@ -140,10 +157,74 @@ async function open(host, path) {
   return result;
 }
 let reconnectReport;
+let orphanReport;
 let cleanupControl;
 try {
   if (cleanupControlMode) {
     cleanupControl = await fixture({ action: "arm-cleanup-control" });
+  } else if (liveOrphanMode) {
+    const setup = create();
+    await open(setup, "/read");
+    const setupPid = (await call(setup, "health")).processId;
+    const original = await fixture({
+      action: "inspect-profile",
+      workerPid: setupPid,
+    });
+    await close(setup);
+    const orphan = await fixture({
+      action: "arm-live-orphan",
+      browser: original,
+      workerPid: setupPid,
+    });
+    const contender = create(),
+      contenderPid = (await call(contender, "health")).processId;
+    const refused = await call(contender, "set_value", {
+      elementId: "new-tab",
+      value: source.url + "/read",
+    });
+    assert.equal(refused.ok, false);
+    assert.match(refused.error, /BROWSER_PROFILE_BUSY.*still alive/);
+    const unchanged = await fixture({ action: "inspect-live-orphan" });
+    assert.equal(unchanged.processId, orphan.processId);
+    assert.equal(unchanged.creationDate, orphan.creationDate);
+    await close(contender);
+    await fixture({
+      action: "inspect-live-orphan",
+      retiredWorkerPid: contenderPid,
+    });
+    const retired = await fixture({ action: "close-live-orphan" });
+    assert.equal(retired.browserAbsent, true);
+    const recovery = create(),
+      page = await open(recovery, "/read");
+    assert.match(page.text, /Cookie: remembered/);
+    const recoveryPid = (await call(recovery, "health")).processId,
+      recovered = await fixture({
+        action: "inspect-profile",
+        workerPid: recoveryPid,
+      });
+    assert.equal(recovered.profile.path, orphan.profile.path);
+    assert.equal(orphan.leaseOwner.workerPid, orphan.writer.processId);
+    assert.equal(recovered.leaseOwner.workerPid, recoveryPid);
+    assert.notEqual(
+      recovered.leaseOwner.tokenSha256,
+      orphan.leaseOwner.tokenSha256,
+    );
+    assert.notDeepEqual(
+      [recovered.processId, recovered.creationDate],
+      [orphan.processId, orphan.creationDate],
+    );
+    await close(recovery);
+    orphanReport = {
+      ok: true,
+      mode: "controlled-live-browser-dead-lease-owner",
+      scope: "production lease boundary; not a natural worker crash",
+      orphan,
+      unchanged,
+      retired,
+      recovered,
+      contenderPid,
+      recoveryPid,
+    };
   } else if (reconnect) {
     const host = create();
     const original = await open(host, "/set");
@@ -410,12 +491,29 @@ try {
       }),
     );
   }
+} catch (error) {
+  if (liveOrphanMode) {
+    console.error(
+      JSON.stringify({
+        retained: true,
+        scope: "controlled live-orphan",
+        root: source.root,
+        error: String(error),
+      }),
+    );
+    await new Promise(() =>
+      setInterval(() => {
+        void server.pid;
+      }, 60000),
+    );
+  }
+  throw error;
 } finally {
   for (const host of hosts) await close(host);
   lines.close();
   server.stdin.end();
   const timer =
-    reconnect || cleanupControlMode
+    reconnect || cleanupControlMode || liveOrphanMode
       ? undefined
       : setTimeout(() => server.kill(), 5000);
   await new Promise((resolve) => {
@@ -438,13 +536,22 @@ try {
     );
     assert.match(serverErrors, /PROFILE_CLEANUP_BLOCKED/);
   }
-  if (reconnect)
+  if (reconnect || liveOrphanMode)
     assert.equal(
       server.exitCode,
       0,
       `fixture must confirm owned storage cleanup: ${serverErrors}`,
     );
 }
+
+if (orphanReport)
+  console.log(
+    JSON.stringify({
+      ...orphanReport,
+      fixture: source.server,
+      fixtureCleanup: await verifyFixtureRetirement(),
+    }),
+  );
 
 if (reconnectReport)
   console.log(
@@ -506,14 +613,7 @@ async function verifyDisposal() {
     server.stdin.end();
     await exited;
     assert.equal(server.exitCode, 0, serverErrors);
-    const retired = await run(launch.executable, [
-      "--input-type=module",
-      "-e",
-      `import {execFileSync} from "node:child_process"; import {access} from "node:fs/promises"; import {dirname} from "node:path"; const pid=Number(process.argv[1]); if(!Number.isSafeInteger(pid)||pid<1)throw Error("INVALID_FIXTURE_PID");const ps="$ErrorActionPreference='Stop';$rows=@(Get-CimInstance Win32_Process -Filter 'ProcessId="+pid+"' -ErrorAction Stop);ConvertTo-Json -Compress -InputObject @($rows|ForEach-Object{$_.ProcessId})";const rows=JSON.parse(execFileSync("powershell.exe",["-NoProfile","-NonInteractive","-Command",ps],{encoding:"utf8",windowsHide:true,timeout:10000}));if(rows.length)throw Error("FIXTURE_PID_STILL_PRESENT_OR_REUSED");try{await access(dirname(process.argv[2]));throw Error("FIXTURE_STORAGE_RETAINED")}catch(error){if(error.code!=="ENOENT")throw error}console.log(JSON.stringify({fixtureProcessAbsent:true,fixtureStorageAbsent:true}))`,
-      String(source.server.processId),
-      source.root,
-    ]);
-    const fixtureCleanup = JSON.parse(retired.stdout);
+    const fixtureCleanup = await verifyFixtureRetirement();
     console.log(
       JSON.stringify({
         ok: true,
@@ -535,4 +635,15 @@ async function verifyDisposal() {
     setInterval(() => {}, 60_000);
     await new Promise(() => {});
   }
+}
+
+async function verifyFixtureRetirement() {
+  const retired = await run(launch.executable, [
+    "--input-type=module",
+    "-e",
+    `import {execFileSync} from "node:child_process"; import {access} from "node:fs/promises"; import {dirname} from "node:path"; const pid=Number(process.argv[1]); if(!Number.isSafeInteger(pid)||pid<1)throw Error("INVALID_FIXTURE_PID");const ps="$ErrorActionPreference='Stop';$rows=@(Get-CimInstance Win32_Process -Filter 'ProcessId="+pid+"' -ErrorAction Stop);ConvertTo-Json -Compress -InputObject @($rows|ForEach-Object{$_.ProcessId})";const rows=JSON.parse(execFileSync("powershell.exe",["-NoProfile","-NonInteractive","-Command",ps],{encoding:"utf8",windowsHide:true,timeout:10000}));if(rows.length)throw Error("FIXTURE_PID_STILL_PRESENT_OR_REUSED");try{await access(dirname(process.argv[2]));throw Error("FIXTURE_STORAGE_RETAINED")}catch(error){if(error.code!=="ENOENT")throw error}console.log(JSON.stringify({fixtureProcessAbsent:true,fixtureStorageAbsent:true}))`,
+    String(source.server.processId),
+    source.root,
+  ]);
+  return JSON.parse(retired.stdout);
 }

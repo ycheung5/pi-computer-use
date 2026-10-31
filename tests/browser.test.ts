@@ -84,6 +84,7 @@ test("profile fixture plans need no backend, dependency tree or fixture files", 
     );
     for (const [flag, mode] of [
       ["--reconnect", "same-worker-reconnect"],
+      ["--live-orphan", "controlled-live-browser-dead-lease-owner"],
       ["--cleanup-control", "missing-lease-cleanup-control"],
       ["--dispose-only", "temporary-profile-disposal"],
     ] as const) {
@@ -105,4 +106,45 @@ test("profile fixture plans need no backend, dependency tree or fixture files", 
   } finally {
     rmSync(folder, { recursive: true, force: true });
   }
+});
+
+test("controlled orphan fixture refuses changed or unknown ownership facts without setup", () => {
+  const server = fileURLToPath(
+    new URL("./browser-profiles-server.mjs", import.meta.url),
+  );
+  const expected = {
+    processId: 42,
+    creationDate: "known-birth",
+    executable: "C:\\owned\\msedge.exe",
+    profile: { path: "C:\\owned\\kept-edge" },
+  };
+  const valid = {
+    expected,
+    current: expected,
+    writerPresent: false,
+    lease: "original bytes",
+    originalLease: "original bytes",
+  };
+  const proof = (v: object) => {
+    const result = spawnSync(
+      process.execPath,
+      [server, "--orphan-proof-check", JSON.stringify(v)],
+      { encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout).ok;
+  };
+  assert.equal(proof(valid), true);
+  for (const changed of [
+    undefined,
+    { ...expected, processId: 43 },
+    { ...expected, creationDate: "reused" },
+    { ...expected, executable: "C:\\other.exe" },
+    { ...expected, profile: { path: "C:\\other" } },
+  ])
+    assert.equal(proof({ ...valid, current: changed }), false);
+  for (const writerPresent of [true, undefined])
+    assert.equal(proof({ ...valid, writerPresent }), false);
+  assert.equal(proof({ ...valid, lease: "rewritten token" }), false);
+  assert.equal(proof({ ...valid, expected: {}, current: {} }), false);
 });
