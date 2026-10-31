@@ -11,7 +11,10 @@ import computerUse from "../dist/extension.js";
 import { computerUseHost } from "./native-host.mjs";
 
 assert.equal(process.platform, "win32");
-const visualAssociation = process.env.PI_CU_OCR_VISUAL_ASSOCIATION === "1";
+const serverMode = process.argv[2] === "--visual-server";
+const visualAssociation =
+  serverMode || process.env.PI_CU_OCR_VISUAL_ASSOCIATION === "1";
+const title = `Pi CU OCR ${Date.now()}`;
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-ocr-fixture-"));
 const executable = join(folder, "fixture.exe");
 const compiler = join(
@@ -36,10 +39,7 @@ const built = spawnSync(
 assert.equal(built.status, 0, built.stdout + built.stderr);
 const fixture = spawn(
   executable,
-  [
-    `Pi CU OCR ${Date.now()}`,
-    ...(visualAssociation ? ["visual-association"] : []),
-  ],
+  [title, ...(visualAssociation ? ["visual-association"] : [])],
   {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
@@ -49,6 +49,20 @@ const fixture = spawn(
 const [ready] = await once(fixture.stdout, "data");
 const handle = Number(ready.toString().trim());
 const fixtureLines = createInterface({ input: fixture.stdout });
+if (serverMode) {
+  const { serveVisualFixture } = await import("./pi-visual-host.mjs");
+  await serveVisualFixture({
+    fixture,
+    fixtureLines,
+    folder,
+    executable,
+    handle,
+    title,
+    pipeName: process.argv[3],
+  });
+  // The private server returns only after owned fixture retirement and IPC closure.
+  process.exit(0);
+}
 const host = computerUseHost();
 computerUse(host.api);
 const tool = host.tools.get("windows_computer_use_ocr");
@@ -311,7 +325,11 @@ async function verifyDefault() {
   const find = host.tools.get("windows_computer_use_find");
   const found = await find.execute(
     "sparse-find",
-    { nativeWindowHandle: handle, processId: fixture.pid, query: "HELLO 123" },
+    {
+      nativeWindowHandle: handle,
+      processId: fixture.pid,
+      query: "HELLO 123",
+    },
     undefined,
     undefined,
     {},

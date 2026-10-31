@@ -92,7 +92,8 @@
     "test:native:process-containment": "node tests/process-containment-check.mjs",
     "test:native:owner-supervisor": "node tests/owner-supervisor-check.mjs",
     "test:native:owner-backend-health": "node tests/owner-backend-health-check.mjs",
-    "test:native:owner-crash-boundary": "node tests/owner-crash-boundary-check.mjs"
+    "test:native:owner-crash-boundary": "node tests/owner-crash-boundary-check.mjs",
+    "test:pi:visual": "node tests/pi-visual-host.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
