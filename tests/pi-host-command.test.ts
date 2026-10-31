@@ -1,0 +1,161 @@
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+
+const helper = () =>
+  import(new URL("./pi-host-command.mjs", import.meta.url).href);
+test("passive host observer preserves real stdin/stdout frames and callbacks", async () => {
+  const { commandObserver } = await helper();
+  const folder = await mkdtemp(join(tmpdir(), "pi-command-observer-"));
+  try {
+    const trace = join(folder, "trace.jsonl");
+    const source = `process.stdin.on('data',b=>{process.stdout.write(b,()=>process.stderr.write('callback'));});`;
+    const child = spawn(
+      process.execPath,
+      ["--import", commandObserver(trace), "-e", source],
+      { stdio: ["pipe", "pipe", "pipe"] },
+    );
+    const closed = once(child, "close");
+    let stdout = "",
+      stderr = "";
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    const frame =
+      JSON.stringify({
+        id: 7,
+        action: "wait",
+        operationId: "actual-operation",
+        args: { milliseconds: 30000 },
+      }) + "\n";
+    child.stdin.end(frame);
+    assert.deepEqual(await closed, [0, null]);
+    assert.equal(stdout, frame);
+    assert.equal(stderr, "callback");
+    const rows = (await readFile(trace, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(rows[0].kind, "ready");
+    assert.deepEqual(
+      rows.map((row) => row.sequence),
+      [1, 2, 3],
+    );
+    assert.equal(rows[1].kind, "input");
+    assert.equal(rows[1].action, "wait");
+    assert.equal(rows[1].operationId, "actual-operation");
+    assert.equal(rows[1].milliseconds, 30000);
+    assert.equal(rows[2].kind, "output");
+    assert.ok(rows.every((row) => !row.fault));
+    assert.equal(JSON.stringify(rows).includes('"args"'), false);
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test("passive command guard permits only owner-bound health/wait and fails closed", async () => {
+  const { commandGuard } = await helper();
+  const running = { phase: "running", expiresAt: Date.now() + 10000 };
+  const event = {
+    toolName: "windows_computer_use_wait",
+    input: { milliseconds: 30000 },
+  };
+  assert.equal(
+    commandGuard(
+      event,
+      () => running,
+      () => {},
+    ),
+    undefined,
+  );
+  for (const owner of [
+    { phase: "retained" },
+    { phase: "running", expiresAt: 0 },
+    null,
+  ])
+    assert.equal(
+      commandGuard(
+        event,
+        () => owner,
+        () => {},
+      ).block,
+      true,
+    );
+  assert.equal(
+    commandGuard(
+      event,
+      () => {
+        throw Error("journal");
+      },
+      () => {},
+    ).block,
+    true,
+  );
+  assert.equal(
+    commandGuard(
+      event,
+      () => running,
+      () => {
+        throw Error("audit");
+      },
+    ).block,
+    true,
+  );
+  for (const input of [
+    { milliseconds: 30001 },
+    { milliseconds: 30000, windowRef: "foreign" },
+    {},
+  ])
+    assert.equal(
+      commandGuard(
+        { ...event, input },
+        () => running,
+        () => {},
+      ).block,
+      true,
+    );
+  assert.equal(
+    commandGuard(
+      { ...event, toolName: "windows_computer_use_click" },
+      () => running,
+      () => {},
+    ).block,
+    true,
+  );
+});
+
+test("observer faults preserve malformed bytes and cannot fabricate clean proof", async () => {
+  const { commandObserver } = await helper();
+  const folder = await mkdtemp(join(tmpdir(), "pi-command-malformed-"));
+  try {
+    const trace = join(folder, "trace.jsonl");
+    const child = spawn(
+      process.execPath,
+      [
+        "--import",
+        commandObserver(trace),
+        "-e",
+        "process.stdin.on('data',b=>process.stdout.write(b))",
+      ],
+      { stdio: ["pipe", "pipe", "pipe"] },
+    );
+    const closed = once(child, "close");
+    let output = "";
+    child.stdout.on("data", (b) => (output += b));
+    child.stderr.resume();
+    child.stdin.end('not-json\n{"id":9}\n');
+    assert.deepEqual(await closed, [0, null]);
+    assert.equal(output, 'not-json\n{"id":9}\n');
+    const rows = (await readFile(trace, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.ok(rows.some((row) => row.kind === "fault"));
+    assert.ok(rows.slice(1).every((row) => row.fault === true));
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
