@@ -185,7 +185,9 @@ export function registerComputerUse(
       if (
         !result.ok &&
         typeof result.error === "string" &&
-        /^TARGET_ACTIVATION_REFUSED(?::|$)/.test(result.error)
+        /^(?:WINDOWS_ERROR: )?TARGET_ACTIVATION_REFUSED(?::|$)/.test(
+          result.error,
+        )
       ) {
         return {
           ...result,
