@@ -2503,34 +2503,53 @@ export async function browse(
           "element was not observed in the current document",
         );
       const value = await withCancellation(
-        element.evaluate((node) => ({
-          tag: node.tagName.toLowerCase(),
-          text: node.textContent?.trim().slice(0, 2000),
-          value:
-            node instanceof HTMLInputElement && node.type === "password"
-              ? "[redacted]"
-              : "value" in node
-                ? String(node.value)
-                : undefined,
-          link: node instanceof HTMLAnchorElement ? node.href : undefined,
-          ...("disabled" in node ||
-          node.closest('[aria-disabled="true"], [inert]')
-            ? {
-                disabled:
-                  node.matches(":disabled") ||
-                  node.closest('[aria-disabled="true"], [inert]') !== null,
-              }
-            : {}),
-          ...("readOnly" in node || node.hasAttribute("aria-readonly")
-            ? {
-                readonly:
-                  ("readOnly" in node &&
-                    (node as HTMLInputElement | HTMLTextAreaElement)
-                      .readOnly) ||
-                  node.getAttribute("aria-readonly") === "true",
-              }
-            : {}),
-        })),
+        element.evaluate((node) => {
+          const nativeReadonly =
+            node instanceof HTMLTextAreaElement ||
+            (node instanceof HTMLInputElement &&
+              [
+                "text",
+                "search",
+                "url",
+                "tel",
+                "email",
+                "password",
+                "date",
+                "month",
+                "week",
+                "time",
+                "datetime-local",
+                "number",
+              ].includes(node.type));
+          return {
+            tag: node.tagName.toLowerCase(),
+            text: node.textContent?.trim().slice(0, 2000),
+            value:
+              node instanceof HTMLInputElement && node.type === "password"
+                ? "[redacted]"
+                : "value" in node
+                  ? String(node.value)
+                  : undefined,
+            link: node instanceof HTMLAnchorElement ? node.href : undefined,
+            ...("disabled" in node ||
+            node.closest('[aria-disabled="true"], [inert]')
+              ? {
+                  disabled:
+                    node.matches(":disabled") ||
+                    node.closest('[aria-disabled="true"], [inert]') !== null,
+                }
+              : {}),
+            ...(nativeReadonly || node.hasAttribute("aria-readonly")
+              ? {
+                  readonly:
+                    (nativeReadonly &&
+                      (node as HTMLInputElement | HTMLTextAreaElement)
+                        .readOnly) ||
+                    node.getAttribute("aria-readonly") === "true",
+                }
+              : {}),
+          };
+        }),
         signal,
       );
       return {

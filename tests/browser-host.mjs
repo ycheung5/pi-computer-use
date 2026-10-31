@@ -152,6 +152,23 @@ try {
       `${query} exposes ${property}`,
     );
   }
+  const checkboxMatches = await client.execute("find", {
+    browserTab: tab,
+    query: "Checkbox with ignored readonly",
+  });
+  const checkbox = checkboxMatches.results.find(
+    (entry) => entry.role === "checkbox",
+  );
+  assert.ok(checkbox?.id, JSON.stringify(checkboxMatches));
+  const checkboxInfo = await client.execute("element_info", {
+    elementId: checkbox.id,
+  });
+  assert.equal(checkboxInfo.ok, true, JSON.stringify(checkboxInfo));
+  assert.equal(
+    "readonly" in checkboxInfo.element,
+    false,
+    "HTML readonly does not apply to checkbox inputs",
+  );
   const shot = await client.execute("screenshot", {
     browserTab: tab,
     maxWidth: 300,
