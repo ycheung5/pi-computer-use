@@ -421,6 +421,21 @@ Run `test:browser:comparison:oracle -- /path/to/reference edge --verify-profile-
 
 The live runs use a private Windows-readable copy of the worktree's tests, built worker, native assets and locked runtime dependencies. Windows Node cannot follow the worktree's absolute Linux dependency symlink. Source/copy hashes are recorded with the local evidence; the copy is removed afterward. No production code, daily profile, live-model request, physical input or clipboard mutation is part of this baseline.
 
+### Consolidated Chromium tool acceptance
+
+The #16 tool deliverable and transferred #15 criteria are accounted for separately from #36 real-model workflows and the remaining release/manual gates. Existing trustworthy results are reused where production paths are unchanged; the 2026-10-31 Chrome headless recheck covered current shared restriction/focus guards, stale IDs and reconnect. The added launch-failure case passed through registered Pi tools without production changes.
+
+| Criterion | Named evidence |
+| --- | --- |
+| Installed Chrome/Edge and background behavior (#15.1) | Corrected named-browser read/action runs and focused visible Edge foreground evidence in [browser validation](browser.md#validation); current Chrome headless read/guard/lifecycle pass. |
+| Both browsers, native/WSL paths, disconnect, cleanup and startup failure (#15.4) | Chrome/Edge WSL-controller read/actions and profile runs; native Windows Node Edge profile fixture through registered Pi tools; read fixture disconnect/reconnect; `test:browser -- edge --headless --startup-failure`. |
+| Actions, JavaScript dialogs and explicit waits (#16.1) | `browser-actions-host.mjs` Edge/Chrome action results, paired form evidence and current shared-guard regressions. |
+| Transfers, tab effects and post-action observations (#16.2) | Paired advanced Edge/Chrome known upload/download bytes and exactly-once server requests, new/closed tabs and returned page changes. |
+| Targeting, serialization, cancellation and honest results (#16.3) | Stale/root identity checks in read/advanced fixtures, worker/ownership ordering regressions, actual passive-wait cancellation and same-operation refusal/new-operation recovery. |
+| Navigation, overlays, dialogs, transfers and failure paths (#16.4) | The existing read/action/advanced fixtures plus the named launch-failure case. |
+
+The launch-failure executable is an owned .NET fixture that records its PID and exits 42 without launching children. The public result reports `BROWSER_PROFILE_RETAINED` and no browser session. Independent process checks prove the fixture and worker exited before test-only storage removal; removal is checked afterward. Unknown launch ownership remains conservatively retained in production. Earlier fixture `taskkill` and staging failures remain recorded; this acceptance does not erase them. No physical input, daily profile, real-model result or unrestricted application coverage is inferred.
+
 ## Pointer comparison preparation
 
 Historical preparation boundary; see the later [dedicated-session evidence](#dedicated-physical-comparison-evidence).
