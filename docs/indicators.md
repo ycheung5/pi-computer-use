@@ -18,7 +18,7 @@ Own native screenshots/OCR suspend overlay windows and restore presentation in `
 - `npm run test:indicators` uses disposable Windows settings and exercises configuration, offscreen rendering, shortcut parsing, operation lifetime, capture suspension and disabled-indicator stopping without physical input.
 - Set `PI_CU_ENABLE_INDICATOR_PREVIEW=1` for the same runner's brief visible show/hide, native hit-query and capture-suspension checks. Run live checks under `flock -w 120 /tmp/pi-cu-live-tests.lock` from WSL to avoid overlap with other desktop fixtures.
 
-The updated glow border is source-reviewed only; its appearance, rendering, cleanup and compatibility have not been validated by a build, automated test or live desktop run. Automated protocol state and native window-query checks establish behavior, not human visual acceptance. Physical keys and mouse input are not emitted by this runner.
+The updated glow border is source-reviewed. Portable checks, package validation and compilation of the Windows stop/indicator helper passed; the helper was not launched for these checks. Appearance, alpha rendering, cleanup and compatibility have not yet been validated by a live desktop run. Automated protocol state and native window-query checks establish behavior, not human visual acceptance. Physical keys and mouse input are not emitted by this runner.
 
 ## Manual acceptance checklist
 
