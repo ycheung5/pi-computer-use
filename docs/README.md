@@ -20,6 +20,7 @@ Read the row matching the task; follow section links before reading whole docume
 | Control indicators, preview and manual acceptance | [Indicators](indicators.md) |
 | Desktop ownership and operation lifecycle | [Ownership](ownership.md) |
 | Native window discovery and validation | [Windows discovery](windows.md), [accessibility observations](windows.md#accessibility-observations), [locked sessions](windows.md#locked-session-refusals) |
+| Native interop alternatives and tradeoffs | [Native interop research](native-interop-research.md) |
 | Guarded desktop pointer and dedicated input validation | [Pointer actions](pointer.md) |
 | Text, chords, clipboard preservation and validation | [Text entry](text.md) |
 | Personal settings, commands and tool loading | [Settings](settings.md) |
