@@ -105,7 +105,7 @@ partial class WindowsBridge {
         try {
           Dictionary<string, object> args = (Dictionary<string, object>)request["args"];
           if (action == "type_text" || action == "keypress") result = ExecuteText(action,args);
-          else if (action == "click" || action == "double_click" || action == "move" || action == "drag" || (action == "scroll" && (!args.ContainsKey("elementId") || args.ContainsKey("_cancelEvent")))) result = ExecutePointer(action,args);
+          else if (action == "click" || action == "double_click" || action == "move" || action == "drag" || (action == "scroll" && (!args.ContainsKey("elementId") || (args.ContainsKey("_cancelEvent") && !Option(args,"_quietScroll",false))))) result = ExecutePointer(action,args);
           else if (action == "list_windows") result = ListWindows(args);
           else if (action == "browser_frame") result = MarkBrowserFrame(args);
           else if (action == "focus" || action == "invoke" || action == "set_value" || action == "scroll") result = ExecuteControl(action,args);

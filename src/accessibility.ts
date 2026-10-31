@@ -163,6 +163,7 @@ export async function executeAccessibility(
   action: string,
   args: Record<string, unknown>,
   signal?: AbortSignal,
+  execute?: (normalized: Record<string, unknown>) => Promise<WorkerResult>,
 ): Promise<WorkerResult> {
   const definition = definitions[action];
   if (!definition) return { ok: false, action, error: "UNKNOWN_ACTION" };
@@ -221,6 +222,9 @@ export async function executeAccessibility(
   }
   signal?.throwIfAborted();
   let result: WorkerResult;
+  // Guarded mutation failures retain the cleanup lease; do not translate them
+  // into ordinary observation errors or clear the outer input state.
+  if (execute) return execute(normalized);
   try {
     result = await nativeDesktop.execute(action, normalized, signal);
   } catch (error) {

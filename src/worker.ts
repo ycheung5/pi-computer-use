@@ -236,7 +236,18 @@ async function guardedInput(
   operationId: string,
   signal: AbortSignal,
   requestId: number,
+  quietScroll = false,
 ): Promise<WorkerResponse["result"]> {
+  if (quietScroll)
+    return executeAccessibility(action, args, signal, (normalized) =>
+      guardedInput(
+        action,
+        { ...normalized, _quietScroll: true },
+        operationId,
+        signal,
+        requestId,
+      ),
+    );
   const armed = await stopListener.arm(operationId, signal);
   if (!armed.ok || typeof armed.cancelEvent !== "string")
     return { ...armed, action };
@@ -524,11 +535,20 @@ async function dispatch(
                             "set_value",
                             "scroll",
                           ].includes(request.action)
-                        ? await executeAccessibility(
-                            request.action,
-                            request.args,
-                            signal,
-                          )
+                        ? request.action === "scroll"
+                          ? await guardedInput(
+                              request.action,
+                              request.args,
+                              operationId,
+                              signal,
+                              request.id,
+                              true,
+                            )
+                          : await executeAccessibility(
+                              request.action,
+                              request.args,
+                              signal,
+                            )
                         : {
                             ok: false,
                             action: request.action,
