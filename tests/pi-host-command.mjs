@@ -82,13 +82,32 @@ export function assessCommandSettlement(pending, rows) {
   if (
     response.result?.ok !== false ||
     response.result.action !== action ||
-    response.result.error !== "COMPUTER_USE_STOPPED"
+    !(navigation
+      ? ["COMPUTER_USE_STOPPED", "COMPUTER_USE_CANCELLED"].includes(
+          response.result.error,
+        )
+      : response.result.error === "COMPUTER_USE_STOPPED")
   )
     return failed("worker did not report stop-specific wait cancellation");
   if (!Number.isFinite(elapsedMs) || elapsedMs < 0 || elapsedMs >= budget)
     return failed(
       "worker cancellation was not before the original timer deadline",
     );
+  if (
+    navigation &&
+    !rows.some(
+      (row) =>
+        row.kind === "input" &&
+        row.pid === pending.pid &&
+        row.sequence > pending.sequence &&
+        row.sequence < response.sequence &&
+        Number.isFinite(row.monotonicMs) &&
+        row.monotonicMs >= pending.monotonicMs &&
+        row.monotonicMs <= response.monotonicMs &&
+        (row.cancel === pending.id || row.stop === pending.operationId),
+    )
+  )
+    return failed("actual matching navigation stop/cancel frame absent");
   const ends = rows.filter(
     (row) =>
       row.kind === "input" &&

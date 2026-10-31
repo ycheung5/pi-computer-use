@@ -8,17 +8,29 @@ export const scenarios = [
   "partial",
   "cancel",
 ];
-export async function formState(base) {
+// Both local fixture consumers run their HTTP reads in Windows, including from a WSL Pi host.
+async function fixtureState(base, paths) {
   const { nativeWorkerLaunch } = await import("../dist/launcher.js");
   const native = await nativeWorkerLaunch();
-  const js = `Promise.all([fetch(${JSON.stringify(base + "form/state")}).then(r=>r.json()),fetch(${JSON.stringify(base + "form/delayed/state")}).then(r=>r.json())]).then(([payload,events])=>console.log(JSON.stringify({payload,events})))`;
+  const js = `Promise.all(${JSON.stringify(paths)}.map(path=>fetch(${JSON.stringify(base)}+path,{signal:AbortSignal.timeout(2000)}).then(r=>{if(!r.ok)throw Error('FIXTURE_HTTP_'+r.status);return r.json()}))).then(rows=>console.log(JSON.stringify(rows)))`;
   return JSON.parse(
     execFileSync(native.executable, ["-e", js], {
       encoding: "utf8",
-      timeout: 10000,
+      timeout: 5000,
       stdio: ["ignore", "pipe", "ignore"],
     }),
   );
+}
+export async function formState(base) {
+  const [payload, events] = await fixtureState(base, [
+    "form/state",
+    "form/delayed/state",
+  ]);
+  return { payload, events };
+}
+export async function heldState(base) {
+  const [held] = await fixtureState(base, ["held/state"]);
+  return held;
 }
 const allowed = new Set([
   "snapshot",
@@ -191,7 +203,7 @@ export default async function (pi) {
             throw Error("worker identity unknown");
           audit({ type: "cancel_worker_pin", pin });
         }
-        const held = await (await fetch(base + "held/state")).json();
+        const held = await heldState(base);
         if (closed) return;
         if (held.entries > 1 || held.completed > 0)
           throw Error("held navigation entry ambiguous or completed");
@@ -985,7 +997,9 @@ export function verifyOutcome(scenario, f) {
       c?.assessment?.status === "observed" &&
       c.assessment.response?.id === c.pending?.id &&
       c.assessment.response?.pid === c.pending?.pid &&
-      c.assessment.response?.result?.error === "COMPUTER_USE_STOPPED" &&
+      ["COMPUTER_USE_STOPPED", "COMPUTER_USE_CANCELLED"].includes(
+        c.assessment.response?.result?.error,
+      ) &&
       c.assessment.acknowledgment?.result?.released === true &&
       c.http?.urlHash === c.pending?.navigationHash &&
       c.workerRetired === true &&

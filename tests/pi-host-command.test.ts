@@ -211,6 +211,9 @@ test("command settlement requires actual timely wait cancellation and released o
   const replace = (index: number, patch: Record<string, unknown>) =>
     records.map((row, i) => (i === index ? { ...row, ...patch } : row));
   for (const changed of [
+    replace(1, {
+      result: { ok: false, action: "wait", error: "COMPUTER_USE_CANCELLED" },
+    }),
     replace(1, { result: { ok: true, action: "wait" } }),
     replace(1, { monotonicMs: 31000 }),
     records.filter((_, i) => i !== 1),
@@ -357,11 +360,35 @@ test("held navigation cancellation needs actual sole pending entry and timely re
     monotonicMs: 1500,
     result: { ok: true, action: "operation_end", released: true },
   };
-  const rows = [pending, response, end, ack];
+  const control = {
+    kind: "input",
+    cancel: 3,
+    pid: 17,
+    sequence: 3,
+    monotonicMs: 1200,
+  };
+  const rows = [pending, control, response, end, ack];
+  const cancelled = {
+    ...response,
+    result: { ok: false, action: "set_value", error: "COMPUTER_USE_CANCELLED" },
+  };
+  const acceptedCancelled = assessCommandSettlement(pending, [
+    pending,
+    control,
+    cancelled,
+    end,
+    ack,
+  ]);
+  assert.equal(acceptedCancelled.status, "observed");
+  assert.equal(
+    acceptedCancelled.response.result.error,
+    "COMPUTER_USE_CANCELLED",
+  );
   assert.equal(assessCommandSettlement(pending, rows).status, "observed");
   assert.equal(
     assessCommandSettlement(pending, [
       pending,
+      control,
       response,
       end,
       { ...ack, monotonicMs: 16000 },
@@ -369,8 +396,22 @@ test("held navigation cancellation needs actual sole pending entry and timely re
     "failed",
   );
   for (const broken of [
-    [pending, { ...response, id: 99 }, end, ack],
-    [pending, { ...response, monotonicMs: 16000 }, end, ack],
+    [pending, response, end, ack],
+    [pending, { ...control, cancel: 99 }, response, end, ack],
+    [pending, { ...control, pid: 99 }, response, end, ack],
+    [pending, { ...control, sequence: 6 }, response, end, ack],
+    [
+      pending,
+      control,
+      {
+        ...response,
+        result: { ok: false, action: "set_value", error: "AbortError" },
+      },
+      end,
+      ack,
+    ],
+    [pending, control, { ...response, id: 99 }, end, ack],
+    [pending, control, { ...response, monotonicMs: 16000 }, end, ack],
     [
       pending,
       {
@@ -380,9 +421,10 @@ test("held navigation cancellation needs actual sole pending entry and timely re
       end,
       ack,
     ],
-    [pending, response, end],
+    [pending, control, response, end],
     [
       pending,
+      control,
       response,
       end,
       {

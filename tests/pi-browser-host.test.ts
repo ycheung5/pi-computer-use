@@ -1625,7 +1625,15 @@ test("cancel acceptance requires actual stopped/released proof and an interrupte
       pending,
       assessment: {
         status: "observed",
-        response: { id: 3, pid: 17, result: { error: "COMPUTER_USE_STOPPED" } },
+        response: {
+          id: 3,
+          pid: 17,
+          result: {
+            ok: false,
+            action: "set_value",
+            error: "COMPUTER_USE_STOPPED",
+          },
+        },
         acknowledgment: { result: { released: true } },
       },
       workerRetired: true,
@@ -1641,6 +1649,28 @@ test("cancel acceptance requires actual stopped/released proof and an interrupte
     },
   };
   assert.equal((await verify("cancel", facts)).pass, true);
+  assert.equal(
+    (
+      await verify("cancel", {
+        ...facts,
+        cancel: {
+          ...facts.cancel,
+          assessment: {
+            ...facts.cancel.assessment,
+            response: {
+              ...facts.cancel.assessment.response,
+              result: {
+                ok: false,
+                action: "set_value",
+                error: "COMPUTER_USE_CANCELLED",
+              },
+            },
+          },
+        },
+      })
+    ).pass,
+    true,
+  );
   for (const patch of [
     { assessment: { status: "pending" } },
     { workerRetired: false },
@@ -1679,4 +1709,59 @@ test("cancel acceptance requires actual stopped/released proof and an interrupte
     ).pass,
     false,
   );
+});
+
+test("form and held-state consumers share the bounded child-runtime fixture bridge", async () => {
+  const { createInterface } = await import("node:readline");
+  const { pathToFileURL } = await import("node:url");
+  const folder = await mkdtemp(join(tmpdir(), "pi-fixture-state-bridge-"));
+  await mkdir(join(folder, "tests"));
+  await mkdir(join(folder, "dist"));
+  await writeFile(join(folder, "package.json"), '{"type":"module"}');
+  await copyFile(
+    new URL("./pi-browser-fixture.mjs", import.meta.url),
+    join(folder, "tests/pi-browser-fixture.mjs"),
+  );
+  await writeFile(
+    join(folder, "dist/launcher.js"),
+    `export async function nativeWorkerLaunch(){return {executable:${JSON.stringify(process.execPath)}}}`,
+  );
+  const child = spawn(
+    process.execPath,
+    ["tests/browser-actions-server.mjs", "edge", "false"],
+    {
+      env: {
+        ...process.env,
+        PI_CU_HELD_FIXTURE: "1",
+        PI_CU_PARTIAL_FIXTURE: "0",
+        PI_CU_MIXED_FIXTURE: "",
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+  const closed = once(child, "close"),
+    lines = createInterface({ input: child.stdout });
+  child.stderr.resume();
+  try {
+    const [line] = await once(lines, "line"),
+      source = JSON.parse(line);
+    const { formState, heldState } = await import(
+      pathToFileURL(join(folder, "tests/pi-browser-fixture.mjs")).href
+    );
+    assert.deepEqual(await formState(source.url), {
+      payload: null,
+      events: { starts: 0, ready: 0, submissions: 0 },
+    });
+    const held = await heldState(source.url);
+    assert.equal(held.entries, 0);
+    assert.equal(held.closed, 0);
+    assert.equal(held.completed, 0);
+    assert.match(held.urlHash, /^[a-f0-9]{64}$/);
+    await assert.rejects(heldState(source.url + "missing/"));
+  } finally {
+    lines.close();
+    child.stdin.end();
+    assert.equal((await closed)[0], 0);
+    await rm(folder, { recursive: true, force: true });
+  }
 });

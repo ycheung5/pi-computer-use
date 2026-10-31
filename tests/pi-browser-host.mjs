@@ -2,6 +2,7 @@
 import {
   actualText,
   brief,
+  heldState,
   scenarios,
   verifyOutcome,
 } from "./pi-browser-fixture.mjs";
@@ -527,7 +528,12 @@ async function live(selected, options) {
           if (pending && assessment.status !== "observed")
             await retain("cancel-settlement-unconfirmed");
           const stop = rows.find(
-            (row) => row.kind === "input" && row.stop === pending?.operationId,
+            (row) =>
+              row.kind === "input" &&
+              row.pid === pending?.pid &&
+              row.sequence > pending.sequence &&
+              row.sequence < assessment.response?.sequence &&
+              (row.stop === pending.operationId || row.cancel === pending.id),
           );
           facts.cancel = {
             pending,
@@ -569,9 +575,7 @@ async function live(selected, options) {
             .filter(Boolean)
             .map((l) => JSON.parse(l));
           if (scenario === "cancel") {
-            facts.cancel.http = win(
-              `fetch(${JSON.stringify(source.url + "held/state")}).then(r=>r.json()).then(v=>console.log(JSON.stringify(v)))`,
-            );
+            facts.cancel.http = await heldState(source.url);
           } else if (scenario === "advanced") {
             const files = new Map(
               facts.downloads
