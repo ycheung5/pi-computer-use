@@ -1,6 +1,6 @@
 # Pi Windows Computer Use
 
-Native Pi tools for Windows desktop and browser automation from Windows or WSL2 Pi. **The integration is not release-accepted yet**: dedicated physical-input, visual and user acceptance checks remain pending. Follow the [task graph](docs/tickets.md) and [integration draft](https://github.com/ycheung5/pi-computer-use/pull/22).
+Native Pi tools for Windows desktop and browser automation from Windows or WSL2 Pi. **The integration is not release-accepted yet**: dedicated physical-input, visual and user acceptance checks remain pending. Follow the [task graph](docs/tickets.md) and [integration draft](https://github.com/ycheung5/pi-computer-use/pull/38).
 
 ## Requirements
 

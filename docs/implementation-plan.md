@@ -1,6 +1,6 @@
 # Pi computer-use implementation plan
 
-Status: implementation and acceptance work on `integration/reference-alignment`. See [draft PR #22](https://github.com/ycheung5/pi-computer-use/pull/22) for integration history and [current delivery outcomes](tickets.md#delivery-outcomes-and-ownership) for remaining work; release acceptance is incomplete.
+Status: implementation and acceptance work on `integration/reference-alignment`. See [current draft PR #38](https://github.com/ycheung5/pi-computer-use/pull/38) for the active integration and [current delivery outcomes](tickets.md#delivery-outcomes-and-ownership) for remaining work; release acceptance is incomplete.
 
 Requirements and behavioral contracts are authoritative in the [specification](spec.md). Use the [documentation index](README.md) to load only relevant context.
 
