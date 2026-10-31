@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 const run = promisify(execFile);
 const app = process.argv[2] ?? "edge";
 const reconnect = process.argv.includes("--reconnect");
+const cleanupControlMode = process.argv.includes("--cleanup-control");
 assert.ok(
   ["edge", "chrome", "firefox"].includes(app),
   "Use edge, chrome or firefox",
@@ -18,11 +19,16 @@ if (reconnect)
     "Reconnect fixture currently supports Chromium only",
   );
 if (process.argv.includes("--plan")) {
-  assert.ok(reconnect, "Use --plan with --reconnect");
+  assert.ok(
+    reconnect || cleanupControlMode,
+    "Use --plan with --reconnect or --cleanup-control",
+  );
   console.log(
     JSON.stringify({
       executed: false,
-      mode: "same-worker-reconnect",
+      mode: cleanupControlMode
+        ? "missing-lease-cleanup-control"
+        : "same-worker-reconnect",
       app,
       physicalInput: false,
       dailyProfile: false,
@@ -114,8 +120,11 @@ async function open(host, path) {
   return result;
 }
 let reconnectReport;
+let cleanupControl;
 try {
-  if (reconnect) {
+  if (cleanupControlMode) {
+    cleanupControl = await fixture({ action: "arm-cleanup-control" });
+  } else if (reconnect) {
     const host = create();
     const original = await open(host, "/set");
     assert.match((await open(host, "/read")).text, /Cookie: remembered/);
@@ -385,12 +394,30 @@ try {
   for (const host of hosts) await close(host);
   lines.close();
   server.stdin.end();
-  const timer = reconnect ? undefined : setTimeout(() => server.kill(), 5000);
+  const timer =
+    reconnect || cleanupControlMode
+      ? undefined
+      : setTimeout(() => server.kill(), 5000);
   await new Promise((resolve) => {
     server.once("close", resolve);
     if (server.exitCode !== null) resolve();
   });
   clearTimeout(timer);
+  if (cleanupControlMode) {
+    console.log(
+      JSON.stringify({
+        cleanupControl,
+        fixtureExit: server.exitCode,
+        fixtureErrors: serverErrors,
+      }),
+    );
+    assert.equal(
+      server.exitCode,
+      1,
+      "live recorded root must block missing-lease deletion",
+    );
+    assert.match(serverErrors, /PROFILE_CLEANUP_BLOCKED/);
+  }
   if (reconnect)
     assert.equal(
       server.exitCode,
@@ -403,3 +430,21 @@ if (reconnectReport)
   console.log(
     JSON.stringify({ ...reconnectReport, fixtureStorageRemoved: true }),
   );
+
+if (cleanupControlMode) {
+  const verified = await run(launch.executable, [
+    "--input-type=module",
+    "-e",
+    `import{readFile,rm}from'node:fs/promises';import{join}from'node:path';const text=await readFile(join(process.argv[1],'canary.txt'),'utf8');if(text!=='owned cleanup canary')throw new Error('CANARY_CHANGED');try{process.kill(Number(process.argv[3]),0);throw new Error('CONTROL_CHILD_ALIVE')}catch(error){if(error.code!=='ESRCH')throw error}await rm(process.argv[2],{recursive:true,force:true});console.log(JSON.stringify({retainedCanary:true,childExitedAfterRefusal:true,storageRemovedAfterChildExit:true}))`,
+    cleanupControl.profile,
+    cleanupControl.directory,
+    String(cleanupControl.processId),
+  ]);
+  console.log(
+    JSON.stringify({
+      ok: true,
+      mode: "missing-lease-cleanup-control",
+      ...JSON.parse(verified.stdout),
+    }),
+  );
+}

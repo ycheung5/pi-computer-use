@@ -72,7 +72,7 @@ test("browser tools validate options before touching a document", async () => {
   }
 });
 
-test("profile reconnect plan needs no backend, dependency tree or fixture files", () => {
+test("profile fixture plans need no backend, dependency tree or fixture files", () => {
   const folder = mkdtempSync(join(tmpdir(), "pi-profile-reconnect-plan-"));
   try {
     const script = join(folder, "browser-profiles-host.mjs");
@@ -82,19 +82,24 @@ test("profile reconnect plan needs no backend, dependency tree or fixture files"
         fileURLToPath(new URL("./browser-profiles-host.mjs", import.meta.url)),
       ),
     );
-    const result = spawnSync(
-      process.execPath,
-      [script, "edge", "--reconnect", "--plan"],
-      { encoding: "utf8" },
-    );
-    assert.equal(result.status, 0, result.stderr);
-    const plan = JSON.parse(result.stdout);
-    assert.equal(plan.executed, false);
-    assert.equal(plan.mode, "same-worker-reconnect");
-    assert.equal(plan.app, "edge");
-    assert.equal(plan.physicalInput, false);
-    assert.equal(plan.dailyProfile, false);
-    assert.deepEqual(readdirSync(folder), ["browser-profiles-host.mjs"]);
+    for (const [flag, mode] of [
+      ["--reconnect", "same-worker-reconnect"],
+      ["--cleanup-control", "missing-lease-cleanup-control"],
+    ] as const) {
+      const result = spawnSync(
+        process.execPath,
+        [script, "edge", flag, "--plan"],
+        { encoding: "utf8" },
+      );
+      assert.equal(result.status, 0, result.stderr);
+      const plan = JSON.parse(result.stdout);
+      assert.equal(plan.executed, false);
+      assert.equal(plan.mode, mode);
+      assert.equal(plan.app, "edge");
+      assert.equal(plan.physicalInput, false);
+      assert.equal(plan.dailyProfile, false);
+      assert.deepEqual(readdirSync(folder), ["browser-profiles-host.mjs"]);
+    }
   } finally {
     rmSync(folder, { recursive: true, force: true });
   }

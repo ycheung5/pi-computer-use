@@ -1,7 +1,15 @@
 // Dedicated cookie origin and storage root; no daily profiles or real sign-ins.
 
-import { execFileSync } from "node:child_process";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,6 +53,17 @@ server.listen(0, "127.0.0.1", () =>
     }),
   ),
 );
+const observedRoots = new Map();
+let cleanupControlChild;
+let cleanupControlClosed;
+function rememberRoot(row, profile) {
+  observedRoots.set(`${row.pid}:${row.creationDate}`, {
+    processId: row.pid,
+    creationDate: row.creationDate,
+    executable: row.executable,
+    profile,
+  });
+}
 // Fixture-only lifecycle control: no global desktop discovery or personal profile.
 function processAt(pid) {
   assertPid(pid);
@@ -105,12 +124,48 @@ async function inspect(workerPid) {
     !argument.test(row.commandLine)
   )
     throw new Error("owned profile/browser association unavailable");
+  rememberRoot(row, path);
   return {
     ok: true,
     processId: row.pid,
     creationDate: row.creationDate,
     executable: row.executable,
     profile: { kept: true, path },
+  };
+}
+async function armCleanupControl() {
+  if (cleanupControlChild) throw new Error("cleanup control already armed");
+  const profile = join(root, "cleanup-control");
+  await mkdir(profile, { recursive: true });
+  await writeFile(join(profile, "canary.txt"), "owned cleanup canary");
+  cleanupControlChild = spawn(
+    process.execPath,
+    ["-e", "process.stdin.resume()", profile],
+    {
+      stdio: ["pipe", "ignore", "ignore"],
+      windowsHide: true,
+    },
+  );
+  cleanupControlClosed = once(cleanupControlChild, "close");
+  rememberRoot(
+    {
+      pid: cleanupControlChild.pid,
+      creationDate: null,
+      executable: process.execPath,
+    },
+    profile,
+  );
+  const row = processAt(cleanupControlChild.pid);
+  if (!row || row.executable.toLowerCase() !== process.execPath.toLowerCase())
+    throw new Error("owned cleanup control identity unavailable");
+  observedRoots.delete(`${row.pid}:null`);
+  rememberRoot(row, profile);
+  return {
+    ok: true,
+    directory,
+    profile,
+    processId: row.pid,
+    creationDate: row.creationDate,
   };
 }
 async function closeOwned(request) {
@@ -193,7 +248,9 @@ for await (const line of lines) {
   try {
     const request = JSON.parse(line);
     let response;
-    if (request.action === "inspect-profile")
+    if (request.action === "arm-cleanup-control")
+      response = await armCleanupControl();
+    else if (request.action === "inspect-profile")
       response = await inspect(request.workerPid);
     else if (request.action === "close-owned-browser")
       response = await closeOwned(request);
@@ -205,6 +262,24 @@ for await (const line of lines) {
 }
 server.close(async () => {
   try {
+    // A missing lease is not absence: retain every root already observed by this fixture.
+    for (const observed of observedRoots.values()) {
+      const current = processAt(observed.processId);
+      if (current) {
+        const same =
+          current.creationDate === observed.creationDate &&
+          current.executable?.toLowerCase() ===
+            observed.executable?.toLowerCase();
+        throw new Error(
+          "PROFILE_CLEANUP_BLOCKED: " +
+            (same
+              ? "recorded root still live"
+              : "recorded PID reused or identity uncertain") +
+            "; retained " +
+            directory,
+        );
+      }
+    }
     // Refuse deletion if any recorded profile owner may still be alive/unknown.
     for (const name of await readdir(root).catch((error) => {
       if (error.code === "ENOENT") return [];
@@ -228,5 +303,11 @@ server.close(async () => {
   } catch (error) {
     console.error(String(error));
     process.exitCode = 1;
+  } finally {
+    if (cleanupControlChild) {
+      // This harmless test child is owned by its retained handle, never an old lease.
+      cleanupControlChild.stdin.end();
+      await cleanupControlClosed;
+    }
   }
 });
