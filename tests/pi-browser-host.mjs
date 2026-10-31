@@ -219,7 +219,15 @@ async function live(selected, options) {
                 ]
               : []),
           ],
-          { stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
+          {
+            stdio: ["pipe", "pipe", "pipe"],
+            windowsHide: true,
+            env: {
+              ...process.env,
+              PI_CU_PARTIAL_FIXTURE: scenario === "partial" ? "1" : "0",
+              WSLENV: `${process.env.WSLENV ?? ""}:PI_CU_PARTIAL_FIXTURE`,
+            },
+          },
         );
         server.stderr.resume();
         ownership.fixtureChildPid = server.pid;
@@ -251,6 +259,13 @@ async function live(selected, options) {
             `const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');const n=cp.execFileSync(p.join(process.env.WINDIR,'System32','WindowsPowerShell','v1.0','powershell.exe'),['-NoProfile','-EncodedCommand',${JSON.stringify(Buffer.from(ps, "utf16le").toString("base64"))}],{encoding:'utf8'}).trim();const s=JSON.parse(n);if(!Number.isInteger(s.count))throw Error('process evidence unavailable');console.log(JSON.stringify({browserVersion:s.version,profileEmpty:fs.readdirSync(${JSON.stringify(profile)}).length===0,processCount:s.count}))`,
           );
         };
+        if (scenario === "partial") {
+          await write("fixture-readiness.json", {
+            ready: source.partialFixture === true,
+          });
+          if (source.partialFixture !== true)
+            throw Error("PARTIAL_FIXTURE_NOT_READY: refusing model startup");
+        }
         const spec = {
           scenario,
           base: source.url,

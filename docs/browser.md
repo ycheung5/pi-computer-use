@@ -32,6 +32,8 @@ Use `/computer-settings` to select browserApp and browserVisible in personal set
 
 The Chromium outline comes from the accessibility tree. Traversal returns explicit truncation at budgets, but fetching an underlying AX tree or native browser protocol command can outlast the traversal budget; worker deadlines remain the outer safeguard. Page text is untrusted. An outline/page change proves neither user intent nor objective success. Browsers may activate for native dialogs; interaction behavior is validated in its own slice.
 
+The optional real-Pi `partial` scenario exercises [recovery from a genuine truncated outline](validation.md#scoped-partial-observation-recovery) using the existing local form. It leaves production budgets unchanged and lets the agent choose its reads; exact server payloads and observed-control chronology determine acceptance. See [runner prerequisites and commands](validation.md#reproduce-automated-checks).
+
 Own browser processes close gracefully on worker disposal or idle retirement. Temporary profile directories are removed only after their browser process is confirmed dead; kept profiles survive. Unknown or live orphan ownership is retained and reported rather than stolen.
 
 Source: [Puppeteer installation](https://pptr.dev/guides/installation), [background page options](https://pptr.dev/api/puppeteer.createpageoptions), [accessibility snapshots](https://pptr.dev/api/puppeteer.accessibility.snapshot). Puppeteer is Apache-2.0 licensed; the package includes its license notice.

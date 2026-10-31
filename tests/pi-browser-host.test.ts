@@ -30,7 +30,13 @@ test("real-browser plan works without a build, dependencies, credentials or chil
     );
     const plan = JSON.parse(result.stdout);
     assert.equal(plan.mode, "plan");
-    assert.deepEqual(plan.scenarios, ["form", "advanced", "stale", "mixed"]);
+    assert.deepEqual(plan.scenarios, [
+      "form",
+      "advanced",
+      "stale",
+      "mixed",
+      "partial",
+    ]);
     assert.deepEqual(plan.requested, {
       provider: "openai",
       model: "gpt-6.1-sol",
@@ -389,7 +395,7 @@ test("stale recovery requires a successful result for the newly observed field a
 });
 
 // These subprocess fixtures are Linux executables, never Windows workers or models.
-for (const mode of ["query-failure", "deadline"]) {
+for (const mode of ["query-failure", "deadline", "partial-not-ready"]) {
   test(`retained ${mode} keeps fixture ownership and fences later dispatch/cases`, {
     skip: process.platform !== "linux",
   }, async () => {
@@ -484,9 +490,11 @@ for (const mode of ["query-failure", "deadline"]) {
       await put(join(pkg, "dist/index.js"), "export {};");
       await put(
         join(pkg, "dist/bundle/cli.js"),
-        mode === "deadline"
-          ? "setInterval(()=>{},1000);"
-          : "console.log(JSON.stringify({type:'agent_settled',aborted:false}));",
+        mode === "partial-not-ready"
+          ? `import{writeFileSync}from'node:fs';writeFileSync(${JSON.stringify(join(folder, "model-started"))},"started");console.log(JSON.stringify({type:'agent_settled',aborted:false}));`
+          : mode === "deadline"
+            ? "setInterval(()=>{},1000);"
+            : "console.log(JSON.stringify({type:'agent_settled',aborted:false}));",
       );
       await put(
         join(folder, "tests/browser-actions-server.mjs"),
@@ -497,7 +505,11 @@ for (const mode of ["query-failure", "deadline"]) {
       );
       controller = spawn(
         process.execPath,
-        [join(folder, "tests/pi-browser-host.mjs"), "--scenario", "all"],
+        [
+          join(folder, "tests/pi-browser-host.mjs"),
+          "--scenario",
+          mode === "partial-not-ready" ? "partial" : "all",
+        ],
         {
           env: {
             ...process.env,
@@ -532,8 +544,29 @@ for (const mode of ["query-failure", "deadline"]) {
         retained.reason,
         mode === "deadline"
           ? "host-deadline-ownership-retained"
-          : "owned-process-or-profile-evidence-unavailable",
+          : mode === "partial-not-ready"
+            ? "collector-error-ownership-retained"
+            : "owned-process-or-profile-evidence-unavailable",
       );
+      if (mode === "partial-not-ready") {
+        assert.equal(
+          owner?.piPid,
+          undefined,
+          "unready partial fixture never launches Pi",
+        );
+        assert.deepEqual(
+          JSON.parse(
+            await readFile(
+              join(journal, "..", "fixture-readiness.json"),
+              "utf8",
+            ),
+          ),
+          { ready: false },
+        );
+        await assert.rejects(readFile(join(folder, "model-started")), {
+          code: "ENOENT",
+        });
+      }
       assert.equal(owner?.keeperPid, controller.pid);
       process.kill(controller.pid ?? 0, 0);
       assert.equal(
@@ -1117,5 +1150,405 @@ test("mixed SDK routing preserves owned images and rejects cross-channel or unce
     );
   } finally {
     await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test("partial recovery requires each observed field effect and genuine confirmation", async () => {
+  const base = "http://127.0.0.1:1234/",
+    tab = { id: "t123", url: base + "form" };
+  let serial = 0;
+  const pair = (action: string, input: object, details: object) => {
+    const toolCallId = String(++serial),
+      toolName = "windows_computer_use_" + action;
+    return [
+      { type: "guard_tool_call", toolCallId, toolName, input },
+      {
+        type: "guard_tool_result",
+        toolCallId,
+        toolName,
+        details: { ok: true, action, tab, ...details },
+      },
+    ];
+  };
+  const field = (id: string, name: string, role: string, extra = {}) => ({
+    id,
+    name,
+    role,
+    ...extra,
+  });
+  const controls = [
+    field("name", "Name", "textbox"),
+    field("notes", "Notes", "textbox"),
+    field("accepted", "Accept terms", "checkbox"),
+    field("choice", "Choice", "combobox"),
+    field("beta", "Beta", "option"),
+    field("submit", "Submit form", "button"),
+  ];
+  const restricted = [
+    field("disabled", "Disabled field", "textbox", {
+      value: "Disabled value",
+      disabled: true,
+    }),
+    field("readonly", "Read-only field", "textbox", {
+      value: "Read-only value",
+      readonly: true,
+    }),
+  ];
+  const facts = {
+    ...formReport(),
+    base,
+    oracle: {
+      ...formReport().oracle,
+      events: { submissions: 1, starts: 0, ready: 0 },
+    },
+  };
+  const initial = pair(
+    "set_value",
+    { elementId: "new-tab", value: tab.url },
+    {
+      source: "browser-accessibility",
+      nodeCount: 500,
+      truncated: true,
+      truncationReason: "budget",
+      nodes: Array.from({ length: 500 }, (_, i) => ({
+        role: "paragraph",
+        name: "Context row " + i,
+      })),
+    },
+  );
+  const read = (nodes = controls) =>
+    pair("find", { browserTab: tab.id, query: "Name" }, { nodes });
+  const effects = [
+    pair(
+      "set_value",
+      { elementId: "name", value: facts.oracle.payload.name },
+      {},
+    ),
+    pair(
+      "set_value",
+      { elementId: "notes", value: facts.oracle.payload.notes },
+      {},
+    ),
+    pair("invoke", { elementId: "accepted" }, {}),
+    pair("set_value", { elementId: "choice", value: "beta" }, {}),
+  ];
+  const submit = pair("click", { elementId: "submit" }, {});
+  const confirmationName =
+    "Form confirmation: " + JSON.stringify(facts.oracle.payload);
+  const confirmation = pair(
+    "find",
+    { browserTab: tab.id, query: "Form confirmation" },
+    { nodes: [...restricted, field("result", confirmationName, "status")] },
+  );
+  const complete = [
+    ...initial,
+    ...read(),
+    ...effects.flat(),
+    ...submit,
+    ...confirmation,
+  ];
+  const accepted = async (audit: unknown, patch = {}) =>
+    (await verify("partial", { ...facts, audit, ...patch })).pass;
+  assert.equal(await accepted(complete), true);
+  // Literal same-ID representations from the real cc70ece read-only gate.
+  const actualSubmit = {
+    id: "t96e620fc2bd3e621:226",
+    name: "Submit form",
+    role: "button",
+  };
+  const actualSubmitText = {
+    id: "t96e620fc2bd3e621:226",
+    name: "Submit form",
+    role: "StaticText",
+  };
+  assert.equal(
+    await accepted([
+      ...initial,
+      ...read([...controls.slice(0, 5), actualSubmit, actualSubmitText]),
+      ...effects.flat(),
+      ...pair("click", { elementId: actualSubmit.id }, {}),
+      ...confirmation,
+    ]),
+    true,
+    "literal real button survives its StaticText representation",
+  );
+  for (const contradiction of [
+    { ...controls[0]!, name: "Notes" },
+    { ...controls[0]!, role: "checkbox" },
+  ])
+    assert.equal(
+      await accepted([
+        ...initial,
+        ...read([...controls, contradiction]),
+        ...effects.flat(),
+        ...submit,
+        ...confirmation,
+      ]),
+      false,
+      "contradictory actionable identity cannot be guessed",
+    );
+
+  assert.equal(
+    await accepted([
+      ...initial,
+      ...read([controls[0]!, controls[5]!]),
+      ...effects[0]!,
+      ...submit,
+      ...confirmation,
+    ]),
+    false,
+    "reviewer Name-only causal false pass",
+  );
+  for (let missing = 0; missing < 4; missing++) {
+    assert.equal(
+      await accepted([
+        ...initial,
+        ...read(),
+        ...effects.filter((_, i) => i !== missing).flat(),
+        ...submit,
+        ...confirmation,
+      ]),
+      false,
+      "missing field effect " + missing,
+    );
+    assert.equal(
+      await accepted([
+        ...initial,
+        ...read(controls.filter((_, i) => i !== missing)),
+        ...effects.flat(),
+        ...submit,
+        ...confirmation,
+      ]),
+      false,
+      "missing field observation " + missing,
+    );
+  }
+  for (let wrongRole = 0; wrongRole < 4; wrongRole++)
+    assert.equal(
+      await accepted([
+        ...initial,
+        ...read(
+          controls.map((node, i) =>
+            i === wrongRole ? { ...node, role: "text" } : node,
+          ),
+        ),
+        ...effects.flat(),
+        ...submit,
+        ...confirmation,
+      ]),
+      false,
+      "wrong field role " + wrongRole,
+    );
+  const progressive = [...initial];
+  for (let i = 0; i < 4; i++)
+    progressive.push(...read([controls[i]!]), ...effects[i]!);
+  progressive.push(...read([controls[5]!]), ...submit, ...confirmation);
+  assert.equal(await accepted(progressive), true);
+  const expanded = pair(
+    "accessibility_tree",
+    { browserTab: tab.id, maxNodes: 1200 },
+    { nodes: controls },
+  );
+  assert.equal(
+    await accepted([
+      ...initial,
+      ...expanded,
+      ...effects.flat(),
+      ...submit,
+      ...confirmation,
+    ]),
+    true,
+  );
+  const alternatives = [
+    ...effects[0]!,
+    ...pair("focus", { elementId: "notes" }, {}),
+    ...pair(
+      "type_text",
+      { browserTab: tab.id, text: facts.oracle.payload.notes },
+      {},
+    ),
+    ...pair("set_value", { elementId: "accepted", value: "true" }, {}),
+    ...pair("click", { elementId: "beta" }, {}),
+  ];
+  assert.equal(
+    await accepted([
+      ...initial,
+      ...read(),
+      ...alternatives,
+      ...submit,
+      ...confirmation,
+    ]),
+    true,
+  );
+  const keyboardChoice = [
+    ...initial,
+    ...read(),
+    ...effects.slice(0, 3).flat(),
+    ...pair("focus", { elementId: "choice" }, {}),
+    ...pair("keypress", { browserTab: tab.id, keys: ["enter"] }, {}),
+    ...submit,
+    ...confirmation,
+  ];
+  const unsupported = await verify("partial", {
+    ...facts,
+    audit: keyboardChoice,
+  });
+  assert.equal(unsupported.pass, false);
+  assert.ok(
+    unsupported.verifierLimitations.includes(
+      "keyboard field selection not covered by this verifier",
+    ),
+  );
+  const waited = pair(
+    "wait_for",
+    {
+      browserTab: tab.id,
+      condition: "element",
+      controlType: "status",
+      query: confirmationName,
+    },
+    {
+      condition: "element",
+      query: confirmationName,
+      verification: "observed",
+    },
+  );
+  const waitAudit = [
+    ...initial,
+    ...read(),
+    ...effects.flat(),
+    ...submit,
+    ...read(restricted),
+    ...waited,
+  ];
+  assert.equal(await accepted(waitAudit), true);
+  const replaceDetails = (rows: typeof initial, patch: object) =>
+    rows.map((row) =>
+      "details" in row
+        ? { ...row, details: { ...row.details, ...patch } }
+        : row,
+    );
+  for (const patch of [
+    { conclusive: false },
+    { found: false },
+    { timedOut: true },
+    { condition: "text" },
+  ])
+    assert.equal(
+      await accepted([
+        ...initial,
+        ...read(),
+        ...effects.flat(),
+        ...submit,
+        ...read(restricted),
+        ...replaceDetails(waited, patch),
+      ]),
+      false,
+    );
+  for (const bad of [
+    [...read(), ...effects.flat(), ...submit, ...confirmation],
+    [
+      ...replaceDetails(initial, { nodeCount: 499 }),
+      ...read(),
+      ...effects.flat(),
+      ...submit,
+      ...confirmation,
+    ],
+    [
+      ...initial,
+      ...pair(
+        "find",
+        {
+          browserTab: tab.id,
+          query: "Name Notes Accept terms Choice Submit form",
+        },
+        { nodes: [] },
+      ),
+      ...effects.flat(),
+      ...submit,
+      ...confirmation,
+    ],
+    [
+      ...initial,
+      ...replaceDetails(read(), { tab: { id: "t999", url: tab.url } }),
+      ...effects.flat(),
+      ...submit,
+      ...confirmation,
+    ],
+    [...initial, ...effects.flat(), ...read(), ...submit, ...confirmation],
+    [
+      ...initial,
+      ...read(),
+      ...effects.flat(),
+      ...submit,
+      ...replaceDetails(confirmation, {
+        nodes: restricted,
+        query: confirmationName,
+      }),
+    ],
+    [
+      ...initial,
+      ...read(),
+      ...effects.flat(),
+      ...submit,
+      ...replaceDetails(confirmation, {
+        nodes: [
+          ...restricted,
+          field("echo", confirmationName, "textbox", { value: "echo" }),
+        ],
+      }),
+    ],
+  ])
+    assert.equal(await accepted(bad), false);
+  for (const patch of [
+    {
+      oracle: {
+        ...facts.oracle,
+        events: { submissions: 2, starts: 0, ready: 0 },
+      },
+    },
+    { effective: [{ ...effective[0], thinkingLevel: "high" }] },
+    { cleanup: { ...facts.cleanup, processCount: 1 } },
+  ])
+    assert.equal(await accepted(complete, patch), false);
+});
+
+test("partial fixture readiness reports its optional mode before model startup", async () => {
+  const { createInterface } = await import("node:readline");
+  for (const partial of ["1", "0"]) {
+    const child = spawn(
+      process.execPath,
+      ["tests/browser-actions-server.mjs", "edge", "false"],
+      {
+        env: {
+          ...process.env,
+          PI_CU_PARTIAL_FIXTURE: partial,
+          PI_CU_MIXED_FIXTURE: "",
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+    const closed = once(child, "close"),
+      lines = createInterface({ input: child.stdout });
+    child.stderr.resume();
+    try {
+      const [line] = await once(lines, "line");
+      const source = JSON.parse(line);
+      assert.equal(source.partialFixture, partial === "1" ? true : undefined);
+      const html = await (await fetch(source.url + "form")).text();
+      assert.equal(
+        (html.match(/Context row /g) ?? []).length,
+        partial === "1" ? 200 : 0,
+      );
+      assert.deepEqual(JSON.parse(await readFile(source.settings, "utf8")), {
+        browserApp: "edge",
+        browserVisible: false,
+        browserSignIn: false,
+      });
+    } finally {
+      lines.close();
+      child.stdin.end();
+      assert.equal((await closed)[0], 0);
+    }
   }
 });
