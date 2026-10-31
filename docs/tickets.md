@@ -2,9 +2,11 @@
 
 ## Current investigation and acceptance work
 
-Current delivery view, reconciled against GitHub on 2026-10-31. Requirements remain in [spec](spec.md); results and retained failures live in [validation](validation.md). Product parent [#1](https://github.com/ycheung5/pi-computer-use/issues/1), repair parent [#23](https://github.com/ycheung5/pi-computer-use/issues/23), and release gate [#21](https://github.com/ycheung5/pi-computer-use/issues/21) remain open.
+Current delivery view, reconciled against GitHub on 2026-11-01. Requirements remain in [spec](spec.md); results and retained failures live in [validation](validation.md). Product parent [#1](https://github.com/ycheung5/pi-computer-use/issues/1), repair parent [#23](https://github.com/ycheung5/pi-computer-use/issues/23), and release gate [#21](https://github.com/ycheung5/pi-computer-use/issues/21) remain open.
 
 The goal is one standalone Pi package that completes Windows tasks from native Windows and WSL2, follows pinned DSH behavior, preserves user work and supports recovery. A completed comparison establishes its stated evidence scope; it does not certify the product or close an original requirement.
+
+The user authorized merging PR #38 as a development baseline on 2026-11-01. Merging implementation does not satisfy unfinished acceptance criteria: all 16 remaining issues stay open, and no package release is declared. Completed and superseded issue dispositions below are unchanged. The final integration tip is preserved as the `integration/reference-alignment` archive tag so historical source links remain usable after branch cleanup.
 
 ### Delivery outcomes and ownership
 
@@ -67,7 +69,7 @@ The user chose scoped disposable tests in the current Windows session and grante
 | Process/job/supervisor diagnostic fixtures | Keep for unresolved #27/#31 diagnosis | Different probes establish different cleanup limits. Add work only for a question that can change the next decision; preserve blocked-host guards. |
 | Paired runners and portable report/retention tests | Keep | Live effects and offline reporting exercise different boundaries; similar names or size do not prove duplication. |
 | `src/browser.ts` and native helper organization | Keep pending concrete simplification evidence | File size does not identify removable behavior. Broad rewriting would obscure alignment/regressions. |
-| Unmerged `implement/scroll-reference-28` | Superseded; do not merge step-only patch | Current quiet-scroll repair reuses its wheel-setting semantics with the existing stop/cleanup lease; page count remains reference-compatible. |
+| Unmerged `implement/scroll-reference-28` | Superseded; archive tip as `archive/scroll-reference-28`, then remove branch/worktree; do not merge step-only patch | Current quiet-scroll repair reuses its wheel-setting semantics with the existing stop/cleanup lease; page count remains reference-compatible. |
 
 ## Original issue disposition
 

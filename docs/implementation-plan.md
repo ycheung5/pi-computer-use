@@ -1,6 +1,6 @@
 # Pi computer-use implementation plan
 
-Status: implementation and acceptance work on `integration/reference-alignment`. See [current draft PR #38](https://github.com/ycheung5/pi-computer-use/pull/38) for the active integration and [current delivery outcomes](tickets.md#delivery-outcomes-and-ownership) for remaining work; release acceptance is incomplete.
+Status: the user authorized merging [implementation PR #38](https://github.com/ycheung5/pi-computer-use/pull/38) into `main` as the development baseline on 2026-11-01. This does not declare a release or complete outstanding acceptance. Continue from [current delivery outcomes](tickets.md#delivery-outcomes-and-ownership); remaining requirements retain their open issues.
 
 Requirements and behavioral contracts are authoritative in the [specification](spec.md). Use the [documentation index](README.md) to load only relevant context.
 
