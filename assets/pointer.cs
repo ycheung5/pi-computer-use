@@ -98,7 +98,7 @@ partial class WindowsBridge {
     if(element==null) {
       for(int level=0;level<64;level++) {client=screen;if(!ScreenToClient(recipient,ref client))return false;IntPtr child=ChildWindowFromPointEx(recipient,client,3);if(child==IntPtr.Zero || child==recipient)break;recipient=child;}
     }
-    if(WindowOwner(recipient)!=WindowOwner(window) || !PointerRootAllowed(GetAncestor(recipient,2),window,WindowOwner(window)))throw new InvalidOperationException("ELEMENT_WRONG_OWNER");
+    if(WindowOwner(recipient)!=WindowOwner(window) || !PointerRootAllowed(GetAncestor(recipient,2),window,WindowOwner(window)))throw new InvalidOperationException("ELEMENT_WRONG_OWNER: pointer recipient belongs to a different target; observe the target window and element again; do not automatically replay the action");
     client=screen;if(!ScreenToClient(recipient,ref client) || client.X<0 || client.Y<0 || client.X>32767 || client.Y>32767)return false;
     string button=TextOption(args,"button","left");uint down=button=="right"?0x204U:button=="middle"?0x207U:0x201U;
     uint key=button=="right"?2U:button=="middle"?16U:1U;
