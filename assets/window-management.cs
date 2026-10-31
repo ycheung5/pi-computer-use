@@ -13,7 +13,7 @@ partial class WindowsBridge {
   [DllImport("user32.dll",EntryPoint="AttachThreadInput")] static extern bool ManagementAttach(uint from,uint to,bool attach);
   [DllImport("kernel32.dll",EntryPoint="GetCurrentThreadId")] static extern uint ManagementThread();
   static uint ManagementOwner(IntPtr window) {uint owner;GetWindowThreadProcessId(window,out owner);return owner;}
-  static void ManagementAssert(IntPtr window,uint owner) {if(!IsWindow(window)||ManagementOwner(window)!=owner)throw new InvalidOperationException("WINDOW_IDENTITY_CHANGED: refresh window observations before acting");}
+  static void ManagementAssert(IntPtr window,uint owner) {CheckWindowReference(window);if(!IsWindow(window)||ManagementOwner(window)!=owner)throw new InvalidOperationException("WINDOW_IDENTITY_CHANGED: refresh window observations before acting");}
   static bool? ManagementResponsive(IntPtr window) {UIntPtr ignored;bool answered=SendMessageTimeout(window,0,UIntPtr.Zero,IntPtr.Zero,3,100,out ignored)!=IntPtr.Zero;int error=Marshal.GetLastWin32Error();return !answered&&error==5?(bool?)null:answered;}
   static Dictionary<string,object> ManagementWindow(IntPtr window,uint owner) {
     Rect bounds;if(!GetWindowRect(window,out bounds))throw new InvalidOperationException("WINDOW_BOUNDS_UNAVAILABLE");
@@ -55,9 +55,9 @@ partial class WindowsBridge {
   static bool ManagementActivate(IntPtr window,uint owner) {return ManagementActivate(window,owner,null);}
   static bool ManagementActivate(IntPtr window,uint owner,Dictionary<string,object> diagnostics) {
     ManagementAssert(window,owner);ManagementEnsureUnlockedSession();
-    if(IsIconic(window))ManagementShow(window,9);
+    if(IsIconic(window)){BeginWindowDispatch();ManagementShow(window,9);}
     if(GetForegroundWindow()==window)return true;
-    bool initial=SetForegroundWindow(window);
+    BeginWindowDispatch();bool initial=SetForegroundWindow(window);
     if(diagnostics!=null)diagnostics["initialRequestAccepted"]=initial;
     if(GetForegroundWindow()==window)return true;
     IntPtr front=GetForegroundWindow();uint ignored;uint frontThread=GetWindowThreadProcessId(front,out ignored),own=ManagementThread();bool attached=false;
@@ -66,7 +66,7 @@ partial class WindowsBridge {
       bool attempted=frontThread!=0&&frontThread!=own;
       if(attempted)attached=ManagementAttach(own,frontThread,true);
       if(diagnostics!=null){diagnostics["inputThreadAttachAttempted"]=attempted;if(attempted)diagnostics["inputThreadAttached"]=attached;}
-      ManagementAssert(window,owner);bool raised=ManagementBringToTop(window);ManagementAssert(window,owner);bool requested=SetForegroundWindow(window);
+      ManagementAssert(window,owner);BeginWindowDispatch();bool raised=ManagementBringToTop(window);ManagementAssert(window,owner);BeginWindowDispatch();bool requested=SetForegroundWindow(window);
       if(diagnostics!=null){diagnostics["raiseAccepted"]=raised;diagnostics["fallbackRequestAccepted"]=requested;}
     }
     finally {if(attached)ManagementAttach(own,frontThread,false);}
@@ -83,11 +83,11 @@ partial class WindowsBridge {
     bool? responsive=ManagementResponsive(window);result["targetResponsive"]=responsive;
     ManagementAssert(window,owner);
     if(action=="close_window") {
-      bool posted=ManagementPost(window,0x0010,IntPtr.Zero,IntPtr.Zero);result["posted"]=posted;result["verification"]=posted?"sent":"unconfirmed";result["note"]=posted?"WM_CLOSE was dispatched; the application may veto closure or show a save dialog. Observe windows to verify.":"Windows refused posting WM_CLOSE; no closure was confirmed.";if(!posted)result["nativeError"]=Marshal.GetLastWin32Error();return result;
+      BeginWindowDispatch();bool posted=ManagementPost(window,0x0010,IntPtr.Zero,IntPtr.Zero);result["posted"]=posted;result["verification"]=posted?"sent":"unconfirmed";result["note"]=posted?"WM_CLOSE was dispatched; the application may veto closure or show a save dialog. Observe windows to verify.":"Windows refused posting WM_CLOSE; no closure was confirmed.";if(!posted)result["nativeError"]=Marshal.GetLastWin32Error();return result;
     }
     if(action=="move_window") {
       int x=Convert.ToInt32(args["x"]),y=Convert.ToInt32(args["y"]);
-      bool moved=ManagementMove(window,IntPtr.Zero,x,y,0,0,0x0001|0x0004|0x0010|0x4000);
+      BeginWindowDispatch();bool moved=ManagementMove(window,IntPtr.Zero,x,y,0,0,0x0001|0x0004|0x0010|0x4000);
       result["moved"]=moved;result["x"]=x;result["y"]=y;result["verification"]=moved?"sent":"unconfirmed";
       if(!moved)result["warning"]="SetWindowPos refused the move; the window may be unavailable or maximized.";
       if(!args.ContainsKey("activate")||!Convert.ToBoolean(args["activate"]))return result;

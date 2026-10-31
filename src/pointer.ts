@@ -3,6 +3,7 @@ import type { WorkerResult } from "./protocol.js";
 
 const integer = { type: "integer" };
 const target = {
+  windowRef: { type: "string", minLength: 1 },
   windowTitle: { type: "string" },
   processId: { ...integer, minimum: 1 },
   nativeWindowHandle: { ...integer, minimum: 1 },
@@ -76,6 +77,7 @@ export function validatePointer(
     error: `INVALID_ARGUMENTS: ${message}`,
   });
   const keys = new Set([
+    "windowRef",
     "windowTitle",
     "processId",
     "nativeWindowHandle",
@@ -92,6 +94,11 @@ export function validatePointer(
         ]),
     ...(action === "scroll" ? ["deltaX", "deltaY", "browserTab"] : []),
   ]);
+  if (
+    args.windowRef !== undefined &&
+    (typeof args.windowRef !== "string" || !args.windowRef.trim())
+  )
+    return bad("windowRef must be nonempty");
   for (const key of Object.keys(args))
     if (!keys.has(key)) return bad(`unknown option ${key}`);
   for (const key of ["processId", "nativeWindowHandle"])

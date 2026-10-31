@@ -13,6 +13,7 @@ type Rule = {
   default?: unknown;
 };
 const target: Record<string, Rule> = {
+  windowRef: { type: "string", minLength: 1 },
   windowTitle: { type: "string" },
   processId: { type: "integer", minimum: 1 },
   nativeWindowHandle: { type: "integer", minimum: 1 },
@@ -126,7 +127,7 @@ export async function manageWindow(
     }
     if (
       typeof value === "string" &&
-      ["target", "windowTitle"].includes(key) &&
+      ["target", "windowTitle", "windowRef"].includes(key) &&
       !value.trim()
     )
       return invalid(`${key} cannot be empty`);
@@ -134,6 +135,7 @@ export async function manageWindow(
   }
   if (
     action !== "launch_app" &&
+    args.windowRef === undefined &&
     args.windowTitle === undefined &&
     args.processId === undefined &&
     args.nativeWindowHandle === undefined
@@ -166,7 +168,7 @@ export async function manageWindow(
       action === "launch_app"
         ? await nativeDesktop.execute(
             "list_windows",
-            { maxWindows: 1000, includeInvisible: false },
+            { maxWindows: 1000, includeInvisible: false, _metadataOnly: true },
             signal,
           )
         : undefined;
@@ -179,7 +181,7 @@ export async function manageWindow(
         await delay(Number(args.waitMs), undefined, { signal });
       const after = await nativeDesktop.execute(
         "list_windows",
-        { maxWindows: 1000, includeInvisible: false },
+        { maxWindows: 1000, includeInvisible: false, _metadataOnly: true },
         signal,
       );
       const prior = new Set(

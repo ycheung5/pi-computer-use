@@ -250,3 +250,46 @@ test("Pi gives actionable guidance on activation refusal without replaying", asy
     for (const handler of shutdown) await handler();
   }
 });
+
+test("Pi native targeting exposes one opaque lifetime reference consistently", async () => {
+  const tools: ToolDefinition[] = [];
+  const host = {
+    registerTool: (tool: ToolDefinition) => tools.push(tool),
+    on: () => () => {},
+  } as Pick<ExtensionAPI, "registerTool" | "on">;
+  registerComputerUse(host);
+  for (const action of [
+    "snapshot",
+    "accessibility_tree",
+    "find",
+    "element_info",
+    "focus",
+    "invoke",
+    "set_value",
+    "scroll",
+    "click",
+    "double_click",
+    "move",
+    "drag",
+    "type_text",
+    "keypress",
+    "screenshot",
+    "ocr",
+    "wait_for",
+    "activate_window",
+    "move_window",
+    "close_window",
+  ]) {
+    const tool = tools.find(
+      (item) => item.name === `windows_computer_use_${action}`,
+    );
+    assert.ok(tool, action);
+    const schema = tool.parameters as { properties: Record<string, unknown> };
+    assert.deepEqual(
+      schema.properties.windowRef,
+      { type: "string", minLength: 1 },
+      action,
+    );
+    assert.equal("_windowMarker" in schema.properties, false, action);
+  }
+});

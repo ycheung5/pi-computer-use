@@ -14,6 +14,7 @@ export const screenshotParameters = {
       default: "active_window",
     },
     browserTab: { type: "string", minLength: 1 },
+    windowRef: { type: "string", minLength: 1 },
     windowTitle: { type: "string", minLength: 1 },
     processId: { type: "integer", minimum: 1 },
     nativeWindowHandle: { type: "integer", minimum: 1 },
@@ -56,7 +57,7 @@ function createWgc(): WorkerClient {
           "WGC_UNAVAILABLE: Windows graphics metadata is missing",
         );
       return compileNative(
-        ["wgc.cs"],
+        ["wgc.cs", "window-marker.cs"],
         [
           "System.Drawing.dll",
           join(framework, "System.Runtime.dll"),
@@ -79,6 +80,7 @@ export async function screenshot(
   const maxWidth = args.maxWidth ?? 1600;
   const scope = args.scope ?? "active_window";
   const allowed = new Set([
+    "windowRef",
     "maxWidth",
     "scope",
     "windowTitle",
@@ -87,6 +89,10 @@ export async function screenshot(
     "activate",
   ]);
   const invalid =
+    (args.windowRef !== undefined &&
+      (typeof args.windowRef !== "string" ||
+        !args.windowRef.trim() ||
+        scope === "desktop")) ||
     Object.keys(args).some((key) => !allowed.has(key)) ||
     !Number.isSafeInteger(maxWidth) ||
     typeof maxWidth !== "number" ||
@@ -132,7 +138,21 @@ export async function screenshot(
           { ...target, maxWidth },
           signal,
         );
-        if (composited.ok) return composited;
+        if (composited.ok) {
+          if (result.windowRefUnavailable !== undefined) {
+            composited.windowRefUnavailable = result.windowRefUnavailable;
+            if (
+              composited.screenshot &&
+              typeof composited.screenshot === "object"
+            )
+              (
+                composited.screenshot as Record<string, unknown>
+              ).windowRefUnavailable = result.windowRefUnavailable;
+          }
+          return composited;
+        }
+        if (/WINDOW_REFERENCE/.test(String(composited.error)))
+          return composited;
         failure = String(composited.error);
       } catch (error) {
         if (signal?.aborted) throw error;
