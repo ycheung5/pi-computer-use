@@ -129,7 +129,8 @@ const call = async (extra = {}) => {
 };
 const command = async (value) => {
   fixture.stdin.write(`${value}\n`);
-  await once(fixture.stdout, "data");
+  const [reply] = await once(fixture.stdout, "data");
+  return reply.toString().trim();
 };
 try {
   const normal = await call();
@@ -236,8 +237,22 @@ try {
   const [blackReady] = await once(fixture.stdout, "data");
   handle = Number(blackReady.toString().trim());
   await command("cover");
+  const beforeWgc = JSON.parse(await command("oracle"));
+  assert.equal(beforeWgc.frameHresult, 0);
+  assert.equal(beforeWgc.nativeWindowHandle, handle);
+  assert.equal(beforeWgc.processId, fixture.pid);
+  assert.equal(beforeWgc.minimized, false);
   const composited = await call();
   assert.equal(composited.method, "wgc", JSON.stringify(composited));
+  assert.deepEqual(composited.bounds, beforeWgc.frame);
+  assert.deepEqual(composited.origin, {
+    x: beforeWgc.frame.x,
+    y: beforeWgc.frame.y,
+  });
+  const afterWgc = JSON.parse(await command("oracle"));
+  assert.deepEqual(afterWgc.frame, beforeWgc.frame);
+  assert.equal(afterWgc.lastInputTick, beforeWgc.lastInputTick);
+  assert.equal(afterWgc.foregroundHandle, beforeWgc.foregroundHandle);
   if (lifetimeOnly) {
     const boundWgc = await call({ windowRef: composited.windowRef });
     assert.equal(boundWgc.windowRef, composited.windowRef);

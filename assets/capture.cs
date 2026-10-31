@@ -117,6 +117,7 @@ partial class WindowsBridge {
     Rectangle bounds = desktop;
     Bitmap image = null;
     string method = "screen";
+    string pixelFailure = null;
     bool occluded = false, failed = false;
     List<string> warnings = new List<string>();
     IntPtr target = IntPtr.Zero;
@@ -144,22 +145,38 @@ partial class WindowsBridge {
           warnings.Add("PRINTWINDOW_FAILED_OR_BLANK");
           Rectangle visible = Rectangle.Intersect(bounds, desktop);
           if (visible.Width > 0 && visible.Height > 0) {
-            bounds = visible; image = CopyCaptureRegion(bounds); method = "screen-region"; occluded = true;
+            Rectangle windowBounds = bounds;
+            bounds = visible; method = "screen-region"; occluded = true;
+            try { image = CopyCaptureRegion(bounds); }
+            catch (System.ComponentModel.Win32Exception error) {
+              // Only this failed pixel stage may hand off without a native image.
+              if (!IsWindowVisible(target) || IsIconic(target) || WindowCaptureBounds(target) != windowBounds) throw new InvalidOperationException("WINDOW_MOVED_DURING_CAPTURE: observe the target again");
+              pixelFailure = "SCREEN_REGION_CAPTURE_FAILED: " + error.Message;
+            }
           }
         }
       }
-      if (image == null) {
+      if (image == null && pixelFailure == null) {
         failed = true; bounds = desktop; method = "screen";
         warnings.Add("WINDOW_CAPTURE_FAILED: returning desktop pixels instead of the unavailable target surface");
       }
     }
-      if (image == null) image = CopyCaptureRegion(bounds);
+      if (image == null && pixelFailure == null) image = CopyCaptureRegion(bounds);
       if (target != IntPtr.Zero) {
         CheckWindowReference(target);
         uint ownerAfter;
         GetWindowThreadProcessId(target, out ownerAfter);
         if (!IsWindow(target) || owner != ownerAfter) throw new InvalidOperationException("WINDOW_IDENTITY_CHANGED_DURING_CAPTURE");
         if (!failed && WindowCaptureBounds(target) != bounds && !occluded) throw new InvalidOperationException("WINDOW_MOVED_DURING_CAPTURE: observe the target again");
+      }
+      if (pixelFailure != null) {
+        Dictionary<string, object> unavailable = Result(false, "screenshot");
+        unavailable["error"] = "SCREEN_REGION_CAPTURE_FAILED";
+        unavailable["nativeCaptureError"] = pixelFailure;
+        unavailable["captureWarnings"] = warnings;
+        foreach(var pair in referenceMetadata)unavailable[pair.Key]=pair.Value;
+        unavailable["wgcTarget"] = new Dictionary<string, object> { { "nativeWindowHandle", target.ToInt64() }, { "processId", owner }, { "_windowMarker", WindowReferenceDescriptor(target) } };
+        return unavailable;
       }
       if (maximum > 0 && image.Width > maximum) {
         int height = Math.Max(1, (int)Math.Round((double)image.Height * maximum / image.Width));
