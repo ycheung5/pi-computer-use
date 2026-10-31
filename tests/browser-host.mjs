@@ -152,6 +152,128 @@ try {
       `${query} exposes ${property}`,
     );
   }
+  const ariaReadonlyMatches = await client.execute("find", {
+    browserTab: tab,
+    query: "ARIA read-only editor",
+  });
+  const ariaReadonly = ariaReadonlyMatches.results.find(
+    (entry) => entry.role === "textbox",
+  );
+  assert.ok(ariaReadonly?.id, JSON.stringify(ariaReadonlyMatches));
+  assert.equal(
+    (await client.execute("focus", { elementId: ariaReadonly.id })).ok,
+    true,
+  );
+  for (const keys of [
+    ["x"],
+    ["backspace"],
+    ["delete"],
+    ["ctrl", "v"],
+    ["ctrl", "x"],
+    ["ctrl", "z"],
+    ["ctrl", "y"],
+    ["ctrl", "alt", "x"],
+    ["shift", "insert"],
+  ]) {
+    const rejectedKey = await client.execute("keypress", {
+      browserTab: tab,
+      keys,
+    });
+    assert.equal(rejectedKey.ok, false, JSON.stringify({ keys, rejectedKey }));
+    assert.match(rejectedKey.error, /BROWSER_NOT_EDITABLE/);
+  }
+  assert.equal(
+    (await client.execute("keypress", { browserTab: tab, keys: ["left"] })).ok,
+    true,
+  );
+  assert.equal(
+    (await client.execute("keypress", { browserTab: tab, keys: ["ctrl", "a"] }))
+      .ok,
+    true,
+  );
+  assert.equal(
+    (await client.execute("keypress", { browserTab: tab, keys: ["enter"] })).ok,
+    true,
+    "Enter remains available for form submission in a single-line input",
+  );
+  const rejectedInput = await client.execute("type_text", {
+    browserTab: tab,
+    text: " must not be inserted",
+  });
+  assert.equal(rejectedInput.ok, false, JSON.stringify(rejectedInput));
+  assert.match(rejectedInput.error, /BROWSER_NO_FOCUSED_FIELD/);
+  const ariaReadonlyAfter = await client.execute("element_info", {
+    elementId: ariaReadonly.id,
+  });
+  assert.equal(ariaReadonlyAfter.element.value, "aria-read-only text");
+  const ariaReadonlyNotesMatches = await client.execute("find", {
+    browserTab: tab,
+    query: "ARIA read-only notes",
+  });
+  const ariaReadonlyNotes = ariaReadonlyNotesMatches.results.find(
+    (entry) => entry.role === "textbox",
+  );
+  assert.ok(ariaReadonlyNotes?.id, JSON.stringify(ariaReadonlyNotesMatches));
+  assert.equal(
+    (await client.execute("focus", { elementId: ariaReadonlyNotes.id })).ok,
+    true,
+  );
+  const rejectedEnter = await client.execute("keypress", {
+    browserTab: tab,
+    keys: ["enter"],
+  });
+  assert.equal(rejectedEnter.ok, false, JSON.stringify(rejectedEnter));
+  assert.match(rejectedEnter.error, /BROWSER_NOT_EDITABLE/);
+  const notesAfter = await client.execute("element_info", {
+    elementId: ariaReadonlyNotes.id,
+  });
+  assert.equal(notesAfter.element.value, "fixed notes");
+  for (const [query, expected] of [
+    ["ARIA read-only number", "5"],
+    ["ARIA read-only range", "40"],
+    ["ARIA read-only choice", "Alpha"],
+    ["ARIA read-only date", "2026-10-31"],
+  ]) {
+    const matches = await client.execute("find", { browserTab: tab, query });
+    const target = matches.results.find(
+      (entry) =>
+        entry.id &&
+        entry.name?.includes(query) &&
+        ["spinbutton", "slider", "combobox", "Date", "date", "group"].includes(
+          entry.role,
+        ),
+    );
+    assert.ok(target?.id, JSON.stringify({ query, matches }));
+    assert.equal(
+      (await client.execute("focus", { elementId: target.id })).ok,
+      true,
+    );
+    for (const key of [
+      "up",
+      "down",
+      "left",
+      "right",
+      "home",
+      "end",
+      "pageup",
+      "pagedown",
+    ]) {
+      const result = await client.execute("keypress", {
+        browserTab: tab,
+        keys: [key],
+      });
+      assert.equal(result.ok, false, JSON.stringify({ query, key, result }));
+      assert.match(result.error, /BROWSER_NOT_EDITABLE/);
+    }
+    const after = await client.execute("element_info", {
+      elementId: target.id,
+    });
+    assert.equal(
+      after.element.value,
+      expected,
+      JSON.stringify({ query, after }),
+    );
+  }
   const checkboxMatches = await client.execute("find", {
     browserTab: tab,
     query: "Checkbox with ignored readonly",
