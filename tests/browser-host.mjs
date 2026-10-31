@@ -169,6 +169,19 @@ try {
     false,
     "HTML readonly does not apply to checkbox inputs",
   );
+  const setCheckbox = await client.execute("set_value", {
+    elementId: checkbox.id,
+    value: "true",
+  });
+  assert.equal(setCheckbox.ok, true, JSON.stringify(setCheckbox));
+  const checkedAgain = await client.execute("find", {
+    browserTab: tab,
+    query: "Checkbox with ignored readonly",
+  });
+  const checkedResult = checkedAgain.results.find(
+    (entry) => entry.role === "checkbox",
+  );
+  assert.equal(checkedResult?.checked, true, JSON.stringify(checkedAgain));
   const shot = await client.execute("screenshot", {
     browserTab: tab,
     maxWidth: 300,
