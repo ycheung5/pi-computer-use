@@ -72,3 +72,95 @@ test("monitor capture plan lists only owned placement captures without backend a
     rmSync(folder, { recursive: true, force: true });
   }
 });
+
+test("saved monitor report rejects translated origin and incorrect frame size", () => {
+  const folder = mkdtempSync(join(tmpdir(), "pi-cu-frame-report-"));
+  try {
+    const script = join(folder, "reference-capture.mjs"),
+      path = join(folder, "report.json");
+    writeFileSync(
+      script,
+      readFileSync(
+        fileURLToPath(new URL("./reference-capture.mjs", import.meta.url)),
+      ),
+    );
+    const valid = {
+      engine: "pi",
+      scenario: "monitor-negative-x-scaled",
+      status: "pass",
+      observation: {
+        method: "printwindow",
+        maxWidth: 80,
+        oracle: { frame: { x: -1833, y: 80, width: 306, height: 193 } },
+        bounds: { x: -1833, y: 80, width: 306, height: 193 },
+        origin: { x: -1833, y: 80 },
+        width: 80,
+        height: 50,
+        scale: 80 / 306,
+        scaleY: 50 / 193,
+      },
+    };
+    const call = (row: unknown) => {
+      writeFileSync(path, JSON.stringify({ cases: [row] }));
+      return spawnSync(
+        process.execPath,
+        [script, `--verify-monitor-report=${path}`],
+        { encoding: "utf8" },
+      );
+    };
+    const result = call(valid);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).verified, 1);
+    for (const mutation of [
+      "translated",
+      "origin-only",
+      "size",
+      "height",
+      "y-scale",
+    ]) {
+      const shifted = structuredClone(valid);
+      if (mutation === "translated") {
+        shifted.observation.origin.x += 10;
+        shifted.observation.bounds.x += 10;
+      }
+      if (mutation === "origin-only") shifted.observation.origin.y += 10;
+      if (mutation === "size") shifted.observation.bounds.width += 1;
+      if (mutation === "height") shifted.observation.height += 1;
+      if (mutation === "y-scale") shifted.observation.scaleY = 80 / 306;
+      const invalid = call(shifted);
+      assert.notEqual(invalid.status, 0, mutation);
+    }
+    const reference = structuredClone(valid);
+    reference.engine = "reference";
+    reference.observation.scale = 0.2614;
+    reference.observation.scaleY = 0.2614;
+    assert.equal(
+      call(reference).status,
+      0,
+      "Reference uniform scale allows only the measured resized-height rounding",
+    );
+    reference.status = "fail";
+    const replay = call(reference);
+    assert.equal(replay.status, 0, replay.stderr);
+    assert.equal(
+      JSON.parse(replay.stdout).checks[0].originalStatus,
+      "fail",
+      "Rechecking frame assertions never rewrites the collected status",
+    );
+    reference.status = "blocked";
+    assert.notEqual(
+      call(reference).status,
+      0,
+      "Blocked setup is not collected coordinate evidence",
+    );
+    reference.status = "pass";
+    reference.observation.scale = reference.observation.scaleY = 0.2613;
+    assert.notEqual(
+      call(reference).status,
+      0,
+      "Reference precision does not permit a larger scale mismatch",
+    );
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});

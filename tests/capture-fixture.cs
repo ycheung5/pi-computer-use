@@ -17,6 +17,7 @@ class CaptureFixture {
   [StructLayout(LayoutKind.Sequential)] struct InputInfo {public uint Size,Tick;}
   delegate bool MonitorCallback(IntPtr monitor,IntPtr dc,ref Rect bounds,IntPtr data);
   [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+  [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr window,int attribute,out Rect bounds,int bytes);
   [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window,out Rect bounds);
   [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr window,out Rect bounds);
   [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr window,ref Point point);
@@ -31,10 +32,12 @@ class CaptureFixture {
     IntPtr previous=SetThreadDpiAwarenessContext(new IntPtr(-4));
     if(previous==IntPtr.Zero)throw new InvalidOperationException("Physical oracle DPI context unavailable");
     try {
-      Rect window,client;Point origin=new Point();InputInfo input=new InputInfo {Size=(uint)Marshal.SizeOf(typeof(InputInfo))};
+      Rect window,client,frame;Point origin=new Point();InputInfo input=new InputInfo {Size=(uint)Marshal.SizeOf(typeof(InputInfo))};
       if(!GetWindowRect(form.Handle,out window)||!GetClientRect(form.Handle,out client)||!ClientToScreen(form.Handle,ref origin)||!GetLastInputInfo(ref input))throw new InvalidOperationException("Physical fixture geometry unavailable");
+      int frameResult=DwmGetWindowAttribute(form.Handle,9,out frame,Marshal.SizeOf(typeof(Rect)));
+      string frameJson=frameResult==0 && frame.Right>frame.Left && frame.Bottom>frame.Top?Box(frame):"null";
       client.Right+=origin.X;client.Bottom+=origin.Y;client.Left=origin.X;client.Top=origin.Y;
-      return "{\"nativeWindowHandle\":"+form.Handle.ToInt64()+",\"processId\":"+System.Diagnostics.Process.GetCurrentProcess().Id+",\"window\":"+Box(window)+",\"client\":"+Box(client)+",\"minimized\":"+(form.WindowState==FormWindowState.Minimized?"true":"false")+",\"foregroundHandle\":"+GetForegroundWindow().ToInt64()+",\"lastInputTick\":"+input.Tick+"}";
+      return "{\"frame\":"+frameJson+",\"frameHresult\":"+frameResult+",\"nativeWindowHandle\":"+form.Handle.ToInt64()+",\"processId\":"+System.Diagnostics.Process.GetCurrentProcess().Id+",\"window\":"+Box(window)+",\"client\":"+Box(client)+",\"minimized\":"+(form.WindowState==FormWindowState.Minimized?"true":"false")+",\"foregroundHandle\":"+GetForegroundWindow().ToInt64()+",\"lastInputTick\":"+input.Tick+"}";
     } finally {SetThreadDpiAwarenessContext(previous);}
   }
   static string Layout() {

@@ -11,6 +11,103 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { inflateSync } from "node:zlib";
 
+function assertMonitorFrame(seen, engine) {
+  const frame = seen.oracle.frame;
+  assert.ok(
+    frame &&
+      [frame.x, frame.y, frame.width, frame.height].every(
+        Number.isSafeInteger,
+      ) &&
+      frame.width > 0 &&
+      frame.height > 0,
+    "Physical DWM extended frame unavailable",
+  );
+  assert.ok(["pi", "reference"].includes(engine));
+  assert.equal(
+    seen.method,
+    "printwindow",
+    "Focused fixture expects PrintWindow, not an alternate capture path",
+  );
+  assert.deepEqual(
+    seen.bounds,
+    frame,
+    "Capture bounds must equal independently measured DWM frame",
+  );
+  assert.deepEqual(
+    seen.origin,
+    { x: frame.x, y: frame.y },
+    "Capture origin must equal independently measured DWM frame",
+  );
+  assert.equal(
+    seen.width,
+    seen.maxWidth === 0 ? frame.width : Math.min(seen.maxWidth, frame.width),
+  );
+  assert.ok(
+    Math.abs(seen.height - (frame.height * seen.width) / frame.width) <= 0.5,
+    "PNG height must preserve the independently measured frame aspect ratio",
+  );
+  assert.ok(
+    Math.abs(seen.scale - seen.width / frame.width) <=
+      (engine === "reference" ? 0.00005 + 1e-10 : 1e-10),
+    "Image X scale must match PNG/frame dimensions within pinned DSH four-decimal precision",
+  );
+  if (engine === "pi")
+    assert.ok(
+      Math.abs(seen.scaleY - seen.height / frame.height) < 1e-10,
+      "Pi Y scale must match actual PNG/frame dimensions",
+    );
+  else {
+    assert.equal(
+      seen.scaleY,
+      seen.scale,
+      "Pinned DSH reports one uniform image scale",
+    );
+    assert.ok(
+      Math.abs(seen.scaleY * frame.height - seen.height) <=
+        0.5 + frame.height * 0.00005 + 1e-10,
+      "DSH uniform Y scale permits half an output pixel of resized-height rounding plus four-decimal scale precision",
+    );
+  }
+}
+const monitorReport = process.argv.find((arg) =>
+  arg.startsWith("--verify-monitor-report="),
+);
+if (monitorReport) {
+  const report = JSON.parse(
+    await readFile(
+      monitorReport.slice("--verify-monitor-report=".length),
+      "utf8",
+    ),
+  );
+  assert.ok(Array.isArray(report.cases) && report.cases.length > 0);
+  for (const row of report.cases) {
+    assert.ok(
+      ["pass", "fail"].includes(row.status),
+      "Blocked prerequisites are not recorded captures",
+    );
+    assert.ok(row.scenario.startsWith("monitor-"));
+    assertMonitorFrame(row.observation, row.engine);
+  }
+  console.log(
+    JSON.stringify({
+      ok: true,
+      scope:
+        "Independent frame/scale assertions only; original collection outcomes preserved",
+      verified: report.cases.length,
+      collectionFailures: report.cases.filter((row) => row.status === "fail")
+        .length,
+      checks: report.cases.map((row) => ({
+        engine: row.engine,
+        scenario: row.scenario,
+        originalStatus: row.status,
+        ...(row.error ? { originalError: row.error } : {}),
+        frameVerified: true,
+      })),
+    }),
+  );
+  process.exit(0);
+}
+
 const selectedScenario = process.argv.includes("--scenario")
   ? process.argv[process.argv.indexOf("--scenario") + 1]
   : undefined;
@@ -450,6 +547,17 @@ async function monitorPlacements(engine) {
       return;
     }
     const initial = JSON.parse(await f.command("oracle"));
+    if (!initial.frame) {
+      cases.push({
+        engine,
+        scenario: "monitor-frame-prerequisite",
+        status: "blocked",
+        cause: "fixture-frame-query",
+        observation: { layout, initial },
+        error: "Physical DWM extended-frame query unavailable",
+      });
+      return;
+    }
     const top = Math.max(primary.workArea.y, left.workArea.y) + 80;
     const placements = [
       ["primary", primary.workArea.x + 80, primary.workArea.y + 80],
@@ -513,7 +621,9 @@ async function monitorPlacements(engine) {
               observation = {
                 ...(await verifyCapture(engine, f, maxWidth, [20, 150, 80])),
                 setup,
+                maxWidth,
               };
+              assertMonitorFrame(observation, engine);
               observation.after = JSON.parse(await f.command("oracle"));
               assert.equal(
                 observation.occludedPossible,
