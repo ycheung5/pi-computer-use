@@ -34,6 +34,8 @@ The Chromium outline comes from the accessibility tree. Traversal returns explic
 
 The optional real-Pi `partial` scenario exercises [recovery from a genuine truncated outline](validation.md#scoped-partial-observation-recovery) using the existing local form. It leaves production budgets unchanged and lets the agent choose its reads; exact server payloads and observed-control chronology determine acceptance. See [runner prerequisites and commands](validation.md#reproduce-automated-checks).
 
+The optional `cancel` case verifies [actual Pi cancellation of a held navigation](validation.md#scoped-held-navigation-cancellation), including the original worker reply and released acknowledgment. It intentionally leaves the requested confirmation incomplete.
+
 Own browser processes close gracefully on worker disposal or idle retirement. Temporary profile directories are removed only after their browser process is confirmed dead; kept profiles survive. Unknown or live orphan ownership is retained and reported rather than stolen.
 
 Source: [Puppeteer installation](https://pptr.dev/guides/installation), [background page options](https://pptr.dev/api/puppeteer.createpageoptions), [accessibility snapshots](https://pptr.dev/api/puppeteer.accessibility.snapshot). Puppeteer is Apache-2.0 licensed; the package includes its license notice.

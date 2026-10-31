@@ -36,6 +36,7 @@ test("real-browser plan works without a build, dependencies, credentials or chil
       "stale",
       "mixed",
       "partial",
+      "cancel",
     ]);
     assert.deepEqual(plan.requested, {
       provider: "openai",
@@ -395,7 +396,12 @@ test("stale recovery requires a successful result for the newly observed field a
 });
 
 // These subprocess fixtures are Linux executables, never Windows workers or models.
-for (const mode of ["query-failure", "deadline", "partial-not-ready"]) {
+for (const mode of [
+  "query-failure",
+  "deadline",
+  "partial-not-ready",
+  "held-not-ready",
+]) {
   test(`retained ${mode} keeps fixture ownership and fences later dispatch/cases`, {
     skip: process.platform !== "linux",
   }, async () => {
@@ -449,6 +455,7 @@ for (const mode of ["query-failure", "deadline", "partial-not-ready"]) {
         "src/worker.ts",
         "dist/browser.js",
         "dist/worker.js",
+        "tests/pi-host-command.mjs",
       ])
         await put(join(folder, path), "// Passive external-host fixture\n");
       await put(join(folder, "package.json"), '{"type":"module"}');
@@ -490,7 +497,7 @@ for (const mode of ["query-failure", "deadline", "partial-not-ready"]) {
       await put(join(pkg, "dist/index.js"), "export {};");
       await put(
         join(pkg, "dist/bundle/cli.js"),
-        mode === "partial-not-ready"
+        mode.endsWith("not-ready")
           ? `import{writeFileSync}from'node:fs';writeFileSync(${JSON.stringify(join(folder, "model-started"))},"started");console.log(JSON.stringify({type:'agent_settled',aborted:false}));`
           : mode === "deadline"
             ? "setInterval(()=>{},1000);"
@@ -508,7 +515,11 @@ for (const mode of ["query-failure", "deadline", "partial-not-ready"]) {
         [
           join(folder, "tests/pi-browser-host.mjs"),
           "--scenario",
-          mode === "partial-not-ready" ? "partial" : "all",
+          mode === "held-not-ready"
+            ? "cancel"
+            : mode === "partial-not-ready"
+              ? "partial"
+              : "all",
         ],
         {
           env: {
@@ -544,11 +555,11 @@ for (const mode of ["query-failure", "deadline", "partial-not-ready"]) {
         retained.reason,
         mode === "deadline"
           ? "host-deadline-ownership-retained"
-          : mode === "partial-not-ready"
+          : mode.endsWith("not-ready")
             ? "collector-error-ownership-retained"
             : "owned-process-or-profile-evidence-unavailable",
       );
-      if (mode === "partial-not-ready") {
+      if (mode.endsWith("not-ready")) {
         assert.equal(
           owner?.piPid,
           undefined,
@@ -769,7 +780,7 @@ test("browser fixture faults deny dispatch through actual SDK hooks", async () =
       const root=process.argv[1], base='http://127.0.0.1:1234/';
       const {default:scope}=await import(pathToFileURL(join(root,'tests/pi-browser-fixture.mjs')));
       const receipts=[];
-      for(const kind of ['running','retained','missing','malformed','unknown-phase','audit-io','window-ref','after-audit-io','after-processing-error']) {
+      for(const kind of ['running','retained','missing','malformed','unknown-phase','audit-io','window-ref','after-audit-io','after-processing-error','after-stop']) {
         const dir=join(root,kind);mkdirSync(dir);
         const journal=join(dir,'owner.json'),audit=join(dir,'audit.jsonl');
         if(kind!=='missing')writeFileSync(journal,kind==='malformed'?'{':JSON.stringify({phase:kind==='retained'?'retained':kind==='unknown-phase'?'settled':'running'}));
@@ -786,7 +797,7 @@ test("browser fixture faults deny dispatch through actual SDK hooks", async () =
           await runner.emitToolResult({...event,type:'tool_result',...result});
           event.input={elementId:'t123:e1',value:'safe owned value'};
           if(kind==='after-audit-io'){rmSync(audit);mkdirSync(audit);}
-          await runner.emitToolResult({...event,type:'tool_result',content:[],isError:kind==='after-audit-io',details:kind==='after-audit-io'?{ok:false,error:'UNKNOWN_MUTATION_RESULT'}:{ok:true,nodes:{}}});
+          await runner.emitToolResult({...event,type:'tool_result',content:[],isError:kind==='after-audit-io',details:kind==='after-audit-io'?{ok:false,error:'UNKNOWN_MUTATION_RESULT'}:kind==='after-stop'?{ok:false,error:'COMPUTER_USE_STOPPED'}:{ok:true,nodes:{}}});
           if(kind==='after-audit-io'){rmSync(audit,{recursive:true});writeFileSync(audit,'');}
         }
         if(kind==='window-ref')event.input.windowRef='native-lifetime-reference';
@@ -810,7 +821,7 @@ test("browser fixture faults deny dispatch through actual SDK hooks", async () =
       dispatches: number;
       sdkErrors: number;
     }>;
-    assert.equal(receipts.length, 9);
+    assert.equal(receipts.length, 10);
     for (const receipt of receipts) {
       assert.equal(receipt.threw, false, JSON.stringify(receipts));
       assert.equal(
@@ -1550,5 +1561,207 @@ test("partial fixture readiness reports its optional mode before model startup",
       child.stdin.end();
       assert.equal((await closed)[0], 0);
     }
+  }
+});
+
+test("held confirmation reports genuine HTTP entry and abort closure without completion", async () => {
+  const { createInterface } = await import("node:readline");
+  const child = spawn(
+    process.execPath,
+    ["tests/browser-actions-server.mjs", "edge", "false"],
+    {
+      env: {
+        ...process.env,
+        PI_CU_HELD_FIXTURE: "1",
+        PI_CU_PARTIAL_FIXTURE: "0",
+        PI_CU_MIXED_FIXTURE: "",
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+  const closed = once(child, "close"),
+    lines = createInterface({ input: child.stdout }),
+    abort = new AbortController();
+  child.stderr.resume();
+  try {
+    const [line] = await once(lines, "line"),
+      source = JSON.parse(line);
+    assert.equal(source.heldReady, true);
+    assert.ok(source.heldUrl.startsWith(source.url + "held-"));
+    const state = () => fetch(source.url + "held/state").then((r) => r.json());
+    assert.equal((await state()).entries, 0);
+    const pending = fetch(source.heldUrl, { signal: abort.signal }).catch(
+      (error) => error,
+    );
+    for (let i = 0; (await state()).entries !== 1; i++) {
+      assert.ok(i < 100);
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    assert.deepEqual(
+      { ...(await state()), urlHash: undefined },
+      { entries: 1, completed: 0, closed: 0, urlHash: undefined },
+    );
+    abort.abort();
+    await pending;
+    for (let i = 0; (await state()).closed !== 1; i++) {
+      assert.ok(i < 100);
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    assert.equal((await state()).completed, 0);
+  } finally {
+    abort.abort();
+    lines.close();
+    child.stdin.end();
+    assert.equal((await closed)[0], 0);
+  }
+});
+
+test("cancel acceptance requires actual stopped/released proof and an interrupted truthful task", async () => {
+  const pending = { id: 3, pid: 17, navigationHash: "a".repeat(64) };
+  const facts = {
+    ...formReport(),
+    lifecycle: { settled: true, aborted: true, exitCode: 0 },
+    cancel: {
+      pending,
+      assessment: {
+        status: "observed",
+        response: {
+          id: 3,
+          pid: 17,
+          result: {
+            ok: false,
+            action: "set_value",
+            error: "COMPUTER_USE_STOPPED",
+          },
+        },
+        acknowledgment: { result: { released: true } },
+      },
+      workerRetired: true,
+      http: {
+        entries: 1,
+        completed: 0,
+        closed: 1,
+        urlHash: pending.navigationHash,
+      },
+      noPostStopBusiness: true,
+      noCompletionClaim: true,
+      triggerCount: 1,
+    },
+  };
+  assert.equal((await verify("cancel", facts)).pass, true);
+  assert.equal(
+    (
+      await verify("cancel", {
+        ...facts,
+        cancel: {
+          ...facts.cancel,
+          assessment: {
+            ...facts.cancel.assessment,
+            response: {
+              ...facts.cancel.assessment.response,
+              result: {
+                ok: false,
+                action: "set_value",
+                error: "COMPUTER_USE_CANCELLED",
+              },
+            },
+          },
+        },
+      })
+    ).pass,
+    true,
+  );
+  for (const patch of [
+    { assessment: { status: "pending" } },
+    { workerRetired: false },
+    { http: { entries: 0, completed: 0, closed: 0 } },
+    { http: { entries: 2, completed: 0, closed: 2 } },
+    { http: { entries: 1, completed: 1, closed: 1 } },
+    { http: { entries: 1, completed: 0, closed: 0 } },
+    { noPostStopBusiness: false },
+    { noCompletionClaim: false },
+    { triggerCount: 0 },
+  ])
+    assert.equal(
+      (
+        await verify("cancel", {
+          ...facts,
+          cancel: { ...facts.cancel, ...patch },
+        })
+      ).pass,
+      false,
+    );
+  assert.equal(
+    (
+      await verify("cancel", {
+        ...facts,
+        lifecycle: { ...facts.lifecycle, aborted: false },
+      })
+    ).pass,
+    false,
+  );
+  assert.equal(
+    (
+      await verify("cancel", {
+        ...facts,
+        cleanup: { ...facts.cleanup, processCount: 1 },
+      })
+    ).pass,
+    false,
+  );
+});
+
+test("form and held-state consumers share the bounded child-runtime fixture bridge", async () => {
+  const { createInterface } = await import("node:readline");
+  const { pathToFileURL } = await import("node:url");
+  const folder = await mkdtemp(join(tmpdir(), "pi-fixture-state-bridge-"));
+  await mkdir(join(folder, "tests"));
+  await mkdir(join(folder, "dist"));
+  await writeFile(join(folder, "package.json"), '{"type":"module"}');
+  await copyFile(
+    new URL("./pi-browser-fixture.mjs", import.meta.url),
+    join(folder, "tests/pi-browser-fixture.mjs"),
+  );
+  await writeFile(
+    join(folder, "dist/launcher.js"),
+    `export async function nativeWorkerLaunch(){return {executable:${JSON.stringify(process.execPath)}}}`,
+  );
+  const child = spawn(
+    process.execPath,
+    ["tests/browser-actions-server.mjs", "edge", "false"],
+    {
+      env: {
+        ...process.env,
+        PI_CU_HELD_FIXTURE: "1",
+        PI_CU_PARTIAL_FIXTURE: "0",
+        PI_CU_MIXED_FIXTURE: "",
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+  const closed = once(child, "close"),
+    lines = createInterface({ input: child.stdout });
+  child.stderr.resume();
+  try {
+    const [line] = await once(lines, "line"),
+      source = JSON.parse(line);
+    const { formState, heldState } = await import(
+      pathToFileURL(join(folder, "tests/pi-browser-fixture.mjs")).href
+    );
+    assert.deepEqual(await formState(source.url), {
+      payload: null,
+      events: { starts: 0, ready: 0, submissions: 0 },
+    });
+    const held = await heldState(source.url);
+    assert.equal(held.entries, 0);
+    assert.equal(held.closed, 0);
+    assert.equal(held.completed, 0);
+    assert.match(held.urlHash, /^[a-f0-9]{64}$/);
+    await assert.rejects(heldState(source.url + "missing/"));
+  } finally {
+    lines.close();
+    child.stdin.end();
+    assert.equal((await closed)[0], 0);
+    await rm(folder, { recursive: true, force: true });
   }
 });

@@ -1,6 +1,6 @@
 // Disposable local pages/files only; no external network or daily profiles.
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { connect } from "node:net";
@@ -19,6 +19,9 @@ await writeFile(
     browserSignIn: false,
   }),
 );
+const heldMode = process.env.PI_CU_HELD_FIXTURE === "1",
+  heldPath = "/held-" + randomUUID();
+const held = { entries: 0, completed: 0, closed: 0 };
 const partial = process.env.PI_CU_PARTIAL_FIXTURE === "1";
 const mixedConfig = process.argv[4] ?? process.env.PI_CU_MIXED_FIXTURE;
 const mixed = mixedConfig ? JSON.parse(mixedConfig) : null;
@@ -105,6 +108,27 @@ const advancedHtml = `<!doctype html><meta charset="utf-8"><title>Advanced brows
 <a href="/advanced/download" download="${downloadName}">Download fixture</a>
 <script>async function receive(file){await fetch('/advanced/upload',{method:'POST',body:JSON.stringify({name:file.name,content:await file.text()})});uploaded.textContent='Uploaded: '+file.name;}</script>`;
 const server = createServer(async (request, response) => {
+  if (heldMode && request.url === heldPath) {
+    held.entries++;
+    response.once("finish", () => held.completed++);
+    response.once("close", () => {
+      if (!response.writableFinished) held.closed++;
+    });
+    return; // An actual navigation enters, but no confirmation is emitted.
+  }
+  if (heldMode && request.url === "/held/state") {
+    response.setHeader("Content-Type", "application/json");
+    response.end(
+      JSON.stringify({
+        ...held,
+        urlHash: createHash("sha256")
+          .update(`http://127.0.0.1:${server.address().port}${heldPath}`)
+          .digest("hex"),
+      }),
+    );
+    return;
+  }
+
   if (request.url === "/profile/set" || request.url === "/profile/read") {
     if (request.url === "/profile/set")
       response.setHeader(
@@ -244,6 +268,12 @@ server.listen(0, "127.0.0.1", () =>
       downloadName,
       settings,
       ...(partial ? { partialFixture: true } : {}),
+      ...(heldMode
+        ? {
+            heldUrl: `http://127.0.0.1:${server.address().port}${heldPath}`,
+            heldReady: true,
+          }
+        : {}),
     }),
   ),
 );

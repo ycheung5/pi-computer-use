@@ -211,6 +211,9 @@ test("command settlement requires actual timely wait cancellation and released o
   const replace = (index: number, patch: Record<string, unknown>) =>
     records.map((row, i) => (i === index ? { ...row, ...patch } : row));
   for (const changed of [
+    replace(1, {
+      result: { ok: false, action: "wait", error: "COMPUTER_USE_CANCELLED" },
+    }),
     replace(1, { result: { ok: true, action: "wait" } }),
     replace(1, { monotonicMs: 31000 }),
     records.filter((_, i) => i !== 1),
@@ -302,5 +305,186 @@ test("Linux host identities use proc start/executable and confirmed absence", {
       child.stdin.end();
       await closed;
     }
+  }
+});
+
+test("held navigation cancellation needs actual sole pending entry and timely released response", async () => {
+  const { heldNavigationEntry, assessCommandSettlement } = await helper();
+  const hash = "a".repeat(64);
+  const pending = {
+    kind: "input",
+    action: "set_value",
+    id: 3,
+    operationId: "owned",
+    pid: 17,
+    sequence: 2,
+    monotonicMs: 1000,
+    navigationHash: hash,
+    target: "new-tab",
+  };
+  const witness = { entries: 1, completed: 0, closed: 0, urlHash: hash };
+  assert.deepEqual(heldNavigationEntry([pending], witness, hash), pending);
+  for (const [rows, state] of [
+    [[pending], { ...witness, entries: 0 }],
+    [[pending], { ...witness, entries: 2 }],
+    [[pending], { ...witness, closed: 1 }],
+    [[pending], { ...witness, urlHash: "b".repeat(64) }],
+    [[{ ...pending, navigationHash: "b".repeat(64) }], witness],
+    [[pending, { ...pending, id: 4 }], witness],
+    [[pending, { kind: "input", action: "health", id: 2, pid: 17 }], witness],
+    [[pending, { kind: "output", id: 3, pid: 17 }], witness],
+  ])
+    assert.equal(heldNavigationEntry(rows, state, hash), undefined);
+  const response = {
+    kind: "output",
+    id: 3,
+    pid: 17,
+    sequence: 5,
+    monotonicMs: 1400,
+    result: { ok: false, action: "set_value", error: "COMPUTER_USE_STOPPED" },
+  };
+  const end = {
+    kind: "input",
+    action: "operation_end",
+    id: 4,
+    pid: 17,
+    operationId: "owned",
+    sequence: 6,
+    monotonicMs: 1450,
+  };
+  const ack = {
+    kind: "output",
+    id: 4,
+    pid: 17,
+    sequence: 7,
+    monotonicMs: 1500,
+    result: { ok: true, action: "operation_end", released: true },
+  };
+  const control = {
+    kind: "input",
+    cancel: 3,
+    pid: 17,
+    sequence: 3,
+    monotonicMs: 1200,
+  };
+  const rows = [pending, control, response, end, ack];
+  const cancelled = {
+    ...response,
+    result: { ok: false, action: "set_value", error: "COMPUTER_USE_CANCELLED" },
+  };
+  const acceptedCancelled = assessCommandSettlement(pending, [
+    pending,
+    control,
+    cancelled,
+    end,
+    ack,
+  ]);
+  assert.equal(acceptedCancelled.status, "observed");
+  assert.equal(
+    acceptedCancelled.response.result.error,
+    "COMPUTER_USE_CANCELLED",
+  );
+  assert.equal(assessCommandSettlement(pending, rows).status, "observed");
+  assert.equal(
+    assessCommandSettlement(pending, [
+      pending,
+      control,
+      response,
+      end,
+      { ...ack, monotonicMs: 16000 },
+    ]).status,
+    "failed",
+  );
+  for (const broken of [
+    [pending, response, end, ack],
+    [pending, { ...control, cancel: 99 }, response, end, ack],
+    [pending, { ...control, pid: 99 }, response, end, ack],
+    [pending, { ...control, sequence: 6 }, response, end, ack],
+    [
+      pending,
+      control,
+      {
+        ...response,
+        result: { ok: false, action: "set_value", error: "AbortError" },
+      },
+      end,
+      ack,
+    ],
+    [pending, control, { ...response, id: 99 }, end, ack],
+    [pending, control, { ...response, monotonicMs: 16000 }, end, ack],
+    [
+      pending,
+      {
+        ...response,
+        result: { ok: true, action: "set_value", stillLoading: true },
+      },
+      end,
+      ack,
+    ],
+    [pending, control, response, end],
+    [
+      pending,
+      control,
+      response,
+      end,
+      {
+        ...ack,
+        result: { ok: true, action: "operation_end", released: false },
+      },
+    ],
+  ])
+    assert.notEqual(
+      assessCommandSettlement(pending, broken).status,
+      "observed",
+    );
+});
+
+test("navigation observer records only the allowlisted URL hash and public target class", async () => {
+  const { createHash } = await import("node:crypto");
+  const { commandObserver } = await helper();
+  const folder = await mkdtemp(join(tmpdir(), "pi-navigation-observer-"));
+  try {
+    const trace = join(folder, "worker.jsonl"),
+      url = "http://127.0.0.1:1234/held-owned";
+    const hash = createHash("sha256").update(url).digest("hex");
+    const child = spawn(
+      process.execPath,
+      [
+        "--import",
+        commandObserver(trace, hash),
+        "-e",
+        "process.stdin.resume();process.stdin.on('end',()=>process.stdout.write(JSON.stringify({id:3,result:{ok:false,action:'set_value',error:'http://127.0.0.1:1234/private-error-body'}})+'\\n'))",
+      ],
+      { stdio: ["pipe", "pipe", "pipe"] },
+    );
+    const closed = once(child, "close");
+    child.stdout.resume();
+    child.stderr.resume();
+    child.stdin.end(
+      JSON.stringify({
+        id: 3,
+        action: "set_value",
+        operationId: "owned",
+        args: { elementId: "new-tab", value: url },
+      }) + "\n",
+    );
+    assert.equal((await closed)[0], 0);
+    const text = await readFile(trace, "utf8"),
+      rows = text
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+    assert.equal(text.includes(url), false);
+    assert.equal(text.includes("private-error-body"), false);
+    assert.ok(
+      rows.some(
+        (row) =>
+          row.kind === "input" &&
+          row.navigationHash === hash &&
+          row.target === "new-tab",
+      ),
+    );
+  } finally {
+    await rm(folder, { recursive: true, force: true });
   }
 });

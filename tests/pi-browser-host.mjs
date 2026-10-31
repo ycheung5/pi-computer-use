@@ -2,6 +2,7 @@
 import {
   actualText,
   brief,
+  heldState,
   scenarios,
   verifyOutcome,
 } from "./pi-browser-fixture.mjs";
@@ -119,6 +120,7 @@ async function live(selected, options) {
     "tests/browser-actions-server.mjs",
     "tests/pi-browser-fixture.mjs",
     "tests/pi-browser-host.mjs",
+    "tests/pi-host-command.mjs",
   ])
     manifest[path] = await hash(join(root, path));
   const reports = [];
@@ -225,7 +227,8 @@ async function live(selected, options) {
             env: {
               ...process.env,
               PI_CU_PARTIAL_FIXTURE: scenario === "partial" ? "1" : "0",
-              WSLENV: `${process.env.WSLENV ?? ""}:PI_CU_PARTIAL_FIXTURE`,
+              PI_CU_HELD_FIXTURE: scenario === "cancel" ? "1" : "0",
+              WSLENV: `${process.env.WSLENV ?? ""}:PI_CU_PARTIAL_FIXTURE:PI_CU_HELD_FIXTURE`,
             },
           },
         );
@@ -266,7 +269,28 @@ async function live(selected, options) {
           if (source.partialFixture !== true)
             throw Error("PARTIAL_FIXTURE_NOT_READY: refusing model startup");
         }
+        if (scenario === "cancel") {
+          await write("fixture-readiness.json", {
+            ready: source.heldReady === true,
+          });
+          if (
+            source.heldReady !== true ||
+            !source.heldUrl?.startsWith(source.url + "held-")
+          )
+            throw Error("HELD_FIXTURE_NOT_READY");
+        }
+        const cancel =
+          scenario === "cancel"
+            ? {
+                heldUrl: source.heldUrl,
+                hash: createHash("sha256").update(source.heldUrl).digest("hex"),
+                trace: join(dir, "worker.jsonl"),
+                windowsTrace: translate(join(dir, "worker.jsonl")),
+                windowsNode: native.executable,
+              }
+            : undefined;
         const spec = {
+          ...(cancel ? { cancel } : {}),
           scenario,
           base: source.url,
           upload: source.upload,
@@ -390,6 +414,8 @@ async function live(selected, options) {
               .map((c) => c.text)
               .join("\n");
             if (text) facts.finalReport = text;
+            if (scenario === "cancel" && stopReason === "stop" && text)
+              facts.completionClaim = true;
             saved = {
               type: event.type,
               provider,
@@ -456,6 +482,10 @@ async function live(selected, options) {
         }
         const [exitCode, signal] = await piClosed;
         clearTimeout(watchdog);
+        if (scenario === "cancel") {
+          const current = JSON.parse(await fs.readFile(journal, "utf8"));
+          if (current.phase === "retained") await retain(current.reason);
+        }
         if (ownership.phase === "retained") await retain(ownership.reason);
         facts.lifecycle = { ...facts.lifecycle, exitCode, signal, parseError };
         let state;
@@ -473,6 +503,57 @@ async function live(selected, options) {
         )
           await retain("host-or-browser-cleanup-unconfirmed");
         facts.cleanup = state;
+        if (cancel) {
+          const {
+            commandRows,
+            commandWorkerIdentity,
+            assessCommandSettlement,
+          } = await import("./pi-host-command.mjs");
+          const audit = (await fs.readFile(auditFile, "utf8"))
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => JSON.parse(line));
+          const rows = commandRows(cancel.trace, true),
+            triggers = audit.filter((row) => row.type === "controlled_cancel"),
+            pins = audit.filter((row) => row.type === "cancel_worker_pin");
+          if (
+            pins.length !== 1 ||
+            commandWorkerIdentity(native.executable, pins[0].pin.pid)
+          )
+            await retain("cancel-worker-retirement-unknown");
+          const pending = triggers[0]?.pending,
+            assessment = pending
+              ? assessCommandSettlement(pending, rows)
+              : { status: "unexercised" };
+          if (pending && assessment.status !== "observed")
+            await retain("cancel-settlement-unconfirmed");
+          const stop = rows.find(
+            (row) =>
+              row.kind === "input" &&
+              row.pid === pending?.pid &&
+              row.sequence > pending.sequence &&
+              row.sequence < assessment.response?.sequence &&
+              (row.stop === pending.operationId || row.cancel === pending.id),
+          );
+          facts.cancel = {
+            pending,
+            assessment,
+            workerPin: pins[0].pin,
+            workerRetired: true,
+            triggerCount: triggers.length,
+            noPostStopBusiness: Boolean(
+              stop &&
+                !rows.some(
+                  (row) =>
+                    row.kind === "input" &&
+                    row.sequence > stop.sequence &&
+                    row.action &&
+                    row.action !== "operation_end",
+                ),
+            ),
+            noCompletionClaim: !facts.completionClaim,
+          };
+        }
         if (nativePrepared) {
           const remainingWorkers = nativePrepared.queryWorkers();
           if (!observedNativeWorkers.length || remainingWorkers.length)
@@ -493,7 +574,9 @@ async function live(selected, options) {
             .split("\n")
             .filter(Boolean)
             .map((l) => JSON.parse(l));
-          if (scenario === "advanced") {
+          if (scenario === "cancel") {
+            facts.cancel.http = await heldState(source.url);
+          } else if (scenario === "advanced") {
             const files = new Map(
               facts.downloads
                 .filter(
@@ -557,7 +640,8 @@ async function live(selected, options) {
         });
         console.log(JSON.stringify(reports.at(-1)));
         if (stopped || facts.lifecycle.aborted) {
-          process.exitCode = 1;
+          process.exitCode =
+            scenario === "cancel" && report.verification.pass ? 0 : 1;
           return;
         }
       } catch {
