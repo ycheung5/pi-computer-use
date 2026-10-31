@@ -42,6 +42,10 @@ partial class WindowsBridge {
     // the existing identity, foreground and input guards still apply.
   }
   [DllImport("user32.dll",EntryPoint="BringWindowToTop")]static extern bool ManagementBringToTop(IntPtr window);
+  sealed class ActivationRefusedException : InvalidOperationException {
+    public readonly Dictionary<string,object> Diagnostic;
+    public ActivationRefusedException(Dictionary<string,object> diagnostic) : base("TARGET_ACTIVATION_REFUSED: Windows did not grant foreground access") {Diagnostic=diagnostic;}
+  }
   static string ManagementForegroundRelationship(IntPtr foreground,IntPtr window,uint owner) {
     if(foreground==IntPtr.Zero)return "unavailable";
     if(foreground==window)return "target";

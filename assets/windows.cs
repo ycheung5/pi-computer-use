@@ -116,6 +116,8 @@ partial class WindowsBridge {
         } catch (Exception error) {
           Dictionary<string, object> failure = Result(false, action);
           failure["error"] = "WINDOWS_ERROR: " + error.Message;
+          ActivationRefusedException refused=error as ActivationRefusedException;
+          if(refused!=null)failure["activationDiagnostic"]=refused.Diagnostic;
           result = failure;
         }
         Console.WriteLine(json.Serialize(new Dictionary<string, object> { { "id", request["id"] }, { "result", result } }));
