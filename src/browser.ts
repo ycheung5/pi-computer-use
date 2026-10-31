@@ -1505,6 +1505,36 @@ async function pressBrowserKeys(
     );
     return { navigated: "reload" };
   }
+  // Refuse keyboard edits to an explicitly read-only focused element, while
+  // preserving navigation, selection and dialog handling. Page scripts can
+  // still react to any key, so this is not a general mutation guarantee.
+  const control = modifiers.includes("Control");
+  const alt = modifiers.includes("Alt");
+  const shift = modifiers.includes("Shift");
+  const plainText =
+    !control && !alt && (main.length === 1 || lower === "space");
+  const editingKey = ["backspace", "delete"].includes(lower);
+  const editingShortcut =
+    (control && ["v", "x", "z", "y"].includes(lower)) ||
+    (control && alt && main.length === 1) ||
+    (shift && lower === "insert");
+  const newline = !control && !alt && lower === "enter";
+  if (plainText || editingKey || editingShortcut || newline) {
+    const readonly = await callPage(
+      tab,
+      (checkNewline: boolean) => {
+        const element = document.activeElement;
+        if (!element || element.getAttribute("aria-readonly") !== "true")
+          return false;
+        // Enter in a single-line input may submit a form instead of editing.
+        return !checkNewline || !(element instanceof HTMLInputElement);
+      },
+      newline && !plainText && !editingKey && !editingShortcut,
+      signal,
+    );
+    if (readonly)
+      return fail("BROWSER_NOT_EDITABLE", "focused field is readonly");
+  }
   const chord = [
     ...["Control", "Alt", "Shift"]
       .filter((modifier) => modifiers.some((held) => held === modifier))
