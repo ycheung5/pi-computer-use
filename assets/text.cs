@@ -165,7 +165,10 @@ partial class WindowsBridge {
       ManagementEnsureUnlockedSession();
       foreach(int key in new int[]{1,2,4,16,17,18,91,92})if(GetAsyncKeyState(key)<0)throw new InvalidOperationException("USER_INPUT_ACTIVE: button or modifier already held");
       interaction.Check();
-      if(GetForegroundWindow()!=window && (!ManagementActivate(window,owner) || GetForegroundWindow()!=window))throw new InvalidOperationException("TARGET_ACTIVATION_REFUSED");
+      if(GetForegroundWindow()!=window) {
+        Dictionary<string,object> activation=new Dictionary<string,object>();
+        if(!ManagementActivate(window,owner,activation) || GetForegroundWindow()!=window){activation["foregroundAtRefusal"]=ManagementForegroundRelationship(GetForegroundWindow(),window,owner);result["activationDiagnostic"]=activation;throw new InvalidOperationException("TARGET_ACTIVATION_REFUSED");}
+      }
       if(args.ContainsKey("_elementId")){main.SetFocus();}
       else if(action=="type_text" && TextOption(args,"focusMode","preserve")=="main") {main=MainTextControl(window);main.SetFocus();result["focusedControl"]=main.Current.ControlType.ProgrammaticName;}
       if(action=="type_text" && TextFocus(window,false)==IntPtr.Zero) {IntPtr remembered=TextFocus(window);if(remembered!=IntPtr.Zero)AutomationElement.FromHandle(remembered).SetFocus();}

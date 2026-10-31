@@ -168,7 +168,8 @@ partial class WindowsBridge {
       PointerCheck(cancel,window,owner,path[0],false);
       if(!PointerRootAllowed(GetForegroundWindow(),window,owner) && (action!="move" || Option(args,"activate",false))) {
         interaction.Check();if(cancel.WaitOne(0))throw new InvalidOperationException("COMPUTER_USE_STOPPED");
-        if(!ManagementActivate(window,owner) || GetForegroundWindow()!=window)throw new InvalidOperationException("TARGET_ACTIVATION_REFUSED");
+        Dictionary<string,object> activation=new Dictionary<string,object>();
+        if(!ManagementActivate(window,owner,activation) || GetForegroundWindow()!=window){activation["foregroundAtRefusal"]=ManagementForegroundRelationship(GetForegroundWindow(),window,owner);result["activationDiagnostic"]=activation;throw new InvalidOperationException("TARGET_ACTIVATION_REFUSED");}
         activated=true;
       }
       uint down=button=="right"?8U:button=="middle"?32U:2U;up=button=="right"?16U:button=="middle"?64U:4U;
