@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -18,6 +19,48 @@ await writeFile(
     browserSignIn: false,
   }),
 );
+const mixed = process.env.PI_CU_MIXED_FIXTURE
+  ? JSON.parse(process.env.PI_CU_MIXED_FIXTURE)
+  : null;
+let issuedCode = null,
+  confirmations = 0;
+const mixedPayload = {
+  name: "Mixed task 中文 café 😀",
+  notes: "Browser to native",
+  accepted: true,
+  choice: "beta",
+};
+async function mixedOracle() {
+  return new Promise((resolve, reject) => {
+    const socket = connect(mixed.pipe);
+    let data = "";
+    const timer = setTimeout(
+      () => socket.destroy(Error("owned fixture unavailable")),
+      10000,
+    );
+    socket.on("connect", () =>
+      socket.write(JSON.stringify({ action: "oracle" }) + "\n"),
+    );
+    socket.on("data", (bytes) => (data += bytes));
+    socket.on("error", reject);
+    socket.on("close", () => clearTimeout(timer));
+    socket.on("end", () => {
+      try {
+        const o = JSON.parse(data);
+        if (
+          o.ok !== true ||
+          ["pid", "creation", "executable"].some(
+            (k) => o.identity?.[k] !== mixed.identity[k],
+          )
+        )
+          throw Error("owned fixture changed");
+        resolve(o);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}
 const html = `<!doctype html><title>Browser action fixture</title>
 <h1>Browser action fixture</h1><p id="count">Count: 0</p><button id="increment" onclick="count.textContent='Count: '+(++window.counter)">Increment</button>
 <button onclick="document.elementFromPoint=()=>increment;cover.hidden=false">Cover target</button><button id="cover" hidden style="position:fixed;inset:0;z-index:100;background:white" onclick="cover.hidden=true">Remove cover</button>
@@ -48,7 +91,7 @@ const formHtml = `<!doctype html><meta charset="utf-8"><title>Paired browser for
 <script>form.addEventListener('submit',async event=>{event.preventDefault();
 const payload={name:document.getElementById('name').value,notes:notes.value,accepted:accepted.checked,choice:choice.value};
 const response=await fetch('/form/submit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
-result.textContent=JSON.stringify(await response.json());});</script>`;
+result.textContent=JSON.stringify(await response.json());});</script>${mixed ? `<p id="nativeAcknowledgement">Native confirmation pending</p><script>setInterval(()=>fetch('/mixed/state').then(r=>r.json()).then(s=>nativeAcknowledgement.textContent=s.acknowledgement),300)</script>` : ""}`;
 const downloadName = `pi-advanced-${randomUUID()}.txt`;
 let advancedState = { upload: null, uploadRequests: 0, downloads: 0 };
 const advancedHtml = `<!doctype html><meta charset="utf-8"><title>Advanced browser fixture</title>
@@ -60,7 +103,7 @@ const advancedHtml = `<!doctype html><meta charset="utf-8"><title>Advanced brows
 <input type="file" aria-label="Direct upload"><input id="file" type="file" hidden onchange="receive(this.files[0])"><button onclick="file.click()">Upload fixture</button><p id="uploaded">No file</p>
 <a href="/advanced/download" download="${downloadName}">Download fixture</a>
 <script>async function receive(file){await fetch('/advanced/upload',{method:'POST',body:JSON.stringify({name:file.name,content:await file.text()})});uploaded.textContent='Uploaded: '+file.name;}</script>`;
-const server = createServer((request, response) => {
+const server = createServer(async (request, response) => {
   if (request.url === "/profile/set" || request.url === "/profile/read") {
     if (request.url === "/profile/set")
       response.setHeader(
@@ -95,6 +138,27 @@ const server = createServer((request, response) => {
     advancedState = { upload: null, uploadRequests: 0, downloads: 0 };
     response.setHeader("content-type", "text/html; charset=utf-8");
     response.end(advancedHtml);
+  } else if (mixed && request.url === "/mixed/state") {
+    let acknowledgement = "Native confirmation pending";
+    try {
+      if (issuedCode) {
+        const o = await mixedOracle();
+        if (
+          o.approve.code === issuedCode &&
+          o.approve.count === 1 &&
+          o.ignore.count === 0
+        )
+          acknowledgement = "Native confirmation complete: " + issuedCode;
+      }
+    } catch {
+      response.statusCode = 503;
+      acknowledgement = "Native confirmation unavailable";
+    }
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ acknowledgement }));
+  } else if (mixed && request.url === "/mixed/receipt") {
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ issuedCode, confirmations }));
   } else if (request.url === "/form/delayed/state") {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify(formEvents));
@@ -112,11 +176,43 @@ const server = createServer((request, response) => {
     request.on("data", (chunk) => {
       body += chunk;
     });
-    request.on("end", () => {
-      formSubmission = JSON.parse(body);
+    request.on("end", async () => {
+      const payload = JSON.parse(body);
+      if (
+        mixed &&
+        (Object.keys(payload).length !== 4 ||
+          Object.entries(mixedPayload).some(
+            ([key, value]) => payload[key] !== value,
+          ))
+      ) {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({ error: "Exact mixed form payload required" }),
+        );
+        return;
+      }
+      if (mixed) {
+        try {
+          const o = await mixedOracle();
+          issuedCode = o.approve.code;
+          if (!/^\d{4}$/.test(issuedCode)) throw Error("invalid fixture code");
+          confirmations++;
+        } catch {
+          response.writeHead(503, { "content-type": "application/json" });
+          response.end(JSON.stringify({ error: "Owned fixture unavailable" }));
+          return;
+        }
+      }
+      formSubmission = payload;
       formEvents.submissions++;
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify(formSubmission));
+      response.end(
+        JSON.stringify(
+          mixed
+            ? { ...formSubmission, confirmationCode: issuedCode }
+            : formSubmission,
+        ),
+      );
     });
   } else if (request.url === "/form") {
     formSubmission = null;

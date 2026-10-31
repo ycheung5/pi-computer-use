@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
 import {
   copyFile,
   mkdir,
@@ -623,3 +624,92 @@ for (const mode of ["query-failure", "deadline"]) {
     }
   });
 }
+
+test("mixed confirmation reveals a code only after exact submission and acknowledges actual owned counters", async () => {
+  const { createServer } = await import("node:net");
+  const { createInterface } = await import("node:readline");
+  const folder = await mkdtemp(join(tmpdir(), "pi-mixed-http-"));
+  const pipe =
+    process.platform === "win32"
+      ? `\\\\.\\pipe\\pi-mixed-${process.pid}`
+      : join(folder, "owned.sock");
+  const identity = {
+    pid: 123,
+    creation: "fixture-generation",
+    executable: "owned-fixture",
+  };
+  let count = 0,
+    otherCount = 0;
+  const oracle = createServer((socket) =>
+    socket.once("data", () =>
+      socket.end(
+        JSON.stringify({
+          ok: true,
+          identity,
+          approve: { code: "7391", count },
+          ignore: { code: "2846", count: otherCount },
+        }) + "\n",
+      ),
+    ),
+  );
+  oracle.listen(pipe);
+  await once(oracle, "listening");
+  const child = spawn(process.execPath, ["tests/browser-actions-server.mjs"], {
+    env: {
+      ...process.env,
+      PI_CU_MIXED_FIXTURE: JSON.stringify({ pipe, identity }),
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const closed = once(child, "close");
+  child.stderr.resume();
+  const lines = createInterface({ input: child.stdout });
+  try {
+    const [line] = await once(lines, "line");
+    const { url } = JSON.parse(line);
+    const page = await (await fetch(url + "form")).text();
+    assert.equal(page.includes("7391"), false);
+    assert.equal(page.includes("2846"), false);
+    const pre = await (await fetch(url + "mixed/state")).json();
+    assert.equal(JSON.stringify(pre).includes("7391"), false);
+    const submit = (payload: object) =>
+      fetch(url + "form/submit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    assert.equal((await submit({ name: "wrong" })).status, 400);
+    const payload = {
+      name: "Mixed task 中文 café 😀",
+      notes: "Browser to native",
+      accepted: true,
+      choice: "beta",
+    };
+    assert.deepEqual(await (await submit(payload)).json(), {
+      ...payload,
+      confirmationCode: "7391",
+    });
+    assert.equal(
+      (await (await fetch(url + "mixed/state")).json()).acknowledgement,
+      "Native confirmation pending",
+    );
+    otherCount = 1;
+    assert.equal(
+      (await (await fetch(url + "mixed/state")).json()).acknowledgement,
+      "Native confirmation pending",
+    );
+    otherCount = 0;
+    count = 1;
+    assert.equal(
+      (await (await fetch(url + "mixed/state")).json()).acknowledgement,
+      "Native confirmation complete: 7391",
+    );
+    assert.deepEqual(await (await fetch(url + "form/state")).json(), payload);
+  } finally {
+    child.stdin.end();
+    await closed;
+    lines.close();
+    await new Promise<void>((resolve) => oracle.close(() => resolve()));
+    await rm(folder, { recursive: true, force: true });
+  }
+});
