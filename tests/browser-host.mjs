@@ -354,6 +354,33 @@ try {
         new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
       );
     }
+    for (const name of ["shadow", "frame"]) {
+      await clickFixture(`Focus disabled ${name}`);
+      const blockedText = await client.execute("type_text", {
+        browserTab: tab,
+        text: " unwanted",
+      });
+      assert.equal(
+        blockedText.ok,
+        false,
+        JSON.stringify({ name, blockedText }),
+      );
+      assert.match(blockedText.error, /BROWSER_NO_FOCUSED_FIELD/);
+      const blockedKey = await client.execute("keypress", {
+        browserTab: tab,
+        keys: ["x"],
+      });
+      assert.equal(blockedKey.ok, false, JSON.stringify({ name, blockedKey }));
+      assert.match(blockedKey.error, /BROWSER_NOT_EDITABLE/);
+    }
+    await clickFixture("Report disabled values");
+    const disabledValues = await client.execute("accessibility_tree", {
+      browserTab: tab,
+    });
+    assert.match(
+      disabledValues.text,
+      /Disabled values: shadow disabled \| frame disabled/,
+    );
     await clickFixture("Focus opaque frame field");
     const ready = await client.execute("wait_for", {
       browserTab: tab,

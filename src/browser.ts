@@ -1425,7 +1425,11 @@ async function focusedBrowserControl(tab: Tab, signal?: AbortSignal) {
     tab,
     () => {
       let element: Element | null = document.activeElement;
+      let disabled = false;
       for (let depth = 0; element && depth < 64; depth++) {
+        disabled ||=
+          element.matches(":disabled") ||
+          element.closest('[aria-disabled="true"], [inert]') !== null;
         const shadow = element.shadowRoot?.activeElement;
         if (shadow) {
           element = shadow;
@@ -1451,9 +1455,7 @@ async function focusedBrowserControl(tab: Tab, signal?: AbortSignal) {
         tag,
         type: tag === "input" ? (element as HTMLInputElement).type : "",
         role: element.getAttribute("role")?.trim().split(/\s+/)[0] ?? "",
-        disabled:
-          element.matches(":disabled") ||
-          element.closest('[aria-disabled="true"], [inert]') !== null,
+        disabled,
         readonly: element.getAttribute("readonly") !== null,
         ariaReadonly: element.getAttribute("aria-readonly") === "true",
         contentEditable:
@@ -1579,8 +1581,10 @@ async function pressBrowserKeys(
   ].includes(lower);
   if (plainText || editingKey || editingShortcut || newline || adjustmentKey) {
     const element = await focusedBrowserControl(tab, signal);
+    const disabled = element?.disabled === true;
     let readonly = element?.ariaReadonly === true;
     if (
+      !disabled &&
       element &&
       readonly &&
       adjustmentKey &&
@@ -1612,6 +1616,7 @@ async function pressBrowserKeys(
           "radiogroup",
         ].includes(element.role);
     } else if (
+      !disabled &&
       element &&
       readonly &&
       newline &&
@@ -1622,8 +1627,11 @@ async function pressBrowserKeys(
       // Enter in a single-line input may submit a form instead of editing.
       readonly = element.tag !== "input";
     }
-    if (readonly)
-      return fail("BROWSER_NOT_EDITABLE", "focused field is readonly");
+    if (disabled || readonly)
+      return fail(
+        "BROWSER_NOT_EDITABLE",
+        disabled ? "focused field is disabled" : "focused field is readonly",
+      );
   }
   const chord = [
     ...["Control", "Alt", "Shift"]
