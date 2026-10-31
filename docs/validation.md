@@ -576,7 +576,7 @@ This path matches the tested runtime pin in this release; use the package's veri
 
 ## Manual release gates
 
-These remain **pending until a named person records the environment, steps, expected/actual results and evidence**. The user planned to perform acceptance testing.
+These gates remain pending until their environment, steps, expected/actual results and evidence are recorded. Use existing automated runners where they cover the case; this list does not make an automatable check depend on human participation. Human judgment or participation is needed for visual acceptance, real sign-in, physical stop/interference and environment changes that automation cannot safely provide. Respect each runner's isolation requirements and the user's scoped-session choice; clean-install testing is currently user-deferred.
 
 - [ ] Clean Windows Pi installation outside this WSL job, and clean WSL2 Ubuntu installation, with no dev dependency tree or separately installed Windows Node; record install/update/removal and missing/corrupt runtime/network diagnostics.
 - [ ] Dedicated interactive desktop: complete the remaining pointer and keyboard cancellation checks. The legacy `test:native:text:physical` runner is blocked because its fixture overwrote the original clipboard and could retire an unsettled input owner; a preservation-safe long-typing/cancellation runner remains needed.
