@@ -243,6 +243,7 @@ server.listen(0, "127.0.0.1", () =>
       upload,
       downloadName,
       settings,
+      ...(partial ? { partialFixture: true } : {}),
     }),
   ),
 );

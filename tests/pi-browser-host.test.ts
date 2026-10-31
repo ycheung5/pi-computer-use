@@ -395,7 +395,7 @@ test("stale recovery requires a successful result for the newly observed field a
 });
 
 // These subprocess fixtures are Linux executables, never Windows workers or models.
-for (const mode of ["query-failure", "deadline"]) {
+for (const mode of ["query-failure", "deadline", "partial-not-ready"]) {
   test(`retained ${mode} keeps fixture ownership and fences later dispatch/cases`, {
     skip: process.platform !== "linux",
   }, async () => {
@@ -490,9 +490,11 @@ for (const mode of ["query-failure", "deadline"]) {
       await put(join(pkg, "dist/index.js"), "export {};");
       await put(
         join(pkg, "dist/bundle/cli.js"),
-        mode === "deadline"
-          ? "setInterval(()=>{},1000);"
-          : "console.log(JSON.stringify({type:'agent_settled',aborted:false}));",
+        mode === "partial-not-ready"
+          ? `import{writeFileSync}from'node:fs';writeFileSync(${JSON.stringify(join(folder, "model-started"))},"started");console.log(JSON.stringify({type:'agent_settled',aborted:false}));`
+          : mode === "deadline"
+            ? "setInterval(()=>{},1000);"
+            : "console.log(JSON.stringify({type:'agent_settled',aborted:false}));",
       );
       await put(
         join(folder, "tests/browser-actions-server.mjs"),
@@ -503,7 +505,11 @@ for (const mode of ["query-failure", "deadline"]) {
       );
       controller = spawn(
         process.execPath,
-        [join(folder, "tests/pi-browser-host.mjs"), "--scenario", "all"],
+        [
+          join(folder, "tests/pi-browser-host.mjs"),
+          "--scenario",
+          mode === "partial-not-ready" ? "partial" : "all",
+        ],
         {
           env: {
             ...process.env,
@@ -538,8 +544,29 @@ for (const mode of ["query-failure", "deadline"]) {
         retained.reason,
         mode === "deadline"
           ? "host-deadline-ownership-retained"
-          : "owned-process-or-profile-evidence-unavailable",
+          : mode === "partial-not-ready"
+            ? "collector-error-ownership-retained"
+            : "owned-process-or-profile-evidence-unavailable",
       );
+      if (mode === "partial-not-ready") {
+        assert.equal(
+          owner?.piPid,
+          undefined,
+          "unready partial fixture never launches Pi",
+        );
+        assert.deepEqual(
+          JSON.parse(
+            await readFile(
+              join(journal, "..", "fixture-readiness.json"),
+              "utf8",
+            ),
+          ),
+          { ready: false },
+        );
+        await assert.rejects(readFile(join(folder, "model-started")), {
+          code: "ENOENT",
+        });
+      }
       assert.equal(owner?.keeperPid, controller.pid);
       process.kill(controller.pid ?? 0, 0);
       assert.equal(
@@ -1484,4 +1511,44 @@ test("partial recovery requires each observed field effect and genuine confirmat
     { cleanup: { ...facts.cleanup, processCount: 1 } },
   ])
     assert.equal(await accepted(complete, patch), false);
+});
+
+test("partial fixture readiness reports its optional mode before model startup", async () => {
+  const { createInterface } = await import("node:readline");
+  for (const partial of ["1", "0"]) {
+    const child = spawn(
+      process.execPath,
+      ["tests/browser-actions-server.mjs", "edge", "false"],
+      {
+        env: {
+          ...process.env,
+          PI_CU_PARTIAL_FIXTURE: partial,
+          PI_CU_MIXED_FIXTURE: "",
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+    const closed = once(child, "close"),
+      lines = createInterface({ input: child.stdout });
+    child.stderr.resume();
+    try {
+      const [line] = await once(lines, "line");
+      const source = JSON.parse(line);
+      assert.equal(source.partialFixture, partial === "1" ? true : undefined);
+      const html = await (await fetch(source.url + "form")).text();
+      assert.equal(
+        (html.match(/Context row /g) ?? []).length,
+        partial === "1" ? 200 : 0,
+      );
+      assert.deepEqual(JSON.parse(await readFile(source.settings, "utf8")), {
+        browserApp: "edge",
+        browserVisible: false,
+        browserSignIn: false,
+      });
+    } finally {
+      lines.close();
+      child.stdin.end();
+      assert.equal((await closed)[0], 0);
+    }
+  }
 });
