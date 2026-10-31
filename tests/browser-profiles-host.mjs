@@ -4,12 +4,44 @@ import { execFile, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { registerComputerUse } from "../dist/extension.js";
-import { nativeWorkerLaunch } from "../dist/launcher.js";
-import { computerUseHost } from "./native-host.mjs";
 
 const run = promisify(execFile);
 const app = process.argv[2] ?? "edge";
+const reconnect = process.argv.includes("--reconnect");
+const cleanupControlMode = process.argv.includes("--cleanup-control");
+assert.ok(
+  ["edge", "chrome", "firefox"].includes(app),
+  "Use edge, chrome or firefox",
+);
+if (reconnect)
+  assert.ok(
+    ["edge", "chrome"].includes(app),
+    "Reconnect fixture currently supports Chromium only",
+  );
+if (process.argv.includes("--plan")) {
+  assert.ok(
+    reconnect || cleanupControlMode,
+    "Use --plan with --reconnect or --cleanup-control",
+  );
+  console.log(
+    JSON.stringify({
+      executed: false,
+      mode: cleanupControlMode
+        ? "missing-lease-cleanup-control"
+        : "same-worker-reconnect",
+      app,
+      physicalInput: false,
+      dailyProfile: false,
+    }),
+  );
+  process.exit(0);
+}
+const [{ registerComputerUse }, { nativeWorkerLaunch }, { computerUseHost }] =
+  await Promise.all([
+    import("../dist/extension.js"),
+    import("../dist/launcher.js"),
+    import("./native-host.mjs"),
+  ]);
 const launch = await nativeWorkerLaunch();
 let serverPath = fileURLToPath(
   new URL("./browser-profiles-server.mjs", import.meta.url),
@@ -19,6 +51,11 @@ if (process.platform !== "win32")
 const server = spawn(launch.executable, [serverPath, app], {
   windowsHide: true,
   stdio: ["pipe", "pipe", "pipe"],
+});
+let serverErrors = "";
+server.stderr.setEncoding("utf8");
+server.stderr.on("data", (chunk) => {
+  serverErrors += chunk;
 });
 const lines = createInterface({ input: server.stdout });
 const source = await new Promise((resolve, reject) => {
@@ -55,6 +92,25 @@ async function close(host) {
   for (const handler of host.shutdown) await handler();
   host.shutdown.length = 0;
 }
+async function fixture(request) {
+  const response = await new Promise((resolve, reject) => {
+    const deadline = setTimeout(
+      () => reject(new Error("profile fixture timeout")),
+      40000,
+    );
+    lines.once("line", (line) => {
+      clearTimeout(deadline);
+      try {
+        resolve(JSON.parse(line));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    server.stdin.write(JSON.stringify(request) + "\n");
+  });
+  assert.equal(response.ok, true, JSON.stringify(response));
+  return response;
+}
 async function open(host, path) {
   const result = await call(host, "set_value", {
     elementId: "new-tab",
@@ -63,8 +119,71 @@ async function open(host, path) {
   assert.equal(result.ok, true, JSON.stringify(result));
   return result;
 }
+let reconnectReport;
+let cleanupControl;
 try {
-  if (process.argv.includes("--temporary-crash")) {
+  if (cleanupControlMode) {
+    cleanupControl = await fixture({ action: "arm-cleanup-control" });
+  } else if (reconnect) {
+    const host = create();
+    const original = await open(host, "/set");
+    assert.match((await open(host, "/read")).text, /Cookie: remembered/);
+    const workerPid = (await call(host, "health")).processId;
+    const first = await fixture({ action: "inspect-profile", workerPid });
+    assert.equal(first.profile.kept, true);
+    await host.emit("agent_settled", { aborted: false });
+    const closed = await fixture({
+      action: "close-owned-browser",
+      browser: first,
+      workerPid,
+    });
+    assert.equal(closed.ok, true, JSON.stringify(closed));
+    assert.equal(closed.oldRootAbsent, true);
+    assert.equal(
+      (await call(host, "health")).processId,
+      workerPid,
+      "worker remains alive after its browser closes",
+    );
+    const resumed = await open(host, "/read");
+    assert.match(resumed.text, /Cookie: remembered/);
+    const next = await fixture({ action: "inspect-profile", workerPid });
+    assert.notEqual(next.processId, first.processId);
+    assert.notEqual(next.creationDate, first.creationDate);
+    assert.notEqual(resumed.tab.id, original.tab.id);
+    const stale = await call(host, "accessibility_tree", {
+      browserTab: original.tab.id,
+    });
+    assert.equal(
+      stale.ok,
+      false,
+      "old tab must not silently target the replacement browser",
+    );
+    assert.match(String(stale.error), /STALE_BROWSER_REFERENCE/);
+    assert.equal(next.profile.path, first.profile.path);
+    assert.equal((await call(host, "health")).processId, workerPid);
+    await close(host);
+    const cleanup = await run(launch.executable, [
+      "--input-type=module",
+      "-e",
+      `import{access}from'node:fs/promises';for(const id of process.argv.slice(2).map(Number)){try{process.kill(id,0)}catch(error){if(error.code==='ESRCH')continue;throw error}throw new Error('OWNED_BROWSER_STILL_ALIVE:'+id)}try{await access(process.argv[1]+'.lock');throw new Error('PROFILE_LOCK_RETAINED')}catch(error){if(error.code!=='ENOENT')throw error}await access(process.argv[1]);console.log(JSON.stringify({browserAndWorkerRootsAbsent:true,keptProfilePresent:true,lockAbsent:true}))`,
+      next.profile.path,
+      String(first.processId),
+      String(next.processId),
+      String(workerPid),
+    ]);
+    reconnectReport = {
+      ok: true,
+      app,
+      mode: "same-worker-reconnect",
+      workerPid,
+      first,
+      next,
+      closeFixture: closed,
+      staleError: stale.error,
+      cookiePersisted: true,
+      cleanup: JSON.parse(cleanup.stdout),
+    };
+  } else if (process.argv.includes("--temporary-crash")) {
     let host = create();
     const notifications = [];
     await host.commands
@@ -275,10 +394,57 @@ try {
   for (const host of hosts) await close(host);
   lines.close();
   server.stdin.end();
-  const timer = setTimeout(() => server.kill(), 5000);
+  const timer =
+    reconnect || cleanupControlMode
+      ? undefined
+      : setTimeout(() => server.kill(), 5000);
   await new Promise((resolve) => {
     server.once("close", resolve);
     if (server.exitCode !== null) resolve();
   });
   clearTimeout(timer);
+  if (cleanupControlMode) {
+    console.log(
+      JSON.stringify({
+        cleanupControl,
+        fixtureExit: server.exitCode,
+        fixtureErrors: serverErrors,
+      }),
+    );
+    assert.equal(
+      server.exitCode,
+      1,
+      "live recorded root must block missing-lease deletion",
+    );
+    assert.match(serverErrors, /PROFILE_CLEANUP_BLOCKED/);
+  }
+  if (reconnect)
+    assert.equal(
+      server.exitCode,
+      0,
+      `fixture must confirm owned storage cleanup: ${serverErrors}`,
+    );
+}
+
+if (reconnectReport)
+  console.log(
+    JSON.stringify({ ...reconnectReport, fixtureStorageRemoved: true }),
+  );
+
+if (cleanupControlMode) {
+  const verified = await run(launch.executable, [
+    "--input-type=module",
+    "-e",
+    `import{readFile,rm}from'node:fs/promises';import{join}from'node:path';const text=await readFile(join(process.argv[1],'canary.txt'),'utf8');if(text!=='owned cleanup canary')throw new Error('CANARY_CHANGED');try{process.kill(Number(process.argv[3]),0);throw new Error('CONTROL_CHILD_ALIVE')}catch(error){if(error.code!=='ESRCH')throw error}await rm(process.argv[2],{recursive:true,force:true});console.log(JSON.stringify({retainedCanary:true,childExitedAfterRefusal:true,storageRemovedAfterChildExit:true}))`,
+    cleanupControl.profile,
+    cleanupControl.directory,
+    String(cleanupControl.processId),
+  ]);
+  console.log(
+    JSON.stringify({
+      ok: true,
+      mode: "missing-lease-cleanup-control",
+      ...JSON.parse(verified.stdout),
+    }),
+  );
 }
