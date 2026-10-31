@@ -164,3 +164,89 @@ test("Pi browser navigation is exposed without adding a separate MCP extension",
     for (const handler of shutdown) await handler();
   }
 });
+
+test("Pi gives actionable guidance on activation refusal without replaying", async () => {
+  const tools: ToolDefinition[] = [];
+  const shutdown: Array<() => Promise<void>> = [];
+  const host = {
+    registerTool: (tool: ToolDefinition) => {
+      tools.push(tool);
+    },
+    on: (event: string, handler: () => Promise<void>) => {
+      if (event === "session_shutdown") shutdown.push(handler);
+      return () => {};
+    },
+  } as Pick<ExtensionAPI, "registerTool" | "on">;
+  const peer = `const i=require('node:readline').createInterface({input:process.stdin});let count=0;i.on('line',line=>{const r=JSON.parse(line);if(!r.action)return;count++;const error=r.action==='snapshot'?'WINDOWS_ERROR: TARGET_ACTIVATION_REFUSED: Windows did not grant foreground access':r.action==='find'?'WINDOWS_ERROR: OTHER_FAILURE: TARGET_ACTIVATION_REFUSED':'TARGET_ACTIVATION_REFUSED';console.log(JSON.stringify({id:r.id,result:{ok:false,action:r.action,error,cleanupConfirmed:true,activationDiagnostic:{foreground:'unavailable'},dispatchCount:count}}));});`;
+  registerComputerUse(host, {
+    launch: async () => ({ executable: process.execPath, args: ["-e", peer] }),
+  });
+  try {
+    const tool = tools.find(
+      (item) => item.name === "windows_computer_use_type_text",
+    );
+    assert.ok(tool);
+    const result = await tool.execute(
+      "refused",
+      { text: "test" },
+      undefined,
+      undefined,
+      {} as Parameters<typeof tool.execute>[4],
+    );
+    assert.equal(result.isError, true);
+    const details = result.details as Record<string, unknown>;
+    assert.equal(details.error, "TARGET_ACTIVATION_REFUSED");
+    assert.equal(details.cleanupConfirmed, true);
+    assert.deepEqual(details.activationDiagnostic, {
+      foreground: "unavailable",
+    });
+    assert.equal(details.dispatchCount, 1);
+    const content = JSON.stringify(result.content);
+    assert.match(content, /Windows refused activation/);
+    assert.match(content, /re-observe/i);
+    assert.match(content, /ask the user/i);
+    assert.match(content, /fresh observation/i);
+    const snapshot = tools.find(
+      (item) => item.name === "windows_computer_use_snapshot",
+    );
+    assert.ok(snapshot);
+    const wrapped = await snapshot.execute(
+      "wrapped",
+      {},
+      undefined,
+      undefined,
+      {} as Parameters<typeof snapshot.execute>[4],
+    );
+    const wrappedDetails = wrapped.details as Record<string, unknown>;
+    assert.equal(
+      wrappedDetails.error,
+      "WINDOWS_ERROR: TARGET_ACTIVATION_REFUSED: Windows did not grant foreground access",
+    );
+    assert.equal(wrappedDetails.cleanupConfirmed, true);
+    assert.deepEqual(wrappedDetails.activationDiagnostic, {
+      foreground: "unavailable",
+    });
+    assert.equal(wrappedDetails.dispatchCount, 2);
+    assert.match(JSON.stringify(wrapped.content), /Windows refused activation/);
+    const find = tools.find(
+      (item) => item.name === "windows_computer_use_find",
+    );
+    assert.ok(find);
+    const unrelated = await find.execute(
+      "other",
+      {},
+      undefined,
+      undefined,
+      {} as Parameters<typeof find.execute>[4],
+    );
+    const unrelatedDetails = unrelated.details as Record<string, unknown>;
+    assert.equal(
+      unrelatedDetails.error,
+      "WINDOWS_ERROR: OTHER_FAILURE: TARGET_ACTIVATION_REFUSED",
+    );
+    assert.equal(unrelatedDetails.dispatchCount, 3);
+    assert.equal(unrelatedDetails.guidance, undefined);
+  } finally {
+    for (const handler of shutdown) await handler();
+  }
+});
