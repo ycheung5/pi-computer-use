@@ -905,11 +905,15 @@ async function browserCue(
   point?: { x: number; y: number },
   signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
+  signal?.throwIfAborted();
   if (tab.firefox)
     return {
       active: false,
       limitation: "Experimental Firefox has no browser presentation cues",
     };
+  // Modal dialogs pause page JavaScript; retain the existing cue until handled.
+  if (mode === "mark" && tab.dialog)
+    return tab.presentation ?? { active: false };
   try {
     const cueSignal = signal
       ? AbortSignal.any([signal, AbortSignal.timeout(1000)])

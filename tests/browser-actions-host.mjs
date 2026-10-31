@@ -238,6 +238,11 @@ try {
   });
   assert.equal(accepted.ok, true, JSON.stringify(accepted));
   assert.match(accepted.text, /Prompt: fixture answer/);
+  assert.doesNotMatch(
+    JSON.stringify(accepted.presentation),
+    /COMPUTER_USE_CANCELLED/,
+    "accepting a modal prompt must not label a cosmetic cue deadline as cancellation",
+  );
   const color = await find("Color", "combobox");
   assert.equal(
     (await call("set_value", { elementId: color, value: "Green" })).ok,
