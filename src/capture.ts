@@ -111,6 +111,7 @@ export async function screenshot(
         "INVALID_ARGUMENTS: invalid screenshot target, scope or maxWidth (integer 0–7680)",
     };
   let nativeCaptureError: unknown;
+  let wgcError: unknown;
   try {
     const result = await nativeDesktop.execute(
       "screenshot",
@@ -137,6 +138,7 @@ export async function screenshot(
         if (result.nativeCaptureError !== undefined)
           composited.nativeCaptureError = result.nativeCaptureError;
         if (composited.ok) return composited;
+        wgcError = composited.error;
         if (
           !result.screenshot ||
           composited.cleanupConfirmed === false ||
@@ -147,6 +149,7 @@ export async function screenshot(
       } catch (error) {
         if (signal?.aborted) throw error;
         failure = error instanceof Error ? error.message : String(error);
+        wgcError = failure;
         if (/WINDOW_REFERENCE|CANCEL|STOP|CLEANUP_UNCONFIRMED/.test(failure))
           throw error;
       } finally {
@@ -170,6 +173,7 @@ export async function screenshot(
       action: "screenshot",
       error: error instanceof Error ? error.message : String(error),
       ...(nativeCaptureError === undefined ? {} : { nativeCaptureError }),
+      ...(wgcError === undefined ? {} : { wgcError }),
     };
   }
 }
