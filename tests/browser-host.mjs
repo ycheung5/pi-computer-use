@@ -136,6 +136,8 @@ try {
   for (const [query, property] of [
     ["Disabled editor", "disabled"],
     ["Read-only editor", "readonly"],
+    ["ARIA disabled editor", "disabled"],
+    ["ARIA read-only editor", "readonly"],
   ]) {
     const matches = await client.execute("find", { browserTab: tab, query });
     const target = matches.results.find((entry) => entry.role === "textbox");
