@@ -1418,6 +1418,56 @@ async function callPage<Arg, Result>(
   return result.result.value as Result;
 }
 
+// The browser reports the host/frame as document.activeElement when focus is
+// nested. Follow only DOM-accessible focus; opaque frames retain prior behavior.
+async function focusedBrowserControl(tab: Tab, signal?: AbortSignal) {
+  return await callPage(
+    tab,
+    () => {
+      let element: Element | null = document.activeElement;
+      let disabled = false;
+      for (let depth = 0; element && depth < 64; depth++) {
+        disabled ||=
+          element.matches(":disabled") ||
+          element.closest('[aria-disabled="true"], [inert]') !== null;
+        const shadow = element.shadowRoot?.activeElement;
+        if (shadow) {
+          element = shadow;
+          continue;
+        }
+        if (element.tagName.toLowerCase() === "iframe") {
+          try {
+            const nested = (element as HTMLIFrameElement).contentDocument
+              ?.activeElement;
+            if (nested) {
+              element = nested;
+              continue;
+            }
+          } catch {
+            // Cross-origin frames cannot be inspected from this document.
+          }
+        }
+        break;
+      }
+      if (!element) return null;
+      const tag = element.tagName.toLowerCase();
+      return {
+        tag,
+        type: tag === "input" ? (element as HTMLInputElement).type : "",
+        role: element.getAttribute("role")?.trim().split(/\s+/)[0] ?? "",
+        disabled,
+        readonly: element.getAttribute("readonly") !== null,
+        ariaReadonly: element.getAttribute("aria-readonly") === "true",
+        contentEditable:
+          "isContentEditable" in element &&
+          (element as HTMLElement).isContentEditable,
+      };
+    },
+    undefined,
+    signal,
+  );
+}
+
 async function pressBrowserKeys(
   tab: Tab,
   keys: string[],
@@ -1530,54 +1580,58 @@ async function pressBrowserKeys(
     "pagedown",
   ].includes(lower);
   if (plainText || editingKey || editingShortcut || newline || adjustmentKey) {
-    const readonly = await callPage(
-      tab,
-      (check: { newline: boolean; adjustment: boolean }) => {
-        const element = document.activeElement;
-        if (!element || element.getAttribute("aria-readonly") !== "true")
-          return false;
-        if (check.adjustment) {
-          const role = element.getAttribute("role")?.trim().split(/\s+/)[0];
-          return (
-            element instanceof HTMLSelectElement ||
-            (element instanceof HTMLInputElement &&
-              [
-                "number",
-                "range",
-                "date",
-                "datetime-local",
-                "month",
-                "week",
-                "time",
-                "color",
-                "radio",
-              ].includes(element.type)) ||
-            [
-              "spinbutton",
-              "slider",
-              "scrollbar",
-              "combobox",
-              "listbox",
-              "radiogroup",
-            ].includes(role ?? "")
-          );
-        }
-        // Enter in a single-line input may submit a form instead of editing.
-        return !check.newline || !(element instanceof HTMLInputElement);
-      },
-      {
-        newline: newline && !plainText && !editingKey && !editingShortcut,
-        adjustment:
-          adjustmentKey &&
-          !plainText &&
-          !editingKey &&
-          !editingShortcut &&
-          !newline,
-      },
-      signal,
-    );
-    if (readonly)
-      return fail("BROWSER_NOT_EDITABLE", "focused field is readonly");
+    const element = await focusedBrowserControl(tab, signal);
+    const disabled = element?.disabled === true;
+    let readonly = element?.ariaReadonly === true;
+    if (
+      !disabled &&
+      element &&
+      readonly &&
+      adjustmentKey &&
+      !plainText &&
+      !editingKey &&
+      !editingShortcut &&
+      !newline
+    ) {
+      readonly =
+        element.tag === "select" ||
+        (element.tag === "input" &&
+          [
+            "number",
+            "range",
+            "date",
+            "datetime-local",
+            "month",
+            "week",
+            "time",
+            "color",
+            "radio",
+          ].includes(element.type)) ||
+        [
+          "spinbutton",
+          "slider",
+          "scrollbar",
+          "combobox",
+          "listbox",
+          "radiogroup",
+        ].includes(element.role);
+    } else if (
+      !disabled &&
+      element &&
+      readonly &&
+      newline &&
+      !plainText &&
+      !editingKey &&
+      !editingShortcut
+    ) {
+      // Enter in a single-line input may submit a form instead of editing.
+      readonly = element.tag !== "input";
+    }
+    if (disabled || readonly)
+      return fail(
+        "BROWSER_NOT_EDITABLE",
+        disabled ? "focused field is disabled" : "focused field is readonly",
+      );
   }
   const chord = [
     ...["Control", "Alt", "Shift"]
@@ -2398,27 +2452,15 @@ export async function browse(
         if (!focused)
           return fail("BROWSER_NOT_FOCUSABLE", "element cannot take focus");
       } else if (action === "type_text") {
-        const editable = await callPage(
-          tab,
-          () => {
-            const control = document.activeElement;
-            if (
-              !control ||
-              control.matches(":disabled") ||
-              control.getAttribute("readonly") !== null ||
-              control.getAttribute("aria-readonly") === "true" ||
-              control.closest('[aria-disabled="true"], [inert]')
-            )
-              return false;
-            return (
-              control instanceof HTMLInputElement ||
-              control instanceof HTMLTextAreaElement ||
-              (control instanceof HTMLElement && control.isContentEditable)
-            );
-          },
-          undefined,
-          signal,
-        );
+        const control = await focusedBrowserControl(tab, signal);
+        const editable =
+          control !== null &&
+          !control.disabled &&
+          !control.readonly &&
+          !control.ariaReadonly &&
+          (control.tag === "input" ||
+            control.tag === "textarea" ||
+            control.contentEditable);
         if (!editable)
           return fail(
             "BROWSER_NO_FOCUSED_FIELD",
