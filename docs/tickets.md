@@ -44,6 +44,7 @@ The user chose scoped disposable tests in the current Windows session and grante
 | --- | --- | --- |
 | #24, #25, #29, #32, #33, #34 | Closed, completed | Six of fourteen follow-up tickets completed audit/comparison scopes. Original requirements retain their acceptance. |
 | #16, #26, #27, #28, #30, #31 | Open, active tool deliverables | Original plus transferred product criteria and remaining comparison evidence; each issue identifies its inherited source criteria. |
+| #17 | Workflow criteria supported; closure review pending | Official Firefox 144.0 read/lifecycle and actions passed on current sources after a fixture-only date-role correction; prior native-host/paired evidence supplies the remaining supported scope. Retained action-profile cleanup and manual sign-in remain under #18. |
 | #35, #36 | Open, partial | Pi pilots exist; recovery/repeated acceptance incomplete. Each safe scenario runs when its actual prerequisites are met. Full closure requires all coverage. |
 | #37 | Open, active | Diagnose known cases and maintain repair ownership now. Final aggregate reconciliation waits for #35/#36 and other required results. |
 
