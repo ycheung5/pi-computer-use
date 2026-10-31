@@ -118,6 +118,53 @@ try {
     found.matches.some((node) => node.name === "After custom provider"),
     "traversal continues after unknown role",
   );
+  const flatten = (node) =>
+    node ? [node, ...(node.children ?? []).flatMap(flatten)] : [];
+  for (const viewMode of ["control", "raw", "content"]) {
+    const included = await client.execute("snapshot", {
+      ...targetArgs(),
+      includeScreenshot: false,
+      activate: false,
+      viewMode,
+      includeOffscreen: true,
+    });
+    const ancestor = flatten(included.tree).find(
+      (node) => node.name === "Offscreen ancestor",
+    );
+    const visible = flatten(ancestor).find(
+      (node) => node.name === "Visible descendant",
+    );
+    assert.equal(ancestor?.isOffscreen, true, "fixture ancestor is offscreen");
+    assert.equal(visible?.isOffscreen, false, "fixture descendant is visible");
+    const visibleOnly = await client.execute("snapshot", {
+      ...targetArgs(),
+      includeScreenshot: false,
+      activate: false,
+      viewMode,
+      includeOffscreen: false,
+    });
+    assert.ok(
+      flatten(visibleOnly.tree).some(
+        (node) => node.name === "Visible descendant",
+      ),
+      `${viewMode} promotes visible descendants through filtered ancestors`,
+    );
+    assert.equal(
+      flatten(visibleOnly.tree).some(
+        (node) => node.name === "Offscreen ancestor",
+      ),
+      false,
+    );
+    const located = await client.execute("find", {
+      ...targetArgs(),
+      query: "Visible descendant",
+      ocrFallback: false,
+      activate: false,
+      viewMode,
+      includeOffscreen: false,
+    });
+    assert.equal(located.matches.length, 1, "visible descendant can be found");
+  }
   const absent = await client.execute("wait_for", {
     nativeWindowHandle: hwnd,
     processId: fixture.pid,
@@ -265,6 +312,7 @@ try {
       inspection: true,
       continuedTraversal: true,
       absenceInconclusive: true,
+      visibleDescendantPromotion: true,
       physicalInput: false,
     }),
   );

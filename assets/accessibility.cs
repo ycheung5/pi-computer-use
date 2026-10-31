@@ -125,20 +125,22 @@ partial class WindowsBridge {
     List<object> children=new List<object>();
     AutomationElement child=state.Walker.GetFirstChild(element);
     while(child!=null && state.CanRead()) {
-      bool include=state.Offscreen || !child.Current.IsOffscreen;
-      if(include) {
-        bool transparent=state.BrowserLayout && child.Current.ControlType==ControlType.Pane && String.IsNullOrEmpty(child.Current.Name);
-        int childDepth=depth+(transparent?0:1);
-        if(childDepth>state.Depth) { if(state.Reason==null) state.Reason="maxDepth"; }
-        else { Dictionary<string,object> item=ReadTree(child,window,childDepth,physicalDepth+1,state); if(item!=null) children.Add(item); }
-      }
+      bool transparent=state.BrowserLayout && child.Current.ControlType==ControlType.Pane && String.IsNullOrEmpty(child.Current.Name);
+      int childDepth=depth+(transparent?0:1);
+      if(childDepth>state.Depth) { if(state.Reason==null) state.Reason="maxDepth"; }
+      else { Dictionary<string,object> item=ReadTree(child,window,childDepth,physicalDepth+1,state); if(item!=null) children.Add(item); }
       if(state.Reason=="maxNodes" || state.Reason=="treeTimeoutMs") break;
       child=state.Walker.GetNextSibling(child);
     }
     if(children.Count>0) node["children"]=children;
     return node;
   }
-  static TreeWalker ObservationWalker(string view) { return view=="raw" ? TreeWalker.RawViewWalker : view=="content" ? TreeWalker.ContentViewWalker : TreeWalker.ControlViewWalker; }
+  static TreeWalker ObservationWalker(string view,bool includeOffscreen) {
+    Condition condition=view=="raw"?Automation.RawViewCondition:view=="content"?Automation.ContentViewCondition:Automation.ControlViewCondition;
+    // Filter the projected view, rather than prune visible descendants of an offscreen ancestor.
+    if(!includeOffscreen)condition=new AndCondition(condition,new PropertyCondition(AutomationElement.IsOffscreenProperty,false));
+    return new TreeWalker(condition);
+  }
   static Dictionary<string,object> WarmBrowser(IntPtr window,Traversal state) {
     List<IntPtr> renderers=new List<IntPtr>();
     EnumChildWindows(window,delegate(IntPtr child,IntPtr ignored) { StringBuilder name=new StringBuilder(256); GetClassName(child,name,name.Capacity); if(name.ToString()=="Chrome_RenderWidgetHostHWND") renderers.Add(child); return true; },IntPtr.Zero);
@@ -172,7 +174,8 @@ partial class WindowsBridge {
     bool desktop=TextOption(args,"scope","active_window")=="desktop";
     IntPtr window=desktop ? IntPtr.Zero : ResolveObservationWindow(args);
     if(window!=IntPtr.Zero){RememberPointerOrigin(window);RememberPointerTitle(args,window);}
-    Traversal state=new Traversal { Budget=NumberOption(args,"treeTimeoutMs",5000),Maximum=NumberOption(args,"maxNodes",500),Depth=NumberOption(args,"maxDepth",6),Offscreen=Option(args,"includeOffscreen",false),Full=full,Walker=ObservationWalker(TextOption(args,"viewMode","control")) };
+    bool includeOffscreen=Option(args,"includeOffscreen",false);
+    Traversal state=new Traversal { Budget=NumberOption(args,"treeTimeoutMs",5000),Maximum=NumberOption(args,"maxNodes",500),Depth=NumberOption(args,"maxDepth",6),Offscreen=includeOffscreen,Full=full,Walker=ObservationWalker(TextOption(args,"viewMode","control"),includeOffscreen) };
     if(window!=IntPtr.Zero) { StringBuilder name=new StringBuilder(256); GetClassName(window,name,name.Capacity); state.BrowserLayout=name.ToString().StartsWith("Chrome_",StringComparison.Ordinal) || name.ToString().StartsWith("Mozilla",StringComparison.Ordinal); }
     Dictionary<string,object> web=window==IntPtr.Zero ? null : WarmBrowser(window,state);
     Dictionary<string,object> root=null;
