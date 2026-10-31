@@ -14,7 +14,7 @@ Read the row matching the task; follow section links before reading whole docume
 | Domain terminology | [Glossary](../GLOSSARY.md) |
 | Why behavior parity was chosen | [ADR 0001](adr/0001-preserve-reference-behavior.md) |
 | Publish or read issues | [Issue tracker](agents/issue-tracker.md), [triage labels](agents/triage-labels.md) |
-| Current work queue and original issue disposition | [Current tickets](tickets.md#current-investigation-and-acceptance-work), [original obligations](tickets.md#original-issue-disposition) |
+| What works, remaining outcomes, next work and cleanup decisions | [Delivery map](tickets.md#delivery-outcomes-and-ownership), [execution queue](tickets.md#execution-queue), [cleanup dispositions](tickets.md#cleanup-dispositions), [original obligations](tickets.md#original-issue-disposition) |
 | Worker setup, protocol and test evidence | [Runtime and validation](runtime.md) |
 | Stop command, listener and physical-input gate | [Stopping](stopping.md) |
 | Control indicators, preview and manual acceptance | [Indicators](indicators.md) |

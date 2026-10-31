@@ -1,6 +1,6 @@
 # Pi computer-use implementation plan
 
-Status: implementation in progress on `integration/computer-use`. See [draft PR #22](https://github.com/ycheung5/pi-computer-use/pull/22) for integration evidence; release acceptance is not complete.
+Status: implementation and acceptance work on `integration/reference-alignment`. See [draft PR #22](https://github.com/ycheung5/pi-computer-use/pull/22) for integration history and [current delivery outcomes](tickets.md#delivery-outcomes-and-ownership) for remaining work; release acceptance is incomplete.
 
 Requirements and behavioral contracts are authoritative in the [specification](spec.md). Use the [documentation index](README.md) to load only relevant context.
 
@@ -37,7 +37,7 @@ Every supported tool gets argument validation, success, failure, cancellation wh
 | Presentation | Pi tool rendering, image results, evidence/error distinctions; real indicators, stop shortcuts, remote/recording visibility and display changes checked manually |
 | Performance | Reproducible cold startup, warm reads, input dispatch and complete workflows compared with reference on the same machine |
 
-Use deterministic local browser pages and dedicated disposable Windows fixture apps for automation. Do not drive the user's normal apps or profiles in automated suites. Separate portable unit/contract tests from live Windows integration suites, and separate tests that emit physical input so they run only on a dedicated interactive desktop.
+Use deterministic local pages, isolated browser profiles and disposable Windows targets. The user selected scoped tests in the current Windows session with standing idle-test authorization. Bound actions to owned disposable targets and preserve unrelated apps/documents; serialize desktop activity. Separate portable, live and physical-input suites. A fixture requiring stronger isolation stays blocked until its actual prerequisites are met.
 
 Exercise the integrated extension through both native Windows Pi and WSL2 Pi; worker-only tests do not prove both launch paths. Pin/document tested Pi and dependency versions. Retain failure logs and timing artifacts without persisting sensitive desktop content unnecessarily. CI may run portable tests and suitable Windows fixtures; interactive-desktop, multi-monitor, emergency-stop and user acceptance runs must be recorded separately when CI cannot reproduce them.
 
@@ -53,11 +53,11 @@ The initial foundation, desktop and browser implementation exists; release accep
 | 4. Diagnose and align | Reproduce failures with direct tool calls where possible. Compare mechanisms and change one suspected cause at a time. Implement reference behavior unless a demonstrated gap requires improvement. | Failed cases and affected regressions rerun; required task/recovery scenarios pass three consecutive reset runs on the final candidate. Unresolved outcomes remain failed, blocked or explicitly accepted limitations. |
 | 5. Optimize | Retain the accepted cases and measure justified changes against them and DSH. | Correctness and preservation first, fewer unnecessary interventions second, latency and token use third. No improvement claim from speed alone. |
 
-Phases 2 and 3 gather evidence before broad repair work; a scenario that cannot run has a blocked result, not a fabricated failure or pass. An unsafe fixture prevents its dependent cases from running, but independent cases can continue. Phase 4 loops through diagnosis, targeted changes and reruns until required outcomes are reasonably correct. No fixed production retry count or five-minute agent policy is introduced.
+The phases describe evidence and completion obligations. Execute phases 2–4 per scenario: collect its baseline, diagnose an observed failure, make a targeted repair, and rerun that scenario and affected regressions. Full-suite collection is not a prerequisite for diagnosing an available failure. A blocked or unsafe case halts its dependent activity; independently safe Pi scenarios remain runnable, including while DSH credentials are unavailable. Final reconciliation still accounts for every required outcome. No fixed production retry count or five-minute agent policy is introduced.
 
 Every investigation or implementation change must reconcile the affected documentation before its phase closes: requirements in the spec, sequencing here, cases/results in validation, current behavior in topic guides, and deliberate-deviation rationale in an ADR. Replace stale guidance and remove duplicate instructions; preserve concise historical evidence without presenting it as current acceptance. Update the index and check links after moves.
 
-Current checkpoint (2026-10-30): phase 1 audit is complete. Phase 2 tool-baseline collection is partial, including the first dedicated physical session and retained fixture/reference failures. Phases 3–5 have not completed: real-agent baselines, mechanism repairs and optimization remain pending. Use the [current ticket statuses](tickets.md#current-investigation-and-acceptance-work) and [validation evidence](validation.md) for exact completed and missing criteria. Extend existing harnesses only as needed; implement production fixes after diagnosis. No new public test-only seam is planned.
+Current checkpoint (2026-10-31): audit/comparison tickets #24, #25, #29, #32, #33 and #34 are complete in their recorded scopes. Other tool comparisons and real-agent acceptance are partial. Targeted schema, guidance, input-protocol and browser-control repairs have already landed; final acceptance and optimization remain incomplete. Use the [execution queue](tickets.md#execution-queue) rather than restarting implementation or waiting for every unrelated comparison. Reuse existing fixtures; each new runner requires a named coverage gap. No new public test-only seam is planned.
 
 ## Completion criteria
 

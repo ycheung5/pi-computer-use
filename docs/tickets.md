@@ -2,89 +2,65 @@
 
 ## Current investigation and acceptance work
 
-Parent: [spec #23](https://github.com/ycheung5/pi-computer-use/issues/23). The approved first wave establishes reproducible evidence; targeted production repair tickets follow the findings in #37. Open tickets use their recorded triage labels (`ready-for-agent` or `needs-info`); only work whose blockers are complete can start. Baseline completion does not turn failed product outcomes into passing acceptance.
+Current delivery view, reconciled against GitHub on 2026-10-31. Requirements remain in [spec](spec.md); results and retained failures live in [validation](validation.md). Product parent [#1](https://github.com/ycheung5/pi-computer-use/issues/1), repair parent [#23](https://github.com/ycheung5/pi-computer-use/issues/23), and release gate [#21](https://github.com/ycheung5/pi-computer-use/issues/21) remain open.
 
-GitHub supports native dependencies, but the connected tools expose no dependency-write operation and GitHub CLI is unavailable here. Ticket bodies therefore record explicit blocking issue links; native dependency links have not been created. No parent issue was modified.
+The goal is one standalone Pi package that completes Windows tasks from native Windows and WSL2, follows pinned DSH behavior, preserves user work and supports recovery. A completed comparison establishes its stated evidence scope; it does not certify the product or close an original requirement.
 
-Current progress (2026-10-30): #24, #25, #29, #32, #33 and #34 have completed their audit or automated/passive comparison scopes (6 of 14 tickets). #28 and #31 retain partial evidence and open acceptance gates; paired native element scroll now passes on both engines but differs in distance, and a provider-unavailable probe records Pi partial evidence while reference propagation remains blocked. #26, #27 and #30 now have a first authorized physical baseline: Pi Unicode and corrected pointer cases passed, and paired Pi/DSH window-management fixtures passed 11 scoped cases including a same-process distractor and replacement identity, and each engine completed one same-application drag/drop with an independently observed release; virtual-file indexed coverage found Pi safe refusal/preservation and DSH loss after dispatch; reference failures are retained. Follow-up one-variable Unicode probes found that removing Pi pacing corrupted one controlled case, while either DSH key-up or batch-size changes alone did not fix it; the exact cause and minimum delay remain unknown. Clipboard startup safely refused an unsupported original value; after the user supplied a plain-text sentinel, the custom indexed fixture failed its precondition; a standard virtual-file fixture exposed readable indexed bytes despite a failed predictive query and was compared on both engines. A separate newer-copy case passed Pi and failed DSH; both fixtures restored the sentinel. A fixture-only locked-clipboard prerequisite passed without reading or replacing clipboard data, while locked-backend behavior remains untested. An isolated no-model DSH SDK preflight passed its refusal/shutdown check; its generic MCP bridge discovered 25 pinned reference tools and a local synthetic provider received all 25; the unchanged WSL adapter and actual model behavior remain unverified. The reference scroll step calculation follows Windows wheel lines while Pi uses one step per notch, matching the observed distance difference. These tickets remain open for their outstanding criteria. #35/#36 real-agent tasks and #37 final diagnosis/repair breakdown remain pending their prerequisites. Comparison completion does not mean every product outcome passed: retained findings include schema/guidance gaps, foreground restoration, reference minimized capture, temporary profile cleanup and Firefox reconnect. After the baseline collection, launch schema bounds and action-specific guidance were implemented; portable checks have since passed, while live and real-agent acceptance remain open. See [validation evidence](validation.md).
+### Delivery outcomes and ownership
 
-Latest follow-up: a physical Esc stopped active typing in the Pi worker fixture; operation settlement, stable partial text, recovery and released keys were observed. This does not establish real Pi-host, DSH, custom-shortcut or known-held-modifier acceptance (#31). Passive native Pi host containment observed the host, worker and a process named `windows` in a job; the last process's identity and external descendants are unverified. Synthetic forced job termination skipped managed cleanup, so the physical host fixture remains disabled. The reviewed supervisor probes do not establish safe locked-clipboard or active-input cleanup (#27). See [validation evidence](validation.md#remaining-cancellation-and-locked-clipboard-test-boundaries) and [stopping](stopping.md).
+Rows map requirements to implementation, representative checks and the next action. Paths are navigation pointers, not proof every line or environment has been reviewed. Original issues own product criteria; comparison issues supply evidence rather than commission duplicate implementation.
 
-Current run status (2026-10-30): the user authorized a dedicated idle desktop session after the initial deferral. The first scripted physical baseline has finished and desktop input is stopped. Keep unexecuted physical/manual criteria open; see [dedicated-session evidence](validation.md#dedicated-physical-comparison-evidence). Further live runs require an available dedicated idle session.
-
-| Issue | Deliverable | Blocked by | Status |
+| User outcome / requirement owner | Implementation | Existing checks / evidence | Current state and next completion action |
 | --- | --- | --- | --- |
-| [#24](https://github.com/ycheung5/pi-computer-use/issues/24) | Establish the DSH baseline and deviation inventory | None | Done — comparison/audit scope |
-| [#25](https://github.com/ycheung5/pi-computer-use/issues/25) | Run one reproducible DSH/Pi comparison end to end | #24 | Done — comparison/audit scope |
-| [#26](https://github.com/ycheung5/pi-computer-use/issues/26) | Compare Unicode typing and multiline append | #25 | Partial — criteria remain |
-| [#27](https://github.com/ycheung5/pi-computer-use/issues/27) | Compare clipboard entry and preservation | #25 | Partial — criteria remain |
-| [#28](https://github.com/ycheung5/pi-computer-use/issues/28) | Compare accessibility targeting and waits | #25 | Partial — criteria remain |
-| [#29](https://github.com/ycheung5/pi-computer-use/issues/29) | Compare screenshot, OCR and coordinate mapping | #25 | Done — comparison/audit scope |
-| [#30](https://github.com/ycheung5/pi-computer-use/issues/30) | Compare window management and pointer workflows | #29 | Partial — criteria remain |
-| [#31](https://github.com/ycheung5/pi-computer-use/issues/31) | Verify stopping, ownership and interrupted-operation cleanup | #25 | Partial — criteria remain |
-| [#32](https://github.com/ycheung5/pi-computer-use/issues/32) | Compare browser form completion and delayed results | #25 | Done — comparison/audit scope |
-| [#33](https://github.com/ycheung5/pi-computer-use/issues/33) | Compare browser navigation, dialogs, transfers and profiles | #32 | Done — comparison/audit scope |
-| [#34](https://github.com/ycheung5/pi-computer-use/issues/34) | Verify the installed Pi experience on Windows and WSL2 | #24 | Done — comparison/audit scope |
-| [#35](https://github.com/ycheung5/pi-computer-use/issues/35) | Measure real-agent native tasks and recovery | #26, #27, #28, #30, #31, #34 | Blocked — prerequisites |
-| [#36](https://github.com/ycheung5/pi-computer-use/issues/36) | Measure real-agent browser and mixed workflows | #30, #33, #34 | Blocked — prerequisites |
-| [#37](https://github.com/ycheung5/pi-computer-use/issues/37) | Diagnose baseline failures and define targeted repairs | #35, #36 | Blocked — prerequisites |
+| Install one package and use Pi from Windows or WSL2 — #2, #3 | `src/extension.ts`, `launcher.ts`, `runtime.ts`, `client.ts`, `worker.ts` | `tests/package-host.mjs`, `pi-host.mjs`, `wsl-health.mjs`; [host evidence](validation.md#current-host-acceptance-evidence), #34 | Both current host paths passed scripted packaged health/list. #3 complete; #2 needs clean-Windows provisioning evidence. Reuse host runners. |
+| Discover and operate the intended accessible control — #4, #5, #10, #14 | `src/accessibility.ts`, `desktop.ts`, `waits.ts`; `assets/windows.cs`, `accessibility.cs`, `controls.cs` | `tests/native-accessibility.mjs`, `native-controls.mjs`, `native-waits.mjs`, `accessibility-comparison.mjs`; #28 | #14 complete. Quiet-scroll cancellation/parity, inaccessible and genuinely reused HWND targets, and provider/targeting coverage remain. HWND/PID cannot distinguish same-process reuse; see [Windows guidance](windows.md). |
+| Read screenshots/OCR and mapped coordinates — #6, #7 | `src/capture.ts`, `ocr.ts`; capture/OCR C# assets | `tests/native-capture.mjs`, `native-ocr.mjs`, `reference-capture.mjs`; #29 | Scripted comparison complete. Original mixed-DPI/display and OCR availability/language/cancellation evidence remains. Reuse fixtures and grouped manual checks. |
+| Manage windows and pointer input while preserving other work — #11, #13 | `src/pointer.ts`, `window-management.ts`; corresponding C# assets | `tests/native-pointer-physical.mjs`, `native-pointer-drop.mjs`, `window-management-comparison.mjs`; #30 | Scoped management/counters/drag-drop passed. Foreground restoration, user interference and menu cases remain incomplete. Diagnose observed failures before changing activation. |
+| Enter exact text and preserve clipboard state — #12 | `src/text.ts`; `assets/text.cs`, `clipboard.cs` | `tests/native-notepad-unicode.mjs`, `native-ole-clipboard.mjs`; #26, #27 | Pi exact-text and supported preservation cases passed; pacing remains provisional. Locked-backend, history/cloud and broader interruption coverage remain. These checks do not complete the ordinary Notepad task. |
+| Stop safely and resume in a new operation — #8, #9 | `src/client.ts`, `worker.ts`, `ownership.ts`, `stop.ts`; corresponding C# assets | `tests/ownership-host.mjs`, `native-stop-busy.mjs`, `input-preparation-worker.test.ts`; #31 | #8 complete. Scoped worker Esc/release passed. Pi-host/DSH stop, configured shortcut and known-held-key cases remain. Physical Pi-host runner retains its unproved-cleanup guard. |
+| Work in isolated Chrome/Edge pages — #15, #16 | `src/browser.ts`, `browser-actions.ts` | `tests/browser-host.mjs`, `browser-actions-host.mjs`, `browser-comparison.mjs`; #32, #33 | Scripted comparisons complete; disabled/read-only/nested-focus fixes have regressions. Original installed-browser, cancellation, background and transfer obligations retain missing evidence. |
+| Use experimental installed Firefox and dedicated sign-ins — #17, #18 | `src/browser.ts`, `browser-profiles.ts` | `tests/browser-firefox-endpoint.mjs`, `browser-profiles-host.mjs`, `browser-advanced-comparison.mjs`; #33 | Experimental scope retained. Reconnect/profile recovery and interactive sign-in obligations remain; comparison findings do not certify product acceptance. |
+| Configure tools and see active control — #19, #20 | `src/settings.ts`, `stop.ts`, `browser-indicators.ts`; `assets/indicators.cs` | `tests/settings-host.mjs`, `indicators-host.mjs`; [indicator evidence](indicators.md), #34 | #19 complete. User accepted blue gradient appearance/thickness. Two edge hit-test points passed; physical delivery, lifecycle/display/recording checks remain under #20. |
+| Complete an ordinary document task and recover — #35 | Pi tool boundary and native modules above | [Native pilots](validation.md#pi-only-ordinary-native-control-pilot), [Notepad failures](validation.md#pi-notepad-activation-refusal) | Owned UIA and sibling-target tasks each passed once. Notepad append/save failed on activation, then unexplained ownership. Next: retain diagnostic evidence and solve this scoped workflow. DSH model leg is separately credential-blocked. |
+| Complete ordinary browser and mixed tasks with recovery — #36 | Pi tool boundary and browser/native modules above | [Scoped browser pilot](validation.md#scoped-pi-browser-agent-form-pilot) | One scoped Pi form workflow passed; guard failures retained. Next: delayed confirmation, navigation/stale references/dialogs and supported transfers, then required three reset successes. DSH leg remains open. |
+| Deliver a mature release with traceable departures — #21, #23, #37 | Package and modules above; D01–D08 differences | [Difference register](validation.md#reference-difference-register), [coverage](validation.md#capability-coverage), [manual gates](validation.md#manual-release-gates) | Release incomplete. Diagnose available failures now; final reconciliation still requires all results, regressions, manual gates and comparative performance evidence. |
 
-Indicator appearance refinement (2026-10-31): [#20](https://github.com/ycheung5/pi-computer-use/issues/20) includes the requested reference-style blue gradient edge at approximately 1.5 times DSH thickness. The implementation is integrated; portable, helper compilation and scoped two-monitor preview checks passed, while human visual and edge click-through validation remain pending. Existing lifecycle and safety criteria are unchanged.
+### Execution queue
+
+| Order | Deliverable and owner | Completion condition |
+| --- | --- | --- |
+| 1 | Reconciliation and justified cleanup — #37 | Current outcome map, explicit blockers, cleanup dispositions and synchronized plan/issues. This preparation does not complete #37's full diagnosis. |
+| 2 | Scoped Pi Notepad insertion/append/save — #35 | Actionable error/owned-target evidence, supported recovery, exact accessible/saved result and unrelated fixture state preserved; required three reset successes on final candidate. |
+| 3 | Scoped Pi browser outcome/recovery — #36 | Independent submitted/delayed/file oracles, supported recovery and required three reset successes per required scenario. Reuse existing pages. |
+| 4 | Remaining original acceptance — #2, #4–#7, #9–#13, #15–#18, #20, #21 | Resolve unchecked criteria with named cases/manual checks; reconcile paired DSH results when available. No release from partial success. |
+
+For each repair record the requirement, failure, reference behavior or justified Pi departure, source change, regression and independent outcome. Run relevant checks once per candidate; repeat when a change or unresolved failure warrants it. A new runner needs a named missing case and why existing fixtures cannot cover it.
+
+The user chose scoped disposable tests in the current Windows session and granted standing idle-test authorization. Serialize desktop activity and preserve unrelated apps/documents and clipboard. Request physical participation or visual judgment when needed. DSH real-model runs need `OPENROUTER_API_KEY`, absent from this WSL process; the user chose continued Pi work. Missing DSH credentials or an unrestricted clean session do not block independently safe Pi work.
+
+### Comparison and agent-ticket accounting
+
+| Tickets | GitHub state | Meaning / dependency scope |
+| --- | --- | --- |
+| #24, #25, #29, #32, #33, #34 | Closed, completed | Six of fourteen follow-up tickets completed audit/comparison scopes. Original requirements retain their acceptance. |
+| #26, #27, #28, #30, #31 | Open, partial | Remaining comparisons and safety/behavior evidence; each issue retains unchecked criteria. |
+| #35, #36 | Open, partial | Pi pilots exist; recovery/repeated acceptance incomplete. Each safe scenario runs when its actual prerequisites are met. Full closure requires all coverage. |
+| #37 | Open, active | Diagnose known cases and maintain repair ownership now. Final aggregate reconciliation waits for #35/#36 and other required results. |
+
+### Cleanup dispositions
+
+| Candidate | Decision | Reason and validation |
+| --- | --- | --- |
+| Chronological status prose in this document | Replaced by current tables | Detailed evidence remains in validation and issue history; requirements retain owners. |
+| Blanket baseline-before-diagnosis sequencing | Corrected in plan and #23/#35–#37 | Diagnose available failures independently; final aggregate completion still requires complete evidence. |
+| Retired `tests/native-text-physical.mjs` execution body | Removed; plan/refusal stub retained | The unconditional refusal made the body unreachable. Existing safety regression passed before/after cleanup; full checks passed 117 tests (one skipped), and package/documentation validation passed. No desktop actions. |
+| Process/job/supervisor diagnostic fixtures | Keep for unresolved #27/#31 diagnosis | Different probes establish different cleanup limits. Add work only for a question that can change the next decision; preserve blocked-host guards. |
+| Paired runners and portable report/retention tests | Keep | Live effects and offline reporting exercise different boundaries; similar names or size do not prove duplication. |
+| `src/browser.ts` and native helper organization | Keep pending concrete simplification evidence | File size does not identify removable behavior. Broad rewriting would obscure alignment/regressions. |
+| Unmerged `implement/scroll-reference-28` | Retain unmerged | Increased quiet-scroll steps can outlast timeout; cancellation/partial-effect ownership is unresolved. |
 
 ## Original issue disposition
 
-Checklist audit after the dedicated physical session: completed subcriteria are checked on open GitHub issues where evidence supports them; compound criteria stay unchecked until all clauses are covered. No additional whole issue was closed from a partial pass. Requirements in #1/#23 and release gates in #21 remain unchanged.
+GitHub checked on 2026-10-31: #3, #8, #14 and #19 are closed as completed. #2, #4–#7, #9–#13, #15–#18 and #20 remain open with implementation and missing evidence; owners are mapped above. #1 and #21 remain product/release parents. No issue was closed by this reconciliation.
 
-Reconciled on 2026-10-30 against recorded implementation/fixture evidence through `7a7c0c5`; no new desktop tests were run. Original issues #2–#20 now contain evidence summaries and links to the current follow-up tickets. These dispositions concern their original implementation scope, not acceptance of the whole product.
-
-| Disposition | Issues | Meaning |
-| --- | --- | --- |
-| Closed as completed | #3, #8, #14, #19 | Recorded evidence supports the original WSL2-launch, ownership, wait and settings criteria; paired comparison and broader acceptance remain in the new tickets. |
-| Open, `needs-info` | #2, #4–#7, #9–#13, #15–#18, #20 | Implementation exists, but the issue body identifies missing evidence; current tickets own the next validation work. Do not restart these implementations. |
-| Open, unchanged | #1, #21 | Original product and release gates retain their scope and existing labels. |
-
-- Keep #1 as the original product parent and #21 as the release gate, including clean-install, physical/manual and compatibility obligations.
-- Close an original implementation issue as completed only when its own criteria have evidence.
-- Before closing an issue as superseded, transfer every unmet criterion and evidence link to a named successor; do not falsely mark the work completed.
-- Retain issues with meaningful pending work, distinguishing completed implementation from missing validation rather than commissioning duplicate implementation.
-- Revisit these dispositions if new comparisons demonstrate a regression. Closure of an original slice never exempts its behavior from current acceptance or repair.
-
-| Original obligations | Current evidence owners |
-| --- | --- |
-| #2, #3 — package and hosts | #34 |
-| #4, #5, #10, #14 — discovery, accessibility, controls and waits | #28; cancellation also #31 |
-| #6, #7 — capture and OCR | #29 |
-| #8, #9 — ownership and stop | #31 |
-| #11, #13 — pointer and windows | #30 |
-| #12 — text and clipboard | #26, #27 |
-| #15, #16 — Chromium reads/actions | #32, #33 |
-| #17, #18 — experimental Firefox and profiles | #33 |
-| #19, #20 — settings and presentation | #34 |
-| #1, #21 — product and release | #24, #35–#37 supply evidence; original gates remain |
-
-## Original delivery graph
-
-Parent: [spec #1](https://github.com/ycheung5/pi-computer-use/issues/1). Retained for traceability, not an instruction to restart initial implementation. Original blocking edges are preserved below.
-
-| Issue | Deliverable | Blocked by |
-| --- | --- | --- |
-| [#2](https://github.com/ycheung5/pi-computer-use/issues/2) | Run a packaged Windows worker from native pi | None |
-| [#3](https://github.com/ycheung5/pi-computer-use/issues/3) | Run the same worker from WSL2 pi | #2 |
-| [#4](https://github.com/ycheung5/pi-computer-use/issues/4) | Discover and identify desktop windows | #2 |
-| [#5](https://github.com/ycheung5/pi-computer-use/issues/5) | Read and locate accessible controls | #4 |
-| [#6](https://github.com/ycheung5/pi-computer-use/issues/6) | Capture correctly mapped desktop images | #4 |
-| [#7](https://github.com/ycheung5/pi-computer-use/issues/7) | Read screen text with OCR | #6 |
-| [#8](https://github.com/ycheung5/pi-computer-use/issues/8) | Enforce desktop ownership across sessions | #3, #4 |
-| [#9](https://github.com/ycheung5/pi-computer-use/issues/9) | Stop an operation independently of the worker | #8 |
-| [#10](https://github.com/ycheung5/pi-computer-use/issues/10) | Operate accessible controls in the background | #5, #9 |
-| [#11](https://github.com/ycheung5/pi-computer-use/issues/11) | Perform guarded pointer actions | #6, #9 |
-| [#12](https://github.com/ycheung5/pi-computer-use/issues/12) | Enter text and key chords safely | #10, #11 |
-| [#13](https://github.com/ycheung5/pi-computer-use/issues/13) | Launch and manage application windows | #4, #9 |
-| [#14](https://github.com/ycheung5/pi-computer-use/issues/14) | Wait for observable desktop outcomes | #5, #7 |
-| [#15](https://github.com/ycheung5/pi-computer-use/issues/15) | Browse isolated Chrome and Edge pages | #8 |
-| [#16](https://github.com/ycheung5/pi-computer-use/issues/16) | Complete Chromium browser interactions | #15, #9 |
-| [#17](https://github.com/ycheung5/pi-computer-use/issues/17) | Support experimental installed Firefox | #15, #9 |
-| [#18](https://github.com/ycheung5/pi-computer-use/issues/18) | Remember dedicated browser sign-ins | #16, #17 |
-| [#19](https://github.com/ycheung5/pi-computer-use/issues/19) | Configure personal settings and available tools | #8 |
-| [#20](https://github.com/ycheung5/pi-computer-use/issues/20) | Show configurable control indicators | #9, #11, #19 |
-| [#21](https://github.com/ycheung5/pi-computer-use/issues/21) | Validate parity and prepare the release | #7, #10, #11, #12, #13, #14, #16, #17, #18, #19, #20 |
+Close an issue as completed only when its criteria have evidence. Transfer every unmet criterion and evidence link to a named successor before closing as superseded. Retain failures and limitations. Original dependency history remains in GitHub; current execution sequencing is the queue above and [plan](implementation-plan.md#detailed-milestones).
