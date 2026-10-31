@@ -530,6 +530,88 @@ export function actualText(d) {
   return values.join("\n");
 }
 const exact = (a, b) => a && Object.keys(b).every((k) => a[k] === b[k]);
+// Status names come from owned server output, never editable values or unscoped page text.
+function mixedStatusEvidence(d, request, known) {
+  if (
+    d.action === "wait_for" ||
+    request?.toolName === "windows_computer_use_wait_for"
+  ) {
+    const args = request?.input;
+    return d.condition === "element" &&
+      d.verification === "observed" &&
+      d.found !== false &&
+      d.conclusive !== false &&
+      d.timedOut !== true &&
+      d.appear !== false &&
+      args?.appear !== false &&
+      (args?.condition ?? "element") === "element" &&
+      args?.controlType?.toLowerCase() === "status" &&
+      args.query === d.query
+      ? [d.query]
+      : [];
+  }
+  const names = [];
+  const editable = (n) =>
+    ["textbox", "searchbox", "combobox"].includes(
+      String(n.role).toLowerCase(),
+    ) ||
+    ["input", "textarea", "select"].includes(n.tag) ||
+    n.value !== undefined ||
+    n.editable === true ||
+    n.contenteditable === true;
+  const visit = (node, blocked) => {
+    if (!node) return;
+    blocked = blocked || editable(node);
+    if (
+      !blocked &&
+      node.role?.toLowerCase() === "status" &&
+      typeof node.name === "string"
+    ) {
+      names.push(node.name);
+      if (
+        typeof node.id === "string" &&
+        /^(?:Form confirmation|Native confirmation)/.test(node.name)
+      )
+        known.set(
+          node.id,
+          node.name.startsWith("Form confirmation") ? "pre" : "p",
+        );
+    }
+    for (const child of node.children ?? []) visit(child, blocked);
+  };
+  for (const nodes of [d.nodes, d.results, d.matches]) {
+    const ancestors = [];
+    for (const node of nodes ?? []) {
+      if (!Number.isFinite(node.depth)) ancestors.length = 0;
+      else
+        while (ancestors.length && ancestors.at(-1).depth >= node.depth)
+          ancestors.pop();
+      visit(
+        node,
+        ancestors.some((parent) => parent.editable),
+      );
+      if (Number.isFinite(node.depth))
+        ancestors.push({ depth: node.depth, editable: editable(node) });
+    }
+  }
+  visit(d.tree, false);
+  const element = d.element;
+  if (
+    element &&
+    known.get(element.id) === element.tag &&
+    request?.input?.elementId === element.id &&
+    !editable(element) &&
+    typeof element.text === "string"
+  )
+    names.push(
+      element.tag === "pre"
+        ? "Form confirmation: " + element.text
+        : element.text,
+    );
+  else visit(element, false);
+  return names;
+}
+
 export function verifyOutcome(scenario, f) {
   const provenance =
     f.effective?.length > 0 &&
@@ -553,7 +635,9 @@ export function verifyOutcome(scenario, f) {
     const native = f.native,
       code = native?.initial?.approve?.code,
       ids = new Set(),
-      pending = new Map();
+      pending = new Map(),
+      requests = new Map(),
+      statuses = new Map();
     let codeObserved = false,
       acknowledged = false,
       invoked = 0,
@@ -570,6 +654,7 @@ export function verifyOutcome(scenario, f) {
     };
     for (const e of f.audit ?? []) {
       const d = e.details;
+      if (e.type === "guard_tool_call") requests.set(e.toolCallId, e);
       if (
         e.type === "guard_tool_call" &&
         e.toolName === "windows_computer_use_invoke" &&
@@ -593,20 +678,28 @@ export function verifyOutcome(scenario, f) {
         causal = pending.get(e.toolCallId) === true;
       }
       if (d.tab?.url === f.base + "form") {
-        const text = actualText(d);
-        if (text.includes('"confirmationCode":"' + code + '"'))
+        const names = mixedStatusEvidence(
+          d,
+          requests.get(e.toolCallId),
+          statuses,
+        );
+        if (
+          names.some((name) => {
+            if (!name.startsWith("Form confirmation: ")) return false;
+            try {
+              return (
+                JSON.parse(name.slice("Form confirmation: ".length))
+                  .confirmationCode === code
+              );
+            } catch {
+              return false;
+            }
+          })
+        )
           codeObserved = true;
-        const ack = "Native confirmation complete: " + code;
         if (
           invoked === 1 &&
-          (text.includes(ack) ||
-            (d.action === "wait_for" &&
-              d.verification === "observed" &&
-              d.query === ack &&
-              d.appear !== false &&
-              d.found !== false &&
-              d.conclusive !== false &&
-              d.timedOut !== true))
+          names.includes("Native confirmation complete: " + code)
         )
           acknowledged = true;
       }

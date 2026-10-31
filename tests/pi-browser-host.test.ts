@@ -832,7 +832,18 @@ test("mixed acceptance requires browser-issued code before native effect and obs
         details: {
           ok: true,
           tab: { id: "t123", url: "http://127.0.0.1:1234/form" },
-          nodes: [{ name: '{"confirmationCode":"7391"}' }],
+          nodes: [
+            {
+              id: "t123:result",
+              role: "status",
+              name: 'Form confirmation: {"confirmationCode":"7391"}',
+            },
+            {
+              id: "t123:ack",
+              role: "status",
+              name: "Native confirmation pending",
+            },
+          ],
         },
       },
       {
@@ -867,12 +878,132 @@ test("mixed acceptance requires browser-issued code before native effect and obs
         details: {
           ok: true,
           tab: { id: "t123", url: "http://127.0.0.1:1234/form" },
-          nodes: [{ name: "Native confirmation complete: 7391" }],
+          nodes: [
+            {
+              id: "t123:ack",
+              role: "status",
+              name: "Native confirmation complete: 7391",
+            },
+          ],
         },
       },
     ],
   };
   assert.equal((await verify("mixed", facts)).pass, true);
+  const ack = "Native confirmation complete: 7391";
+  const codeJson = '{"confirmationCode":"7391"}';
+  const result = (details: object, tool = "snapshot", id = "status") => ({
+    type: "guard_tool_result",
+    toolCallId: id,
+    toolName: "windows_computer_use_" + tool,
+    details: {
+      ok: true,
+      tab: { id: "t123", url: facts.base + "form" },
+      ...details,
+    },
+  });
+  const call = (tool: string, id: string, input: object) => ({
+    type: "guard_tool_call",
+    toolCallId: id,
+    toolName: "windows_computer_use_" + tool,
+    input,
+  });
+  const passes = async (audit: unknown[]) =>
+    (await verify("mixed", { ...facts, audit })).pass;
+  const beforeAck = facts.audit.slice(0, 4);
+  const editableEcho = (value: string) =>
+    result({ nodes: [{ name: "Notes", role: "textbox", value }] });
+  const falseProofs = [];
+  for (const audit of [
+    [editableEcho(codeJson), ...facts.audit.slice(1)],
+    [...beforeAck, editableEcho(ack)],
+    [
+      ...beforeAck,
+      result({
+        action: "wait_for",
+        verification: "inconclusive",
+        found: false,
+        conclusive: false,
+        text: ack,
+      }),
+    ],
+  ])
+    falseProofs.push(await passes(audit));
+  assert.deepEqual(falseProofs, [false, false, false]);
+  const expectAcknowledgement = async (
+    expected: boolean,
+    ...events: unknown[]
+  ) => {
+    assert.equal(await passes([...beforeAck, ...events]), expected);
+  };
+  const waitCall = call("wait_for", "ack-wait", {
+    browserTab: "t123",
+    condition: "element",
+    controlType: "status",
+    query: ack,
+  });
+  const waitDetails = {
+    action: "wait_for",
+    condition: "element",
+    query: ack,
+    verification: "observed",
+  };
+  await expectAcknowledgement(
+    true,
+    waitCall,
+    result(waitDetails, "wait_for", "ack-wait"),
+  );
+  for (const flags of [
+    { found: false },
+    { conclusive: false },
+    { timedOut: true },
+    { verification: "inconclusive", text: ack },
+    { condition: "text", text: ack },
+  ])
+    await expectAcknowledgement(
+      false,
+      waitCall,
+      result({ ...waitDetails, ...flags }, "wait_for", "ack-wait"),
+    );
+  const ackInfo = call("element_info", "ack-info", { elementId: "t123:ack" });
+  await expectAcknowledgement(
+    true,
+    ackInfo,
+    result(
+      { element: { id: "t123:ack", tag: "p", text: ack } },
+      "element_info",
+      "ack-info",
+    ),
+  );
+  const pendingCode = result({
+    nodes: [
+      { id: "t123:result", role: "status", name: "Form confirmation pending" },
+    ],
+  });
+  const codeInfo = call("element_info", "code-info", {
+    elementId: "t123:result",
+  });
+  assert.equal(
+    await passes([
+      pendingCode,
+      codeInfo,
+      result(
+        { element: { id: "t123:result", tag: "pre", text: codeJson } },
+        "element_info",
+        "code-info",
+      ),
+      ...facts.audit.slice(1),
+    ]),
+    true,
+  );
+  const nestedEcho = result({
+    nodes: [
+      { role: "textbox", name: "Editable region", depth: 1 },
+      { role: "status", name: ack, depth: 2 },
+    ],
+  });
+  await expectAcknowledgement(false, nestedEcho);
+
   for (const audit of [
     facts.audit.slice(1),
     [
@@ -883,18 +1014,7 @@ test("mixed acceptance requires browser-issued code before native effect and obs
       facts.audit[4],
     ],
     facts.audit.slice(0, -1),
-    [
-      {
-        ...facts.audit[0],
-        details: {
-          ok: true,
-          tab: { id: "t123", url: "http://127.0.0.1:1234/form" },
-          query: '{"confirmationCode":"7391"}',
-          matches: [],
-        },
-      },
-      ...facts.audit.slice(1),
-    ],
+    [result({ query: codeJson, matches: [] }), ...facts.audit.slice(1)],
   ])
     assert.equal((await verify("mixed", { ...facts, audit })).pass, false);
   for (const native of [
