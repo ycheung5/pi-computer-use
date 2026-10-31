@@ -21,7 +21,7 @@ Read the row matching the task; follow section links before reading whole docume
 | Control indicators, preview and manual acceptance | [Indicators](indicators.md) |
 | Desktop ownership and operation lifecycle | [Ownership](ownership.md) |
 | Native window discovery and validation | [Windows discovery](windows.md), [accessibility observations](windows.md#accessibility-observations), [locked sessions](windows.md#locked-session-refusals) |
-| Scoped browser/mixed agent acceptance | [Partial-observation recovery](validation.md#scoped-partial-observation-recovery), [mixed outcome evidence](validation.md#scoped-mixed-browsernative-outcome), [runner prerequisites](validation.md#reproduce-automated-checks) |
+| Scoped browser/mixed agent acceptance | [Held-navigation cancellation](validation.md#scoped-held-navigation-cancellation), [Partial-observation recovery](validation.md#scoped-partial-observation-recovery), [mixed outcome evidence](validation.md#scoped-mixed-browsernative-outcome), [runner prerequisites](validation.md#reproduce-automated-checks) |
 | Scoped native visual agent acceptance | [Opt-in runner](windows.md#scoped-visual-agent-check), [A04 evidence](validation.md#visual-ocr-association-preflight) |
 | Lifetime-bound native targeting and stale-reference behavior | [Window references](windows.md#window-lifetime-references), [accepted design](implementation-plan.md#window-lifetime-design) |
 | Native interop alternatives and tradeoffs | [Native interop research](native-interop-research.md) |
