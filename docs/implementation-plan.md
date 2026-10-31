@@ -61,7 +61,7 @@ Current checkpoint (2026-10-31): audit/comparison tickets #24, #25, #29, #32, #3
 
 ## Window lifetime design
 
-The user approved stronger tracking under #28. [ADR 0002](adr/0002-window-lifetime-references.md) records the independently reviewed design; implementation and acceptance remain open. Current raw selectors retain their existing behavior until this work is delivered.
+The user approved stronger tracking under #28. [ADR 0002](adr/0002-window-lifetime-references.md) records the independently reviewed design; the native lifetime implementation is under scoped acceptance and independent review. Raw selectors remain explicitly weaker compatibility selection.
 
 Use the existing native bridge as the sole reference authority. One optional `windowRef` identifies an observed lifetime; HWND/PID/title and raw native-window IDs remain compatibility selectors. A supplied reference cannot be discarded or restamped internally. Conflicting selectors fail explicitly. Native-child restart expires its references; fresh observation is recovery, never automatic mutation replay.
 
@@ -73,7 +73,7 @@ Snapshot's existing default `captureWindow: false` produces a desktop image. Kee
 
 Missing markers, expiry, unknown epochs and access denial are lost proof, not confirmed disappearance. Validate before dispatch and at existing multi-step checks; already-dispatched effects and concurrent destruction after the final check cannot be undone or atomically excluded. Normal expiry/disposal removes only owned markers. Residue after abrupt native-child exit remains explicit; no property sweeper, broker, privilege bypass or new event thread is planned.
 
-Before production changes, independently review the owned-window marker probe and this interface. Then use existing public tool/worker and native-fixture seams to test binding/repeated use, real destruction/replacement, marker loss, native restart, two authorities, conflicting selectors, no fallback/replay, immutable root/element bindings, WGC delegation and snapshot/OCR/wait composition. Include a fixture pause before final validation and independent action counters. Actual identical-HWND reuse and verified UIPI denial remain distinct prerequisites; different handles or synthetic denial cannot be mislabeled as those cases. Measure added checks without fixed sleeps or extra model rounds.
+The owned-window probe and interface were independently reviewed before implementation. Existing public tool/worker and owned fixtures now exercise the implemented contract, including a provider pause before final validation and a separate post-effect proof-loss case with independent counters. [Current scoped evidence](validation.md#window-lifetime-reference-acceptance) retains automatic capture-fallback and isolated-session gaps. Actual identical-HWND reuse, verified UIPI denial and real-time expiry remain distinct prerequisites; different handles or synthetic denial cannot be mislabeled as those cases. Paired warm checks add no fixed sleeps or extra model rounds.
 
 Live binding tests stay on disposable owned windows. Global discovery and internal launch-enumeration paths must be reviewed for metadata writes; tests that would bind unrelated windows require a suitably isolated session rather than bypassing the user's scoped-test choice.
 
