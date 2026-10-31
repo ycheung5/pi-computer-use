@@ -9,8 +9,13 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 export default async function provider(pi: ExtensionAPI): Promise<void> {
   if (process.env.PI_CU_HOST_STOP_COMMAND) {
     const { readFileSync, appendFileSync } = await import("node:fs");
-    const { registerComputerUse } = await import("../dist/extension.js");
-    const { nativeWorkerLaunch } = await import("../dist/launcher.js");
+    // Load built runtime modules while checking their types before a build exists.
+    const { registerComputerUse } = (await import(
+      new URL("../dist/extension.js", import.meta.url).href
+    )) as typeof import("../src/extension.js");
+    const { nativeWorkerLaunch } = (await import(
+      new URL("../dist/launcher.js", import.meta.url).href
+    )) as typeof import("../src/launcher.js");
     const { commandGuard, commandObserver } = await import(
       new URL("./pi-host-command.mjs", import.meta.url).href
     );
