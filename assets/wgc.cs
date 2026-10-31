@@ -82,11 +82,16 @@ class WgcBridge {
     }
   }
 
+  static void ValidateMarker(Dictionary<string,object> args,IntPtr window,uint owner) {
+    object raw;if(!args.TryGetValue("_windowMarker",out raw) || raw==null)return;
+    var marker=raw as Dictionary<string,object>;object name;
+    if(marker==null || !marker.TryGetValue("name",out name) || !WindowMarker.Matches(window,owner,Convert.ToString(name)))throw new InvalidOperationException("WINDOW_REFERENCE_LOST: delegated capture lifetime proof is unavailable");
+  }
   static object Capture(Dictionary<string, object> args) {
     IntPtr window = new IntPtr(Convert.ToInt64(args["nativeWindowHandle"]));
     uint owner = Convert.ToUInt32(args["processId"]);
     int maximum = Convert.ToInt32(args["maxWidth"]);
-    Identity(window, owner);
+    ValidateMarker(args,window,owner);Identity(window, owner);
     Rectangle bounds = Bounds(window);
     if (bounds.Width <= 0 || bounds.Height <= 0 || (long)bounds.Width * bounds.Height > 40000000) throw new InvalidOperationException("WGC_INVALID_BOUNDS");
     if (!GraphicsCaptureSession.IsSupported()) throw new InvalidOperationException("WGC_UNSUPPORTED");
@@ -112,7 +117,7 @@ class WgcBridge {
         if (copy.Status != AsyncStatus.Completed) throw new InvalidOperationException("WGC_COPY_FAILED: " + copy.Status);
         using (SoftwareBitmap software = copy.GetResults())
         using (Bitmap bitmap = CopyPixels(software)) {
-          Identity(window, owner);
+          ValidateMarker(args,window,owner);Identity(window, owner);
           if (Bounds(window) != bounds) throw new InvalidOperationException("WINDOW_MOVED_DURING_CAPTURE");
           Bitmap output = bitmap;
           try {
@@ -126,13 +131,13 @@ class WgcBridge {
             byte[] png;
             using (MemoryStream memory = new MemoryStream()) { output.Save(memory, ImageFormat.Png); png = memory.ToArray(); }
             return new Dictionary<string, object> {
-              { "ok", true }, { "action", "screenshot" }, { "screenshot", new Dictionary<string, object> {
+              { "ok", true }, { "action", "screenshot" }, {"windowRef",args.ContainsKey("_windowMarker") && args["_windowMarker"] is Dictionary<string,object>?((Dictionary<string,object>)args["_windowMarker"])["windowRef"]:null}, { "screenshot", new Dictionary<string, object> {
                 { "base64", Convert.ToBase64String(png) }, { "mimeType", "image/png" }, { "bytes", png.Length },
                 { "width", output.Width }, { "height", output.Height }, { "method", "wgc" },
                 { "bounds", new Dictionary<string, object> { { "x", bounds.X }, { "y", bounds.Y }, { "width", bounds.Width }, { "height", bounds.Height } } },
                 { "origin", new Dictionary<string, object> { { "x", bounds.X }, { "y", bounds.Y } } },
                 { "imageScale", (double)output.Width / bounds.Width }, { "imageScaleY", (double)output.Height / bounds.Height },
-                { "occludedPossible", false }, { "windowCaptureFailed", false }, { "captureWarnings", new string[0] }
+                { "windowRef",args.ContainsKey("_windowMarker") && args["_windowMarker"] is Dictionary<string,object>?((Dictionary<string,object>)args["_windowMarker"])["windowRef"]:null }, { "source", "window" }, { "occludedPossible", false }, { "windowCaptureFailed", false }, { "captureWarnings", new string[0] }
               } }
             };
           } finally { if (output != bitmap) output.Dispose(); }

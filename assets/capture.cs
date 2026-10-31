@@ -12,8 +12,9 @@ partial class WindowsBridge {
   [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out Rect bounds, int bytes);
 
   static IntPtr ResolveCaptureWindow(Dictionary<string, object> args) {
+    WindowReference bound=ResolveWindowReference(args);
     object value;
-    long requested = args.TryGetValue("nativeWindowHandle", out value) ? Convert.ToInt64(value) : 0;
+    long requested = bound!=null?bound.Window.ToInt64():args.TryGetValue("nativeWindowHandle", out value) ? Convert.ToInt64(value) : 0;
     uint process = args.TryGetValue("processId", out value) ? Convert.ToUInt32(value) : 0;
     string title = args.TryGetValue("windowTitle", out value) ? Convert.ToString(value) : null;
     if (requested != 0) {
@@ -119,10 +120,12 @@ partial class WindowsBridge {
     List<string> warnings = new List<string>();
     IntPtr target = IntPtr.Zero;
     uint owner = 0;
+    var referenceMetadata=new Dictionary<string,object>();
     try {
     if (!desktopScope) {
       target = ResolveCaptureWindow(args);
-      GetWindowThreadProcessId(target, out owner);
+      WindowReference binding=ObserveWindowReference(target,referenceMetadata);if(binding!=null){currentReference=binding;referenceMetadata["windowRef"]=binding.Id;}
+      GetWindowThreadProcessId(target, out owner);CheckWindowReference(target);
       object requestedActivation;
       if (args.TryGetValue("activate", out requestedActivation) && Convert.ToBoolean(requestedActivation) && !SetForegroundWindow(target)) warnings.Add("WINDOW_ACTIVATION_REFUSED: Windows did not bring the target to foreground");
       bounds = WindowCaptureBounds(target);
@@ -151,6 +154,7 @@ partial class WindowsBridge {
     }
       if (image == null) image = CopyCaptureRegion(bounds);
       if (target != IntPtr.Zero) {
+        CheckWindowReference(target);
         uint ownerAfter;
         GetWindowThreadProcessId(target, out ownerAfter);
         if (!IsWindow(target) || owner != ownerAfter) throw new InvalidOperationException("WINDOW_IDENTITY_CHANGED_DURING_CAPTURE");
@@ -177,9 +181,11 @@ partial class WindowsBridge {
         { "occludedPossible", occluded }, { "windowCaptureFailed", failed }, { "captureWarnings", warnings }
       };
       Dictionary<string, object> result = Result(true, "screenshot");
+      metadata["source"]=desktopScope?"desktop":"window";
+      foreach(var pair in referenceMetadata){result[pair.Key]=pair.Value;metadata[pair.Key]=pair.Value;}
       result["screenshot"] = metadata;
       if(target!=IntPtr.Zero && !failed){RememberPointerOrigin(target);RememberPointerTitle(args,target);}
-      if (target != IntPtr.Zero && !failed && occluded) result["wgcTarget"] = new Dictionary<string, object> { { "nativeWindowHandle", target.ToInt64() }, { "processId", owner } };
+      if (target != IntPtr.Zero && !failed && occluded) result["wgcTarget"] = new Dictionary<string, object> { { "nativeWindowHandle", target.ToInt64() }, { "processId", owner }, {"_windowMarker",WindowReferenceDescriptor(target)} };
       return result;
     } finally { if (image != null) image.Dispose(); }
   }

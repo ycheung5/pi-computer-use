@@ -34,6 +34,7 @@ partial class WindowsBridge {
   }
 
   static object ListWindows(Dictionary<string, object> args) {
+    if(args.ContainsKey("windowRef"))return ObserveReferencePresence(args);
     int maximum = Convert.ToInt32(args["maxWindows"]);
     bool invisible = Convert.ToBoolean(args["includeInvisible"]);
     List<object> windows = new List<object>();
@@ -75,6 +76,7 @@ partial class WindowsBridge {
         { "responsive", responseError == 5 ? (object)null : answered },
         { "responsiveness", answered ? "responsive" : responseError == 5 ? "access_denied" : "unresponsive_or_unknown" }
       };
+      AddWindowReference(item,handle);if(!item.ContainsKey("windowRef"))item.Remove("id");
       windows.Add(item);
       return true;
     }, IntPtr.Zero);
@@ -99,6 +101,7 @@ partial class WindowsBridge {
         request = json.Deserialize<Dictionary<string, object>>(line);
         if (request.ContainsKey("cancel")) continue;
         string action = Convert.ToString(request["action"]);
+        currentReference=null;
         pointerInputAction=action=="click" || action=="double_click" || action=="move" || action=="drag" || action=="scroll" || action=="type_text" || action=="keypress";
         pointerOperation=request.ContainsKey("operationId")?Convert.ToString(request["operationId"]):"";
         object result;
@@ -120,11 +123,14 @@ partial class WindowsBridge {
           if(refused!=null)failure["activationDiagnostic"]=refused.Diagnostic;
           result = failure;
         }
+        var payload=result as Dictionary<string,object>;
+        if(payload!=null && currentReference!=null && !payload.ContainsKey("windowRef") && payload.ContainsKey("ok") && Convert.ToBoolean(payload["ok"])) {payload["windowRef"]=currentReference.Id;}
         Console.WriteLine(json.Serialize(new Dictionary<string, object> { { "id", request["id"] }, { "result", result } }));
         Console.Out.Flush();
       } catch (Exception error) {
         Console.Error.WriteLine("NATIVE_PROTOCOL_ERROR: " + error.Message);
       }
     }
+    CleanupWindowReferences();
   }
 }

@@ -57,3 +57,36 @@ test("malformed worker envelopes do not terminate later valid requests", async (
   );
   assert.equal(results.find((item) => item.id === 2).result.ok, true);
 });
+
+test("native lifetime targets reject invalid or mixed proof without desktop dispatch", async () => {
+  const client = worker();
+  try {
+    for (const action of [
+      "snapshot",
+      "screenshot",
+      "ocr",
+      "type_text",
+      "click",
+      "wait_for",
+      "move_window",
+    ]) {
+      const result = await client.execute(action, { windowRef: "" });
+      assert.equal(result.ok, false);
+      assert.match(
+        String(result.error),
+        /INVALID_ARGUMENTS.*windowRef/,
+        action,
+      );
+    }
+    for (const args of [
+      { windowRef: "observed", scope: "desktop" },
+      { windowRef: "observed", browserTab: "t1234" },
+    ]) {
+      const result = await client.execute("snapshot", args);
+      assert.equal(result.ok, false);
+      assert.match(String(result.error), /INVALID_ARGUMENTS.*windowRef/);
+    }
+  } finally {
+    await client.dispose();
+  }
+});

@@ -81,6 +81,7 @@ partial class WindowsBridge {
   static void RestoreControlState(Dictionary<string,object> result,IntPtr before,ControlPoint pointer,IntPtr window,HashSet<long> popups,bool keep,InteractionGuard interaction) {
     ControlPoint now;
     result["pointer"]=GetCursorPos(out now) && now.X==pointer.X && now.Y==pointer.Y?"unchanged":"left: movement was not proven to be ours";
+    if(!CurrentReferenceIntact()){result["foreground"]="left: lifetime proof lost";return;}
     IntPtr after=GetForegroundWindow();
     if(after==before){result["foreground"]="unchanged";return;}
     if(window==IntPtr.Zero || after!=window){result["foreground"]="left: another window is in front";return;}
@@ -99,6 +100,7 @@ partial class WindowsBridge {
     string name=element.Current.ClassName;
     bool button=element.Current.ControlType==ControlType.Button || element.Current.ControlType==ControlType.CheckBox || element.Current.ControlType==ControlType.RadioButton;
     if(!button || !(name.Equals("Button",StringComparison.OrdinalIgnoreCase) || name.StartsWith("WindowsForms10.BUTTON",StringComparison.OrdinalIgnoreCase)))return false;
+    CheckReferenceBeforeDispatch();
     if(!ControlPost(handle,0xF5,IntPtr.Zero,IntPtr.Zero))throw new InvalidOperationException("NATIVE_DISPATCH_FAILED: button message was refused");
     UIntPtr ignored;SendMessageTimeout(handle,0,UIntPtr.Zero,IntPtr.Zero,2,500,out ignored);return true;
   }
@@ -108,7 +110,10 @@ partial class WindowsBridge {
     if(!(name.Equals("Edit",StringComparison.OrdinalIgnoreCase) || name.StartsWith("WindowsForms10.EDIT",StringComparison.OrdinalIgnoreCase) || name.StartsWith("RichEdit",StringComparison.OrdinalIgnoreCase)))return false;
     if((ControlStyle(handle,-16).ToInt64() & 0x800)!=0)throw new InvalidOperationException("READ_ONLY: control does not accept value changes");
     UIntPtr ignored;
-    if(SendMessageTimeout(handle,0xB1,UIntPtr.Zero,new IntPtr(-1),2,500,out ignored)==IntPtr.Zero || ControlText(handle,0xC2,new UIntPtr(1),value,2,1000,out ignored)==IntPtr.Zero)throw new InvalidOperationException("NATIVE_DISPATCH_FAILED: edit message was not confirmed");
+    CheckReferenceBeforeDispatch();
+    if(SendMessageTimeout(handle,0xB1,UIntPtr.Zero,new IntPtr(-1),2,500,out ignored)==IntPtr.Zero)throw new InvalidOperationException("NATIVE_DISPATCH_FAILED: edit selection was not confirmed");
+    CheckReferenceBeforeDispatch();
+    if(ControlText(handle,0xC2,new UIntPtr(1),value,2,1000,out ignored)==IntPtr.Zero)throw new InvalidOperationException("NATIVE_DISPATCH_FAILED: edit message was not confirmed");
     return true;
   }
   static Dictionary<string,object> ScrollPosition(IntPtr handle) {return new Dictionary<string,object>{{"vertical",GetScrollPos(handle,1)},{"horizontal",GetScrollPos(handle,0)}};}
@@ -164,7 +169,7 @@ partial class WindowsBridge {
     IntPtr before=IntPtr.Zero,window=IntPtr.Zero;ControlPoint pointer=new ControlPoint();
     AutomationElement element=null;HashSet<long> popups=new HashSet<long>();InteractionGuard interaction=null;
     EventWaitHandle cancel=null;Process listener=null;bool quietScroll=action=="scroll" && Option(args,"_quietScroll",false);
-    Action check=delegate {if(cancel!=null && (cancel.WaitOne(0) || listener.HasExited))throw new InvalidOperationException("COMPUTER_USE_STOPPED: in-flight app effects cannot be undone; observe before further input");};
+    Action check=delegate {CheckReferenceBeforeDispatch();if(cancel!=null && (cancel.WaitOne(0) || listener.HasExited))throw new InvalidOperationException("COMPUTER_USE_STOPPED: in-flight app effects cannot be undone; observe before further input");};
     try {
       if(quietScroll) {
         listener=Process.GetProcessById(NumberOption(args,"_stopProcessId",0));IntPtr identity=listener.Handle;
@@ -173,23 +178,23 @@ partial class WindowsBridge {
       interaction=new InteractionGuard();before=GetForegroundWindow();GetCursorPos(out pointer);
       PruneElements();element=ResolveObservedElement(TextOption(args,"elementId",""),args,out window);popups=ControlPopups(WindowOwner(window),window);
       if(!element.Current.IsEnabled)throw new InvalidOperationException("ELEMENT_DISABLED: control is disabled");
-      object raw;
-      if(action=="focus") {ForgetTextFocus();element.SetFocus();RememberTextFocus(window,new IntPtr(element.Current.NativeWindowHandle));result["method"]="uia_focus";}
+      object raw;check();
+      if(action=="focus") {ForgetTextFocus();CheckReferenceBeforeDispatch();element.SetFocus();RememberTextFocus(window,new IntPtr(element.Current.NativeWindowHandle));result["method"]="uia_focus";}
       else if(action=="set_value") {
         if(element.TryGetCurrentPattern(ValuePattern.Pattern,out raw) && ((ValuePattern)raw).Current.IsReadOnly)throw new InvalidOperationException("READ_ONLY: control does not accept value changes");
         if(NativeValue(element,TextOption(args,"value","")))result["method"]="native_edit";
-        else if(element.TryGetCurrentPattern(ValuePattern.Pattern,out raw)) {((ValuePattern)raw).SetValue(TextOption(args,"value",""));result["method"]="uia_value";}
+        else if(element.TryGetCurrentPattern(ValuePattern.Pattern,out raw)) {CheckReferenceBeforeDispatch();((ValuePattern)raw).SetValue(TextOption(args,"value",""));result["method"]="uia_value";}
         else throw new InvalidOperationException(Option(args,"fallbackType",true)?"WCU_NEEDS_INPUT: value pattern unavailable; guarded typing required":"UNSUPPORTED_PATTERN: value pattern unavailable");
       } else if(action=="scroll") ControlScroll(element,window,NumberOption(args,"deltaX",0),NumberOption(args,"deltaY",480),result,check);
       else {
         string requested=TextOption(args,"action","default");
-        if(requested=="scroll_into_view") {if(!element.TryGetCurrentPattern(ScrollItemPattern.Pattern,out raw))throw new InvalidOperationException("UNSUPPORTED_PATTERN: ScrollItem unavailable");((ScrollItemPattern)raw).ScrollIntoView();result["method"]="uia_scroll_into_view";}
-        else if(requested=="expand" || requested=="collapse") {if(!element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern,out raw))throw new InvalidOperationException("UNSUPPORTED_PATTERN: ExpandCollapse unavailable");ExpandCollapsePattern expand=(ExpandCollapsePattern)raw;ExpandCollapseState desired=requested=="expand"?ExpandCollapseState.Expanded:ExpandCollapseState.Collapsed;if(expand.Current.ExpandCollapseState!=desired){if(requested=="expand")expand.Expand();else expand.Collapse();}result["method"]="uia_"+requested;}
+        if(requested=="scroll_into_view") {if(!element.TryGetCurrentPattern(ScrollItemPattern.Pattern,out raw))throw new InvalidOperationException("UNSUPPORTED_PATTERN: ScrollItem unavailable");CheckReferenceBeforeDispatch();((ScrollItemPattern)raw).ScrollIntoView();result["method"]="uia_scroll_into_view";}
+        else if(requested=="expand" || requested=="collapse") {if(!element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern,out raw))throw new InvalidOperationException("UNSUPPORTED_PATTERN: ExpandCollapse unavailable");ExpandCollapsePattern expand=(ExpandCollapsePattern)raw;ExpandCollapseState desired=requested=="expand"?ExpandCollapseState.Expanded:ExpandCollapseState.Collapsed;if(expand.Current.ExpandCollapseState!=desired){CheckReferenceBeforeDispatch();if(requested=="expand")expand.Expand();else expand.Collapse();}result["method"]="uia_"+requested;}
         else if(NativeButton(element))result["method"]="native_button";
-        else if(element.TryGetCurrentPattern(InvokePattern.Pattern,out raw)){((InvokePattern)raw).Invoke();result["method"]="uia_invoke";}
-        else if(element.TryGetCurrentPattern(TogglePattern.Pattern,out raw)){((TogglePattern)raw).Toggle();result["method"]="uia_toggle";}
-        else if(element.TryGetCurrentPattern(SelectionItemPattern.Pattern,out raw)){((SelectionItemPattern)raw).Select();result["method"]="uia_select";}
-        else if(element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern,out raw)){((ExpandCollapsePattern)raw).Expand();result["method"]="uia_expand";}
+        else if(element.TryGetCurrentPattern(InvokePattern.Pattern,out raw)){CheckReferenceBeforeDispatch();((InvokePattern)raw).Invoke();result["method"]="uia_invoke";}
+        else if(element.TryGetCurrentPattern(TogglePattern.Pattern,out raw)){CheckReferenceBeforeDispatch();((TogglePattern)raw).Toggle();result["method"]="uia_toggle";}
+        else if(element.TryGetCurrentPattern(SelectionItemPattern.Pattern,out raw)){CheckReferenceBeforeDispatch();((SelectionItemPattern)raw).Select();result["method"]="uia_select";}
+        else if(element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern,out raw)){CheckReferenceBeforeDispatch();((ExpandCollapsePattern)raw).Expand();result["method"]="uia_expand";}
         else {
           // A semantic invoke is not permission to bypass a read-only control.
           // The pointer click path has no semantic action option and can still

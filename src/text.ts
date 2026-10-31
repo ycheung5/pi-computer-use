@@ -3,6 +3,7 @@ import { executePointer } from "./pointer.js";
 import type { WorkerResult } from "./protocol.js";
 
 const target = {
+  windowRef: { type: "string", minLength: 1 },
   windowTitle: { type: "string" },
   processId: { type: "integer", minimum: 1 },
   nativeWindowHandle: { type: "integer", minimum: 1 },
@@ -101,6 +102,11 @@ export function validateText(
       ? ["text", "method", "focusMode", "restoreClipboard"]
       : ["keys", "dispatch"]),
   ]);
+  if (
+    args.windowRef !== undefined &&
+    (typeof args.windowRef !== "string" || !args.windowRef.trim())
+  )
+    return bad("windowRef must be nonempty");
   for (const key of Object.keys(args))
     if (!allowed.has(key)) return bad(`unknown option ${key}`);
   for (const key of ["processId", "nativeWindowHandle"])

@@ -13,7 +13,7 @@ partial class WindowsBridge {
   [DllImport("user32.dll",EntryPoint="AttachThreadInput")] static extern bool ManagementAttach(uint from,uint to,bool attach);
   [DllImport("kernel32.dll",EntryPoint="GetCurrentThreadId")] static extern uint ManagementThread();
   static uint ManagementOwner(IntPtr window) {uint owner;GetWindowThreadProcessId(window,out owner);return owner;}
-  static void ManagementAssert(IntPtr window,uint owner) {if(!IsWindow(window)||ManagementOwner(window)!=owner)throw new InvalidOperationException("WINDOW_IDENTITY_CHANGED: refresh window observations before acting");}
+  static void ManagementAssert(IntPtr window,uint owner) {CheckWindowReference(window);if(!IsWindow(window)||ManagementOwner(window)!=owner)throw new InvalidOperationException("WINDOW_IDENTITY_CHANGED: refresh window observations before acting");}
   static bool? ManagementResponsive(IntPtr window) {UIntPtr ignored;bool answered=SendMessageTimeout(window,0,UIntPtr.Zero,IntPtr.Zero,3,100,out ignored)!=IntPtr.Zero;int error=Marshal.GetLastWin32Error();return !answered&&error==5?(bool?)null:answered;}
   static Dictionary<string,object> ManagementWindow(IntPtr window,uint owner) {
     Rect bounds;if(!GetWindowRect(window,out bounds))throw new InvalidOperationException("WINDOW_BOUNDS_UNAVAILABLE");

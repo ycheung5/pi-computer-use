@@ -51,6 +51,7 @@ partial class WindowsBridge {
     IntPtr focus=TextFocus(window);if(!IsNativeText(focus))return false;AssertWritableText(focus);
     UIntPtr before,after,ignored;
     if(SendMessageTimeout(focus,0xE,UIntPtr.Zero,IntPtr.Zero,2,500,out before)==IntPtr.Zero)throw new InvalidOperationException("BACKGROUND_READ_UNCONFIRMED: no text sent");
+    CheckWindowReference(window);
     // Never retry a refused/uncertain EM_REPLACESEL through physical input.
     if(ControlText(focus,0xC2,new UIntPtr(1),text,2,1000,out ignored)==IntPtr.Zero)throw new InvalidOperationException("TEXT_DISPATCH_UNCONFIRMED: edit may have received partial text; observe before retrying");
     string value=NativeTextValue(focus);bool lengthKnown=SendMessageTimeout(focus,0xE,UIntPtr.Zero,IntPtr.Zero,2,500,out after)!=IntPtr.Zero;
@@ -72,6 +73,7 @@ partial class WindowsBridge {
     if(best==null)throw new InvalidOperationException("TEXT_FOCUS_NOT_FOUND: no writable main text control");return best;
   }
   static void TextCheck(EventWaitHandle cancel,Process listener,IntPtr window,uint owner,IntPtr expectedFocus,bool checkFocus,InteractionGuard interaction) {
+    CheckWindowReference(window);
     interaction.Check();
     if(cancel.WaitOne(0))throw new InvalidOperationException("COMPUTER_USE_STOPPED");
     if(listener.HasExited)throw new InvalidOperationException("STOP_LISTENER_UNAVAILABLE");
@@ -153,10 +155,10 @@ partial class WindowsBridge {
       if(action=="type_text" && method=="auto" && TextOption(args,"focusMode","preserve")=="preserve" && !Option(args,"activate",false) && BackgroundEdit(window,text,result)) {result["inputTargetHandle"]=window.ToInt64();result["inputTargetProcessId"]=owner;return result;}
       bool background=action=="type_text"?method=="background":TextOption(args,"dispatch","foreground")=="background";
       if(background) {
-        if(!args.ContainsKey("windowTitle") && !args.ContainsKey("processId") && !args.ContainsKey("nativeWindowHandle"))throw new InvalidOperationException("BACKGROUND_TARGET_REQUIRED");
+        if(!args.ContainsKey("windowRef") && !args.ContainsKey("windowTitle") && !args.ContainsKey("processId") && !args.ContainsKey("nativeWindowHandle"))throw new InvalidOperationException("BACKGROUND_TARGET_REQUIRED");
         string characters=action=="type_text"?text:Convert.ToString(((IList)args["keys"])[0]);
         IntPtr recipient=TextFocus(window);if(recipient==IntPtr.Zero)recipient=window;AssertWritableText(recipient);
-        foreach(char character in characters) {if(!IsWindow(window) || WindowOwner(window)!=owner || WindowOwner(recipient)!=owner)throw new InvalidOperationException("TARGET_IDENTITY_CHANGED");if(!ControlPost(recipient,0x102,new IntPtr(character),new IntPtr(1)))throw new InvalidOperationException("TEXT_DISPATCH_UNCONFIRMED: some WM_CHAR messages may have been delivered; never replay");}
+        foreach(char character in characters) {CheckWindowReference(window);if(!IsWindow(window) || WindowOwner(window)!=owner || WindowOwner(recipient)!=owner)throw new InvalidOperationException("TARGET_IDENTITY_CHANGED");if(!ControlPost(recipient,0x102,new IntPtr(character),new IntPtr(1)))throw new InvalidOperationException("TEXT_DISPATCH_UNCONFIRMED: some WM_CHAR messages may have been delivered; never replay");}
         result["method"]="postmessage-wmchar";result["verification"]="unconfirmed";result["verified"]=false;result["inputTargetHandle"]=window.ToInt64();result["inputTargetProcessId"]=owner;return result;
       }
       if(TextOption(args,"_cancelEvent","").Length==0)throw new InvalidOperationException("WCU_NEEDS_INPUT: physical text/key input requires independent stopping");
@@ -169,9 +171,9 @@ partial class WindowsBridge {
         Dictionary<string,object> activation=new Dictionary<string,object>();
         if(!ManagementActivate(window,owner,activation) || GetForegroundWindow()!=window){activation["foregroundAtRefusal"]=ManagementForegroundRelationship(GetForegroundWindow(),window,owner);result["activationDiagnostic"]=activation;throw new InvalidOperationException("TARGET_ACTIVATION_REFUSED");}
       }
-      if(args.ContainsKey("_elementId")){main.SetFocus();}
-      else if(action=="type_text" && TextOption(args,"focusMode","preserve")=="main") {main=MainTextControl(window);main.SetFocus();result["focusedControl"]=main.Current.ControlType.ProgrammaticName;}
-      if(action=="type_text" && TextFocus(window,false)==IntPtr.Zero) {IntPtr remembered=TextFocus(window);if(remembered!=IntPtr.Zero)AutomationElement.FromHandle(remembered).SetFocus();}
+      if(args.ContainsKey("_elementId")){CheckWindowReference(window);main.SetFocus();}
+      else if(action=="type_text" && TextOption(args,"focusMode","preserve")=="main") {main=MainTextControl(window);CheckWindowReference(window);main.SetFocus();result["focusedControl"]=main.Current.ControlType.ProgrammaticName;}
+      if(action=="type_text" && TextFocus(window,false)==IntPtr.Zero) {IntPtr remembered=TextFocus(window);if(remembered!=IntPtr.Zero){CheckWindowReference(window);AutomationElement.FromHandle(remembered).SetFocus();}}
       IntPtr expectedFocus=TextFocus(window,false);if(action=="type_text")AssertWritableText(expectedFocus);
       TextCheck(cancel,listener,window,owner,expectedFocus,action=="type_text",interaction);
       if(action=="type_text")RememberTextFocus(window,expectedFocus);

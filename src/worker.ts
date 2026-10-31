@@ -109,7 +109,7 @@ const requests = new Map<
 const blocked = new Set<string>();
 const lastTargets = new Map<
   string,
-  { nativeWindowHandle: number; processId: number }
+  { nativeWindowHandle: number; processId: number; windowRef?: string }
 >();
 function rememberTarget(
   operationId: string,
@@ -123,6 +123,9 @@ function rememberTarget(
     lastTargets.set(operationId, {
       nativeWindowHandle: Number(result.inputTargetHandle),
       processId: Number(result.inputTargetProcessId),
+      ...(typeof result.windowRef === "string"
+        ? { windowRef: result.windowRef }
+        : {}),
     });
 }
 let stopping: Promise<void> = Promise.resolve();
@@ -330,6 +333,18 @@ async function dispatch(
     process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
     return;
   }
+  if (
+    request.args.windowRef !== undefined &&
+    (typeof request.args.windowRef !== "string" ||
+      !request.args.windowRef.trim() ||
+      isBrowserRequest(request.args) ||
+      request.args.scope === "desktop")
+  ) {
+    process.stdout.write(
+      `${JSON.stringify({ id: request.id, result: { ok: false, action: request.action, error: "INVALID_ARGUMENTS: windowRef requires a nonempty native-window reference and cannot target desktop/browser channel" } })}\n`,
+    );
+    return;
+  }
   const denial = await settings.authorize(request.action);
   if (denial) {
     process.stdout.write(
@@ -387,9 +402,13 @@ async function dispatch(
         "move_window",
         "close_window",
       ].includes(request.action) &&
-      !["windowTitle", "processId", "nativeWindowHandle", "elementId"].some(
-        (key) => request.args[key] !== undefined,
-      )
+      ![
+        "windowRef",
+        "windowTitle",
+        "processId",
+        "nativeWindowHandle",
+        "elementId",
+      ].some((key) => request.args[key] !== undefined)
     )
       request.args = { ...request.args, ...previous };
     if (request.action === "prepare_input") {
@@ -588,6 +607,7 @@ async function dispatch(
         _replaceAll: true,
       };
       for (const key of [
+        "windowRef",
         "windowTitle",
         "processId",
         "nativeWindowHandle",

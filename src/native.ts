@@ -152,6 +152,8 @@ export const nativeDesktop = new NativeDesktopClient({
   launch: async (signal) => {
     const names = [
       "windows.cs",
+      "window-marker.cs",
+      "window-references.cs",
       "accessibility.cs",
       "capture.cs",
       "controls.cs",

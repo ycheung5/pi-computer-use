@@ -12,6 +12,7 @@ type Property = {
   minLength?: number;
 };
 const target = {
+  windowRef: { type: "string", minLength: 1 },
   windowTitle: { type: "string" },
   processId: { type: "integer", minimum: 1 },
   nativeWindowHandle: { type: "integer", minimum: 1 },
@@ -244,6 +245,7 @@ export async function executeAccessibility(
     };
     if (windowCapture) {
       for (const key of [
+        "windowRef",
         "windowTitle",
         "processId",
         "nativeWindowHandle",
@@ -270,6 +272,7 @@ export async function executeAccessibility(
       scope: normalized.scope,
     };
     for (const key of [
+      "windowRef",
       "windowTitle",
       "processId",
       "nativeWindowHandle",

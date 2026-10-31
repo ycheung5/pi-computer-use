@@ -67,6 +67,7 @@ partial class WindowsBridge {
     return IsWindowVisible(root) && ControlPopups(owner,source).Contains(root.ToInt64());
   }
   static void PointerCheck(EventWaitHandle cancel,IntPtr window,uint owner,ControlPoint point,bool foreground,bool requireForeground=true) {
+    CheckWindowReference(window);
     if(pointerListener==null || pointerListener.HasExited)throw new InvalidOperationException("STOP_LISTENER_UNAVAILABLE: listener exited; stop input");
     if(cancel.WaitOne(0))throw new InvalidOperationException("COMPUTER_USE_STOPPED");
     if(owner==(uint)pointerListener.Id || !IsWindow(window) || WindowOwner(window)!=owner || !IsWindowVisible(window) || IsIconic(window))throw new InvalidOperationException("TARGET_IDENTITY_CHANGED: intended source window is unavailable");
@@ -105,6 +106,7 @@ partial class WindowsBridge {
     IntPtr packed=new IntPtr((client.Y<<16)|(client.X & 65535));
     int count=action=="double_click"?2:1;
     for(int i=0;i<count;i++) {
+      CheckWindowReference(window);
       if(!IsWindow(window) || !IsWindow(recipient) || WindowOwner(recipient)!=WindowOwner(window))throw new InvalidOperationException("TARGET_IDENTITY_CHANGED");
       if(!ControlPost(recipient,i==0?down:down+2,new IntPtr(key),packed) || !ControlPost(recipient,down+1,IntPtr.Zero,packed))throw new InvalidOperationException("BACKGROUND_DISPATCH_UNCONFIRMED: partial message delivery; observe before retrying");
     }
@@ -123,7 +125,7 @@ partial class WindowsBridge {
       // Resolve without activation: validate identity and point before any takeover.
       Dictionary<string,object> quiet=new Dictionary<string,object>(args);quiet["activate"]=false;
       if(args.ContainsKey("elementId"))element=ResolveObservedElement(TextOption(args,"elementId",""),quiet,out window);
-      else if(!args.ContainsKey("nativeWindowHandle") && !args.ContainsKey("processId") && !args.ContainsKey("windowTitle")) {
+      else if(!args.ContainsKey("windowRef") && !args.ContainsKey("nativeWindowHandle") && !args.ContainsKey("processId") && !args.ContainsKey("windowTitle")) {
         ControlPoint first;
         if(action=="drag") {Dictionary<string,object> p=(Dictionary<string,object>)((IList)args["path"])[0];first=new ControlPoint {X=Convert.ToInt32(p["x"]),Y=Convert.ToInt32(p["y"])};}
         else first=new ControlPoint {X=NumberOption(args,"x",0),Y=NumberOption(args,"y",0)};
@@ -209,7 +211,7 @@ partial class WindowsBridge {
       result["cleanupConfirmed"]=!releaseFailed;
       if(cancel!=null)cancel.Dispose();
       if(pointerListener!=null){pointerListener.Dispose();pointerListener=null;}
-      ControlPoint now;bool same=GetCursorPos(out now) && now.X==last.X && now.Y==last.Y;
+      ControlPoint now;bool same=CurrentReferenceIntact() && GetCursorPos(out now) && now.X==last.X && now.Y==last.Y;
       uint ignored;uint thread=GetWindowThreadProcessId(window,out ignored);ControlGuiInfo info=new ControlGuiInfo {Size=(uint)Marshal.SizeOf(typeof(ControlGuiInfo))};
       HashSet<long> opened=window==IntPtr.Zero?new HashSet<long>():ControlPopups(owner,window);opened.ExceptWith(popups);
       bool popup=opened.Count>0 || (thread!=0 && GetGUIThreadInfo(thread,ref info) && (info.Flags & 0x1C)!=0);
