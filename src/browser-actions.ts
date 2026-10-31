@@ -1,5 +1,6 @@
 // Shared reference-compatible tool schemas; browser execution stays in browser.ts.
 const target = {
+  windowRef: { type: "string", minLength: 1 },
   windowTitle: { type: "string" },
   processId: { type: "integer", minimum: 1 },
   nativeWindowHandle: { type: "integer", minimum: 1 },

@@ -16,6 +16,7 @@ partial class WindowsBridge {
   [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
   [DllImport("user32.dll")] static extern uint GetDoubleClickTime();
   static void PointerSend(uint flags,int data) {
+    if((flags & (2U|8U|32U|0x800U|0x1000U))!=0)BeginWindowDispatch();
     PointerInput item=new PointerInput {Type=0,Data=new InputUnion { Mouse=new MouseInput { Flags=flags,Data=unchecked((uint)data),Extra=OwnedInputMarker }}};
     if(SendInput(1,new PointerInput[]{item},Marshal.SizeOf(typeof(PointerInput)))!=1)throw new InvalidOperationException("INPUT_DISPATCH_UNCONFIRMED: Windows rejected input; observe before retrying");
   }
@@ -67,6 +68,7 @@ partial class WindowsBridge {
     return IsWindowVisible(root) && ControlPopups(owner,source).Contains(root.ToInt64());
   }
   static void PointerCheck(EventWaitHandle cancel,IntPtr window,uint owner,ControlPoint point,bool foreground,bool requireForeground=true) {
+    CheckWindowReference(window);
     if(pointerListener==null || pointerListener.HasExited)throw new InvalidOperationException("STOP_LISTENER_UNAVAILABLE: listener exited; stop input");
     if(cancel.WaitOne(0))throw new InvalidOperationException("COMPUTER_USE_STOPPED");
     if(owner==(uint)pointerListener.Id || !IsWindow(window) || WindowOwner(window)!=owner || !IsWindowVisible(window) || IsIconic(window))throw new InvalidOperationException("TARGET_IDENTITY_CHANGED: intended source window is unavailable");
@@ -105,7 +107,9 @@ partial class WindowsBridge {
     IntPtr packed=new IntPtr((client.Y<<16)|(client.X & 65535));
     int count=action=="double_click"?2:1;
     for(int i=0;i<count;i++) {
+      CheckWindowReference(window);
       if(!IsWindow(window) || !IsWindow(recipient) || WindowOwner(recipient)!=WindowOwner(window))throw new InvalidOperationException("TARGET_IDENTITY_CHANGED");
+      BeginWindowDispatch();
       if(!ControlPost(recipient,i==0?down:down+2,new IntPtr(key),packed) || !ControlPost(recipient,down+1,IntPtr.Zero,packed))throw new InvalidOperationException("BACKGROUND_DISPATCH_UNCONFIRMED: partial message delivery; observe before retrying");
     }
     result["method"]="background_messages";result["verification"]="unconfirmed";result["verificationNote"]="Messages posted; recipient processing and effects are unverified.";return true;
@@ -123,7 +127,7 @@ partial class WindowsBridge {
       // Resolve without activation: validate identity and point before any takeover.
       Dictionary<string,object> quiet=new Dictionary<string,object>(args);quiet["activate"]=false;
       if(args.ContainsKey("elementId"))element=ResolveObservedElement(TextOption(args,"elementId",""),quiet,out window);
-      else if(!args.ContainsKey("nativeWindowHandle") && !args.ContainsKey("processId") && !args.ContainsKey("windowTitle")) {
+      else if(!args.ContainsKey("windowRef") && !args.ContainsKey("nativeWindowHandle") && !args.ContainsKey("processId") && !args.ContainsKey("windowTitle")) {
         ControlPoint first;
         if(action=="drag") {Dictionary<string,object> p=(Dictionary<string,object>)((IList)args["path"])[0];first=new ControlPoint {X=Convert.ToInt32(p["x"]),Y=Convert.ToInt32(p["y"])};}
         else first=new ControlPoint {X=NumberOption(args,"x",0),Y=NumberOption(args,"y",0)};
@@ -183,7 +187,7 @@ partial class WindowsBridge {
             if(cancel.WaitOne(0) || pointerListener.HasExited)throw new InvalidOperationException("COMPUTER_USE_STOPPED");
             if(!IsWindow(window) || WindowOwner(window)!=owner)throw new InvalidOperationException("TARGET_IDENTITY_CHANGED: source changed during drag");
           } else PointerCheck(cancel,window,owner,p,true,action!="move" || Option(args,"activate",false));
-          NotifyPhysicalInput(true);
+          BeginWindowDispatch();NotifyPhysicalInput(true);
           if(!InteractionGuard.Move(p.X,p.Y))throw new InvalidOperationException("POINTER_MOVE_FAILED");
           moved=true;last=p;interaction.Check();
           if(action=="drag" && i>0) {
@@ -209,7 +213,7 @@ partial class WindowsBridge {
       result["cleanupConfirmed"]=!releaseFailed;
       if(cancel!=null)cancel.Dispose();
       if(pointerListener!=null){pointerListener.Dispose();pointerListener=null;}
-      ControlPoint now;bool same=GetCursorPos(out now) && now.X==last.X && now.Y==last.Y;
+      ControlPoint now;bool same=CurrentReferenceIntact() && GetCursorPos(out now) && now.X==last.X && now.Y==last.Y;
       uint ignored;uint thread=GetWindowThreadProcessId(window,out ignored);ControlGuiInfo info=new ControlGuiInfo {Size=(uint)Marshal.SizeOf(typeof(ControlGuiInfo))};
       HashSet<long> opened=window==IntPtr.Zero?new HashSet<long>():ControlPopups(owner,window);opened.ExceptWith(popups);
       bool popup=opened.Count>0 || (thread!=0 && GetGUIThreadInfo(thread,ref info) && (info.Flags & 0x1C)!=0);

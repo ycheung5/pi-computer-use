@@ -18,6 +18,9 @@ export async function listWindows(
   const maxWindows = args.maxWindows ?? 50;
   const includeInvisible = args.includeInvisible ?? false;
   if (
+    Object.keys(args).some(
+      (key) => !["maxWindows", "includeInvisible"].includes(key),
+    ) ||
     !Number.isInteger(maxWindows) ||
     typeof maxWindows !== "number" ||
     maxWindows < 1 ||

@@ -14,6 +14,7 @@ export const screenshotParameters = {
       default: "active_window",
     },
     browserTab: { type: "string", minLength: 1 },
+    windowRef: { type: "string", minLength: 1 },
     windowTitle: { type: "string", minLength: 1 },
     processId: { type: "integer", minimum: 1 },
     nativeWindowHandle: { type: "integer", minimum: 1 },
@@ -56,7 +57,7 @@ function createWgc(): WorkerClient {
           "WGC_UNAVAILABLE: Windows graphics metadata is missing",
         );
       return compileNative(
-        ["wgc.cs"],
+        ["wgc.cs", "window-marker.cs"],
         [
           "System.Drawing.dll",
           join(framework, "System.Runtime.dll"),
@@ -79,6 +80,7 @@ export async function screenshot(
   const maxWidth = args.maxWidth ?? 1600;
   const scope = args.scope ?? "active_window";
   const allowed = new Set([
+    "windowRef",
     "maxWidth",
     "scope",
     "windowTitle",
@@ -87,6 +89,10 @@ export async function screenshot(
     "activate",
   ]);
   const invalid =
+    (args.windowRef !== undefined &&
+      (typeof args.windowRef !== "string" ||
+        !args.windowRef.trim() ||
+        scope === "desktop")) ||
     Object.keys(args).some((key) => !allowed.has(key)) ||
     !Number.isSafeInteger(maxWidth) ||
     typeof maxWidth !== "number" ||
@@ -122,7 +128,10 @@ export async function screenshot(
     const target = result.wgcTarget;
     delete result.wgcTarget;
     if (
-      (result.ok || result.error === "SCREEN_REGION_CAPTURE_FAILED") &&
+      (result.ok ||
+        (result.error === "SCREEN_REGION_CAPTURE_FAILED" &&
+          result.cleanupConfirmed !== false &&
+          result.identityWarning === undefined)) &&
       target &&
       typeof target === "object" &&
       !Array.isArray(target)
@@ -137,12 +146,26 @@ export async function screenshot(
         );
         if (result.nativeCaptureError !== undefined)
           composited.nativeCaptureError = result.nativeCaptureError;
-        if (composited.ok) return composited;
+        if (composited.ok) {
+          if (result.windowRefUnavailable !== undefined) {
+            composited.windowRefUnavailable = result.windowRefUnavailable;
+            if (
+              composited.screenshot &&
+              typeof composited.screenshot === "object"
+            )
+              (
+                composited.screenshot as Record<string, unknown>
+              ).windowRefUnavailable = result.windowRefUnavailable;
+          }
+          return composited;
+        }
         wgcError = composited.error;
         if (
           !result.screenshot ||
           composited.cleanupConfirmed === false ||
-          /CANCEL|STOP|CLEANUP_UNCONFIRMED/.test(String(composited.error))
+          /WINDOW_REFERENCE|CANCEL|STOP|CLEANUP_UNCONFIRMED/.test(
+            String(composited.error),
+          )
         )
           return composited;
         failure = String(composited.error);

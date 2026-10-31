@@ -12,8 +12,9 @@ partial class WindowsBridge {
   [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out Rect bounds, int bytes);
 
   static IntPtr ResolveCaptureWindow(Dictionary<string, object> args) {
+    WindowReference bound=ResolveWindowReference(args);
     object value;
-    long requested = args.TryGetValue("nativeWindowHandle", out value) ? Convert.ToInt64(value) : 0;
+    long requested = bound!=null?bound.Window.ToInt64():args.TryGetValue("nativeWindowHandle", out value) ? Convert.ToInt64(value) : 0;
     uint process = args.TryGetValue("processId", out value) ? Convert.ToUInt32(value) : 0;
     string title = args.TryGetValue("windowTitle", out value) ? Convert.ToString(value) : null;
     if (requested != 0) {
@@ -109,6 +110,7 @@ partial class WindowsBridge {
   }
 
   static object CaptureScreenshot(Dictionary<string, object> args) {
+    if(args.ContainsKey("windowRef") && TextOption(args,"scope","active_window")=="desktop")throw new InvalidOperationException("WINDOW_REFERENCE_CONFLICT: desktop capture cannot use a window reference");
     bool desktopScope = Convert.ToString(args["scope"]) == "desktop";
     int maximum = Convert.ToInt32(args["maxWidth"]);
     Rectangle desktop = SystemInformation.VirtualScreen;
@@ -120,12 +122,14 @@ partial class WindowsBridge {
     List<string> warnings = new List<string>();
     IntPtr target = IntPtr.Zero;
     uint owner = 0;
+    var referenceMetadata=new Dictionary<string,object>();
     try {
     if (!desktopScope) {
       target = ResolveCaptureWindow(args);
-      GetWindowThreadProcessId(target, out owner);
+      WindowReference binding=ObserveWindowReference(target,referenceMetadata);if(binding!=null){currentReference=binding;referenceMetadata["windowRef"]=binding.Id;}
+      GetWindowThreadProcessId(target, out owner);CheckWindowReference(target);
       object requestedActivation;
-      if (args.TryGetValue("activate", out requestedActivation) && Convert.ToBoolean(requestedActivation) && !SetForegroundWindow(target)) warnings.Add("WINDOW_ACTIVATION_REFUSED: Windows did not bring the target to foreground");
+      if (args.TryGetValue("activate", out requestedActivation) && Convert.ToBoolean(requestedActivation)){BeginWindowDispatch();if(!SetForegroundWindow(target))warnings.Add("WINDOW_ACTIVATION_REFUSED: Windows did not bring the target to foreground");}
       bounds = WindowCaptureBounds(target);
       if (!IsIconic(target) && IsWindowVisible(target) && bounds.Width > 0 && bounds.Height > 0) {
         if (ClearCaptureRegion(target, bounds, desktop)) {
@@ -159,6 +163,7 @@ partial class WindowsBridge {
     }
       if (image == null && pixelFailure == null) image = CopyCaptureRegion(bounds);
       if (target != IntPtr.Zero) {
+        CheckWindowReference(target);
         uint ownerAfter;
         GetWindowThreadProcessId(target, out ownerAfter);
         if (!IsWindow(target) || owner != ownerAfter) throw new InvalidOperationException("WINDOW_IDENTITY_CHANGED_DURING_CAPTURE");
@@ -169,7 +174,8 @@ partial class WindowsBridge {
         unavailable["error"] = "SCREEN_REGION_CAPTURE_FAILED";
         unavailable["nativeCaptureError"] = pixelFailure;
         unavailable["captureWarnings"] = warnings;
-        unavailable["wgcTarget"] = new Dictionary<string, object> { { "nativeWindowHandle", target.ToInt64() }, { "processId", owner } };
+        foreach(var pair in referenceMetadata)unavailable[pair.Key]=pair.Value;
+        unavailable["wgcTarget"] = new Dictionary<string, object> { { "nativeWindowHandle", target.ToInt64() }, { "processId", owner }, { "_windowMarker", WindowReferenceDescriptor(target) } };
         return unavailable;
       }
       if (maximum > 0 && image.Width > maximum) {
@@ -193,9 +199,11 @@ partial class WindowsBridge {
         { "occludedPossible", occluded }, { "windowCaptureFailed", failed }, { "captureWarnings", warnings }
       };
       Dictionary<string, object> result = Result(true, "screenshot");
+      metadata["source"]=desktopScope?"desktop":"window";
+      foreach(var pair in referenceMetadata){result[pair.Key]=pair.Value;metadata[pair.Key]=pair.Value;}
       result["screenshot"] = metadata;
       if(target!=IntPtr.Zero && !failed){RememberPointerOrigin(target);RememberPointerTitle(args,target);}
-      if (target != IntPtr.Zero && !failed && occluded) result["wgcTarget"] = new Dictionary<string, object> { { "nativeWindowHandle", target.ToInt64() }, { "processId", owner } };
+      if (target != IntPtr.Zero && !failed && occluded) result["wgcTarget"] = new Dictionary<string, object> { { "nativeWindowHandle", target.ToInt64() }, { "processId", owner }, {"_windowMarker",WindowReferenceDescriptor(target)} };
       return result;
     } finally { if (image != null) image.Dispose(); }
   }
