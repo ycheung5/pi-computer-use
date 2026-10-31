@@ -12,6 +12,7 @@ export const ocrParameters = {
   type: "object",
   additionalProperties: false,
   properties: {
+    windowRef: { type: "string", minLength: 1 },
     windowTitle: { type: "string", minLength: 1 },
     processId: { type: "integer", minimum: 1 },
     nativeWindowHandle: { type: "integer", minimum: 1 },
@@ -98,6 +99,7 @@ export async function ocrDesktop(
       return fail(`INVALID_ARGUMENTS: invalid ${key}`);
   }
   if (
+    (args.windowRef !== undefined && !String(args.windowRef).trim()) ||
     (args.query !== undefined && !normalize(String(args.query))) ||
     (args.windowTitle !== undefined && !String(args.windowTitle).trim()) ||
     [args.processId, args.nativeWindowHandle].some(
@@ -118,6 +120,7 @@ export async function ocrDesktop(
   };
   for (const key of [
     "scope",
+    "windowRef",
     "windowTitle",
     "processId",
     "nativeWindowHandle",
@@ -164,6 +167,12 @@ export async function ocrDesktop(
       language: recognized.language,
       availableLanguages: recognized.availableLanguages,
       source: args.scope === "desktop" ? "desktop" : "window",
+      ...(captured.windowRef === undefined
+        ? {}
+        : { windowRef: captured.windowRef }),
+      ...(captured.windowRefUnavailable === undefined
+        ? {}
+        : { windowRefUnavailable: captured.windowRefUnavailable }),
       coordinateSpace: "screen",
       imageBounds: image.bounds,
       imageScale: scale,
@@ -200,8 +209,14 @@ export async function ocrDesktop(
             y: Math.round(y),
             detailLevel: "full",
           };
-          for (const key of ["windowTitle", "processId", "nativeWindowHandle"])
-            if (args[key] !== undefined) target[key] = args[key];
+          for (const key of [
+            "windowRef",
+            "windowTitle",
+            "processId",
+            "nativeWindowHandle",
+          ])
+            if ((captured[key] ?? args[key]) !== undefined)
+              target[key] = captured[key] ?? args[key];
           try {
             const observed = await nativeDesktop.execute(
               "element_info",

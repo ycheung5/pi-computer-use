@@ -34,53 +34,46 @@ partial class WindowsBridge {
   }
 
   static object ListWindows(Dictionary<string, object> args) {
+    if(args.ContainsKey("windowRef"))return ObserveReferencePresence(args);
     int maximum = Convert.ToInt32(args["maxWindows"]);
     bool invisible = Convert.ToBoolean(args["includeInvisible"]);
     List<object> windows = new List<object>();
-    IntPtr foreground = GetForegroundWindow();
-    bool truncated = false;
-    EnumWindows(delegate(IntPtr handle, IntPtr parameter) {
-      bool visible = IsWindowVisible(handle);
-      bool offscreen = !visible || IsIconic(handle);
-      if (!invisible && offscreen) return true;
-      Rect bounds;
-      if (!GetWindowRect(handle, out bounds)) return true;
-      uint pid;
-      GetWindowThreadProcessId(handle, out pid);
-      if (pid == 0 || !IsWindow(handle)) return true;
-      if (windows.Count == maximum) { truncated = true; return false; }
-      StringBuilder title = new StringBuilder(2048);
-      StringBuilder className = new StringBuilder(256);
-      GetWindowText(handle, title, title.Capacity);
-      GetClassName(handle, className, className.Capacity);
-      UIntPtr ignored;
-      bool answered = SendMessageTimeout(handle, 0, UIntPtr.Zero, IntPtr.Zero, 3, 100, out ignored) != IntPtr.Zero;
-      int responseError = answered ? 0 : Marshal.GetLastWin32Error();
-      // A window can disappear or be reused while native calls are in flight.
-      uint ownerAfter;
-      GetWindowThreadProcessId(handle, out ownerAfter);
-      if (!IsWindow(handle) || ownerAfter != pid) return true;
-      RememberPointerOrigin(handle);
-      Dictionary<string, object> item = new Dictionary<string, object> {
-        { "id", "uia:hwnd:" + handle.ToInt64() + ":pid:" + pid },
-        { "depth", 1 }, { "name", title.ToString() }, { "className", className.ToString() },
-        { "controlType", "Window" }, { "processId", pid }, { "nativeWindowHandle", handle.ToInt64() },
-        { "boundingBox", new Dictionary<string, object> {
-          { "x", bounds.Left }, { "y", bounds.Top }, { "width", bounds.Right - bounds.Left },
-          { "height", bounds.Bottom - bounds.Top }, { "centerX", (bounds.Left + (double)bounds.Right) / 2 },
-          { "centerY", (bounds.Top + (double)bounds.Bottom) / 2 }
-        } },
-        { "isEnabled", IsWindowEnabled(handle) }, { "isOffscreen", offscreen },
-        { "hasKeyboardFocus", handle == foreground }, { "source", "win32" },
-        { "responsive", responseError == 5 ? (object)null : answered },
-        { "responsiveness", answered ? "responsive" : responseError == 5 ? "access_denied" : "unresponsive_or_unknown" }
+    bool truncated=false,identityChanged=false,metadataOnly=Option(args,"_metadataOnly",false);
+    EnumWindows(delegate(IntPtr handle,IntPtr parameter) {
+      // Eligibility probes are not retained metadata. Re-read retained fields after binding.
+      if(!invisible && (!IsWindowVisible(handle) || IsIconic(handle)))return true;
+      uint pid;GetWindowThreadProcessId(handle,out pid);
+      if(pid==0 || !IsWindow(handle))return true;
+      if(windows.Count==maximum){truncated=true;return false;}
+      var bindingMetadata=new Dictionary<string,object>();
+      WindowReference binding=metadataOnly?null:ObserveWindowReference(handle,bindingMetadata);
+      bool visible=IsWindowVisible(handle),offscreen=!visible || IsIconic(handle);
+      if(!invisible && offscreen){if(binding!=null && !WindowMarker.Matches(handle,binding.Owner,binding.Marker))identityChanged=true;return true;}
+      Rect bounds;if(!GetWindowRect(handle,out bounds)){if(binding!=null)identityChanged=true;return true;}
+      var title=new StringBuilder(2048);var className=new StringBuilder(256);
+      GetWindowText(handle,title,title.Capacity);GetClassName(handle,className,className.Capacity);
+      UIntPtr ignored;bool answered=SendMessageTimeout(handle,0,UIntPtr.Zero,IntPtr.Zero,3,100,out ignored)!=IntPtr.Zero;
+      int responseError=answered?0:Marshal.GetLastWin32Error();
+      uint ownerAfter;GetWindowThreadProcessId(handle,out ownerAfter);
+      if(!IsWindow(handle) || ownerAfter!=pid || (binding!=null && !WindowMarker.Matches(handle,binding.Owner,binding.Marker))){if(binding!=null)identityChanged=true;return true;}
+      Dictionary<string,object> item=new Dictionary<string,object>{
+        {"depth",1},{"name",title.ToString()},{"className",className.ToString()},
+        {"controlType","Window"},{"processId",pid},{"nativeWindowHandle",handle.ToInt64()},
+        {"boundingBox",new Dictionary<string,object>{{"x",bounds.Left},{"y",bounds.Top},{"width",bounds.Right-bounds.Left},{"height",bounds.Bottom-bounds.Top},{"centerX",(bounds.Left+(double)bounds.Right)/2},{"centerY",(bounds.Top+(double)bounds.Bottom)/2}}},
+        {"isEnabled",IsWindowEnabled(handle)},{"isOffscreen",offscreen},{"hasKeyboardFocus",handle==GetForegroundWindow()},{"source","win32"},
+        {"responsive",responseError==5?(object)null:answered},{"responsiveness",answered?"responsive":responseError==5?"access_denied":"unresponsive_or_unknown"}
       };
-      windows.Add(item);
-      return true;
-    }, IntPtr.Zero);
+      if(binding!=null){item["id"]="uia:hwnd:"+handle.ToInt64()+":pid:"+pid;item["windowRef"]=binding.Id;}
+      else if(metadataOnly)item["windowRefUnavailable"]="UNBOUND_METADATA: observe the selected window to obtain a reference";
+      else foreach(var pair in bindingMetadata)item[pair.Key]=pair.Value;
+      RememberPointerOrigin(handle);
+      if(binding!=null && !WindowMarker.Matches(handle,binding.Owner,binding.Marker)){identityChanged=true;return true;}
+      windows.Add(item);return true;
+    },IntPtr.Zero);
     Dictionary<string, object> result = Result(true, "list_windows");
     result["windows"] = windows;
-    result["truncated"] = truncated;
+    result["truncated"] = truncated || identityChanged;
+    if(identityChanged){result["conclusive"]=false;result["observationError"]="WINDOW_REFERENCE_LOST: a lifetime changed during enumeration; incomplete observation";}
     result["source"] = "win32";
     return result;
   }
@@ -99,6 +92,7 @@ partial class WindowsBridge {
         request = json.Deserialize<Dictionary<string, object>>(line);
         if (request.ContainsKey("cancel")) continue;
         string action = Convert.ToString(request["action"]);
+        currentReference=null;windowDispatchAttempted=false;
         pointerInputAction=action=="click" || action=="double_click" || action=="move" || action=="drag" || action=="scroll" || action=="type_text" || action=="keypress";
         pointerOperation=request.ContainsKey("operationId")?Convert.ToString(request["operationId"]):"";
         object result;
@@ -120,11 +114,14 @@ partial class WindowsBridge {
           if(refused!=null)failure["activationDiagnostic"]=refused.Diagnostic;
           result = failure;
         }
+        var payload=result as Dictionary<string,object>;
+        if(payload!=null)FinishWindowReference(payload);
         Console.WriteLine(json.Serialize(new Dictionary<string, object> { { "id", request["id"] }, { "result", result } }));
         Console.Out.Flush();
       } catch (Exception error) {
         Console.Error.WriteLine("NATIVE_PROTOCOL_ERROR: " + error.Message);
       }
     }
+    CleanupWindowReferences();
   }
 }

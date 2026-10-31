@@ -10,12 +10,14 @@ type Rule = {
   default?: unknown;
   minimum?: number;
   maximum?: number;
+  minLength?: number;
   enum?: string[];
 };
 const waitDefinition: Record<string, Rule> = {
   milliseconds: { type: "integer", minimum: 1, maximum: 30000, default: 500 },
 };
 const conditionDefinition: Record<string, Rule> = {
+  windowRef: { type: "string", minLength: 1 },
   windowTitle: { type: "string" },
   processId: { type: "integer", minimum: 1 },
   nativeWindowHandle: { type: "integer", minimum: 1 },
@@ -82,11 +84,31 @@ async function observation(
     // Internal enumeration has a higher cap than the model-facing listing tool.
     const result = await nativeDesktop.execute(
       "list_windows",
-      { includeInvisible: true, maxWindows: 4096 },
+      {
+        includeInvisible: true,
+        maxWindows: 4096,
+        _metadataOnly: true,
+        ...(args.windowRef === undefined
+          ? {}
+          : {
+              windowRef: args.windowRef,
+              ...(args.nativeWindowHandle === undefined
+                ? {}
+                : { nativeWindowHandle: args.nativeWindowHandle }),
+              ...(args.processId === undefined
+                ? {}
+                : { processId: args.processId }),
+              ...(args.windowTitle === undefined
+                ? {}
+                : { windowTitle: args.windowTitle }),
+            }),
+      },
       signal,
     );
     if (!result.ok)
       return { found: false, conclusive: false, error: String(result.error) };
+    if (typeof result.referencePresent === "boolean")
+      return { found: result.referencePresent, conclusive: true };
     const windows = result.windows as Record<string, unknown>[];
     const found = windows.some(
       (window) =>
@@ -108,7 +130,12 @@ async function observation(
     scope: args.scope,
     activate: false,
   };
-  for (const key of ["windowTitle", "processId", "nativeWindowHandle"])
+  for (const key of [
+    "windowRef",
+    "windowTitle",
+    "processId",
+    "nativeWindowHandle",
+  ])
     if (args[key] !== undefined) target[key] = args[key];
   if (args.condition === "text") {
     const result = await ocrDesktop(
@@ -192,7 +219,8 @@ export async function waitDesktop(
     if (
       typeof value === "string" &&
       ((rule.enum && !rule.enum.includes(value)) ||
-        ((key === "query" || key === "windowTitle") && !value.trim()))
+        ((key === "query" || key === "windowTitle" || key === "windowRef") &&
+          !value.trim()))
     )
       return fail(`invalid ${key}`);
     args[key] = value;
@@ -204,6 +232,7 @@ export async function waitDesktop(
   }
   if (
     args.condition === "window" &&
+    args.windowRef === undefined &&
     args.nativeWindowHandle === undefined &&
     args.processId === undefined &&
     args.windowTitle === undefined

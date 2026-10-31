@@ -11,6 +11,7 @@ import computerUse from "../dist/extension.js";
 import { computerUseHost } from "./native-host.mjs";
 
 assert.equal(process.platform, "win32");
+const lifetimeOnly = process.argv.includes("--lifetime-only");
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-capture-fixture-"));
 const executable = join(folder, "fixture.exe");
 const compiler = join(
@@ -139,6 +140,11 @@ try {
   );
   assert.equal(normal.windowCaptureFailed, false);
   assert.equal(normal.occludedPossible, false);
+  if (lifetimeOnly) {
+    const bound = await call({ windowRef: normal.windowRef });
+    assert.equal(bound.windowRef, normal.windowRef);
+    assert.equal(bound.source, "window");
+  }
   const snapshotTool = host.tools.get("windows_computer_use_snapshot");
   const snapshot = await snapshotTool.execute(
     "snapshot-image",
@@ -146,6 +152,7 @@ try {
       nativeWindowHandle: handle,
       processId: fixture.pid,
       captureWindow: true,
+      ...(lifetimeOnly ? { windowRef: normal.windowRef } : {}),
       maxWidth: 80,
     },
     undefined,
@@ -162,6 +169,10 @@ try {
   );
   assert.equal(snapshotText.screenshot.width, 80);
   assert.equal("screenshotPending" in snapshotText, false);
+  if (lifetimeOnly) {
+    assert.equal(snapshotText.windowRef, normal.windowRef);
+    assert.equal(snapshotText.screenshot.windowRef, normal.windowRef);
+  }
   const noImage = await snapshotTool.execute(
     "snapshot-no-image",
     {
@@ -177,32 +188,34 @@ try {
     noImage.content.some((item) => item.type === "image"),
     false,
   );
-  const failedSnapshot = await snapshotTool.execute(
-    "snapshot-failed-tree",
-    {
-      nativeWindowHandle: handle,
-      processId: fixture.pid + 100000,
-      maxWidth: 80,
-    },
-    undefined,
-    undefined,
-    {},
-  );
-  assert.equal(
-    failedSnapshot.isError,
-    true,
-    "an attached screenshot does not turn failed UIA into success",
-  );
-  assert.ok(failedSnapshot.content.some((item) => item.type === "image"));
-  const failedDetails = JSON.parse(
-    failedSnapshot.content.find((item) => item.type === "text").text,
-  );
-  assert.equal(failedDetails.ok, false);
-  assert.equal(
-    failedDetails.screenshot.method,
-    "screen",
-    "snapshot defaults to desktop capture unless captureWindow is requested",
-  );
+  if (!lifetimeOnly) {
+    const failedSnapshot = await snapshotTool.execute(
+      "snapshot-failed-tree",
+      {
+        nativeWindowHandle: handle,
+        processId: fixture.pid + 100000,
+        maxWidth: 80,
+      },
+      undefined,
+      undefined,
+      {},
+    );
+    assert.equal(
+      failedSnapshot.isError,
+      true,
+      "an attached screenshot does not turn failed UIA into success",
+    );
+    assert.ok(failedSnapshot.content.some((item) => item.type === "image"));
+    const failedDetails = JSON.parse(
+      failedSnapshot.content.find((item) => item.type === "text").text,
+    );
+    assert.equal(failedDetails.ok, false);
+    assert.equal(
+      failedDetails.screenshot.method,
+      "screen",
+      "snapshot defaults to desktop capture unless captureWindow is requested",
+    );
+  }
   await command("cover");
   const covered = await call();
   assert.deepEqual(
@@ -225,16 +238,27 @@ try {
   await command("cover");
   const composited = await call();
   assert.equal(composited.method, "wgc", JSON.stringify(composited));
+  if (lifetimeOnly) {
+    const boundWgc = await call({ windowRef: composited.windowRef });
+    assert.equal(boundWgc.windowRef, composited.windowRef);
+    assert.equal(boundWgc.method, "wgc");
+    assert.equal(
+      JSON.stringify(boundWgc).includes("PiComputerUse.Window."),
+      false,
+    );
+  }
   assert.deepEqual(
     centerPixel,
     [0, 0, 0],
     "WGC captures the black target behind the magenta cover",
   );
-  await command("minimize");
-  const minimized = await call();
-  assert.equal(minimized.windowCaptureFailed, true);
-  assert.equal(minimized.method, "screen");
-  assert.match(minimized.captureWarnings.join(" "), /WINDOW_CAPTURE_FAILED/);
+  if (!lifetimeOnly) {
+    await command("minimize");
+    const minimized = await call();
+    assert.equal(minimized.windowCaptureFailed, true);
+    assert.equal(minimized.method, "screen");
+    assert.match(minimized.captureWarnings.join(" "), /WINDOW_CAPTURE_FAILED/);
+  }
   const wrong = await tool.execute(
     "wrong-owner",
     { nativeWindowHandle: handle, processId: fixture.pid + 100000 },
@@ -251,7 +275,9 @@ try {
       normal: normal.method,
       covered: covered.method,
       composited: composited.method,
-      minimizedFallback: true,
+      minimizedFallback: !lifetimeOnly,
+      lifetimeOnly,
+      boundWgc: lifetimeOnly,
       pixels: true,
       pngDimensions: true,
       coordinateMapping: true,
