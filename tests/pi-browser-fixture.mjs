@@ -680,7 +680,24 @@ function partialRecovery(f) {
       continue;
     if (reads.has(action)) {
       for (const node of nodes) {
-        if (typeof node.id === "string") known.set(node.id, node);
+        // AX may return a button and its StaticText with the same opaque ID.
+        if (
+          typeof node.id === "string" &&
+          ["textbox", "checkbox", "combobox", "option", "button"].includes(
+            node.role,
+          )
+        ) {
+          const previous = known.get(node.id);
+          if (
+            previous &&
+            (previous.name !== node.name || previous.role !== node.role)
+          )
+            return {
+              pass: false,
+              limitations: ["contradictory observed actionable identity"],
+            };
+          known.set(node.id, node);
+        }
         if (
           submitted &&
           node.name === "Disabled field" &&

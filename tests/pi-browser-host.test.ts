@@ -1223,6 +1223,44 @@ test("partial recovery requires each observed field effect and genuine confirmat
   const accepted = async (audit: unknown, patch = {}) =>
     (await verify("partial", { ...facts, audit, ...patch })).pass;
   assert.equal(await accepted(complete), true);
+  // Literal same-ID representations from the real cc70ece read-only gate.
+  const actualSubmit = {
+    id: "t96e620fc2bd3e621:226",
+    name: "Submit form",
+    role: "button",
+  };
+  const actualSubmitText = {
+    id: "t96e620fc2bd3e621:226",
+    name: "Submit form",
+    role: "StaticText",
+  };
+  assert.equal(
+    await accepted([
+      ...initial,
+      ...read([...controls.slice(0, 5), actualSubmit, actualSubmitText]),
+      ...effects.flat(),
+      ...pair("click", { elementId: actualSubmit.id }, {}),
+      ...confirmation,
+    ]),
+    true,
+    "literal real button survives its StaticText representation",
+  );
+  for (const contradiction of [
+    { ...controls[0]!, name: "Notes" },
+    { ...controls[0]!, role: "checkbox" },
+  ])
+    assert.equal(
+      await accepted([
+        ...initial,
+        ...read([...controls, contradiction]),
+        ...effects.flat(),
+        ...submit,
+        ...confirmation,
+      ]),
+      false,
+      "contradictory actionable identity cannot be guessed",
+    );
+
   assert.equal(
     await accepted([
       ...initial,
