@@ -38,6 +38,8 @@ Live proof on 2026-10-29 used Windows 11 x64 through WSL interop and the private
 
 Listing establishes identity metadata; targeted observations and actions recheck that identity. The native accessibility fixtures exercise ambiguous titles, missing/wrong-owner targets and removed/unseen references through the public interface. The [paired accessibility baseline](validation.md#accessibility-comparison-evidence) compares these outcomes with DSH. Inaccessible/elevated providers and additional replacement cases remain release checks. No test-only target-resolution API is required. Browser-tab discovery is described in [browser control](browser.md).
 
+A window handle and process ID do not include a per-window generation: if Windows reuses the same HWND in the same process, those values alone cannot distinguish the replacement. The reference uses the same HWND/PID window identifier. A fresh observation reduces stale-target risk but cannot prove identity across that reuse; optional title/class/thread values are not guaranteed unique or stable. The existing same-title replacement fixture did not establish actual handle reuse. That acceptance requirement remains open pending a viable lifecycle identity mechanism and validation.
+
 ## Accessibility observations
 
 `accessibility_tree`, `snapshot`, `find` and `element_info` are registered Pi tools backed by a persistent MTA UIA bridge. The worker validates options before native execution. Tree traversal bounds depth, nodes and elapsed time; a synchronous provider can still block, so the native process has a 40-second watchdog and the extension permits the maximum 30-second traversal budget plus cleanup. Truncated or failed observations remain explicit.
