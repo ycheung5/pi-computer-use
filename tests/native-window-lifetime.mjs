@@ -37,9 +37,15 @@ const built = spawnSync(
 assert.equal(built.status, 0, built.stdout + built.stderr);
 const fixtureTitle = `Owned lifetime ${Date.now()}`;
 const expiryOnly = process.argv.includes("--expiry-only");
+const reuseOnly = process.argv.includes("--reuse-only");
+let reuseAvailability;
 const fixture = spawn(
   executable,
-  [fixtureTitle, "--lifetime", ...(expiryOnly ? ["--expiry"] : [])],
+  [
+    fixtureTitle,
+    "--lifetime",
+    ...(expiryOnly ? ["--expiry"] : reuseOnly ? ["--reuse"] : []),
+  ],
   {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
@@ -485,9 +491,86 @@ async function verifyReferenceExpiry() {
       "all expiry checks used the original native helpers",
     );
 }
+// Two finite empirical cycles; exhausting either bound is unavailable, never acceptance.
+async function verifyRealHandleReuse() {
+  await next();
+  const command = async (value) => {
+    fixture.stdin.write(value + "\n");
+    const result = await next();
+    receipts.push({ reuseCommand: value, result });
+    return result;
+  };
+  const first = await command("reuse-prepare");
+  assert.notEqual(first.status, "setup-error");
+  if (first.status !== "collision") {
+    reuseAvailability =
+      "unavailable: no first full-HWND collision within bounds";
+    return;
+  }
+  assert.ok(first.firstOrdinal > 0 && first.ordinal > first.firstOrdinal);
+  assert.equal(first.live, true);
+  assert.equal(first.owner, fixture.pid);
+  const target = {
+    nativeWindowHandle: first.hwnd,
+    processId: first.pid,
+    activate: false,
+  };
+  const bound = await call("accessibility_tree", {
+    ...target,
+    maxDepth: 0,
+    includeOffscreen: true,
+  });
+  if (bound.ok !== true || typeof bound.windowRef !== "string") {
+    reuseAvailability =
+      "unavailable: hidden owned root UIA binding prerequisite";
+    return;
+  }
+  const second = await command("reuse-next:" + first.hwnd);
+  assert.notEqual(second.status, "setup-error");
+  if (second.status !== "collision") {
+    reuseAvailability =
+      "unavailable: no second exact full-HWND collision within bounds";
+    return;
+  }
+  assert.equal(second.hwnd, first.hwnd);
+  assert.equal(second.pid, first.pid);
+  assert.equal(second.owner, fixture.pid);
+  assert.ok(second.ordinal > first.ordinal);
+  assert.equal(second.closeCount, 0);
+  for (const [action, extra] of [
+    ["snapshot", { includeScreenshot: false }],
+    ["close_window", {}],
+  ]) {
+    const lost = await call(action, {
+      ...target,
+      windowRef: bound.windowRef,
+      ...extra,
+    });
+    assert.equal(lost.ok, false, JSON.stringify(lost));
+    assert.match(lost.error, /WINDOW_REFERENCE_LOST/);
+  }
+  const intact = await command("reuse-oracle");
+  assert.equal(intact.live, true);
+  assert.equal(intact.hwnd, second.hwnd);
+  assert.equal(intact.ordinal, second.ordinal);
+  assert.equal(intact.closeCount, 0);
+  const fresh = await call("accessibility_tree", {
+    ...target,
+    maxDepth: 0,
+    includeOffscreen: true,
+  });
+  assert.equal(fresh.ok, true, JSON.stringify(fresh));
+  assert.equal(typeof fresh.windowRef, "string");
+  assert.notEqual(fresh.windowRef, bound.windowRef);
+  reuseAvailability =
+    "observed: same full HWND/PID across distinct real lifetimes; old proof refused without close effect";
+}
 let ok = false;
 try {
-  if (expiryOnly) {
+  if (reuseOnly) {
+    await verifyRealHandleReuse();
+    ok = reuseAvailability.startsWith("observed:");
+  } else if (expiryOnly) {
     await verifyReferenceExpiry();
     ok = true;
   } else if (process.argv.includes("--terminal-only")) {
@@ -787,6 +870,16 @@ try {
 } finally {
   await disposeAuthority(worker);
   for (const authority of authorities) await disposeAuthority(authority);
+  if (reuseOnly && fixture.exitCode === null) {
+    fixture.stdin.write("reuse-oracle\n");
+    const reuseCleanup = await next();
+    receipts.push({ reuseCleanup });
+    assert.equal(
+      reuseCleanup.markerCount,
+      0,
+      "normal native retirement removes matching hidden-root markers",
+    );
+  }
   if (fixture.exitCode === null) {
     fixture.stdin.write("marker-count\n");
     const remainingMarkers = await next();
@@ -813,9 +906,9 @@ try {
   });
   await writeFile(
     join(folder, "receipts.json"),
-    JSON.stringify({ ok, receipts }, null, 2),
+    JSON.stringify({ ok, reuseAvailability, receipts }, null, 2),
   );
-  console.log(JSON.stringify({ ok, folder }));
+  console.log(JSON.stringify({ ok, reuseAvailability, folder }));
   if (output) {
     const hashes = await Promise.all(
       [
@@ -834,7 +927,12 @@ try {
     await writeFile(
       output,
       JSON.stringify(
-        { ok, receipts, sourceHashes: Object.fromEntries(hashes) },
+        {
+          ok,
+          reuseAvailability,
+          receipts,
+          sourceHashes: Object.fromEntries(hashes),
+        },
         null,
         2,
       ),
@@ -845,5 +943,7 @@ try {
     [],
     "owned process cleanup must be independently confirmed",
   );
-  if (ok) await rm(folder, { recursive: true, force: true });
+  if (ok || reuseAvailability?.startsWith("unavailable:"))
+    await rm(folder, { recursive: true, force: true });
+  if (reuseOnly && !ok) process.exitCode = 2;
 }
