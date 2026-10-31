@@ -35,7 +35,7 @@ npm run check
 npm run test:package
 ```
 
-Plan the four opt-in scoped browser/mixed model tasks without a build or credentials using `npm run test:pi:browser -- --plan`. Live execution, prerequisites and retained-owner reports are documented in [release validation](docs/validation.md#reproduce-automated-checks).
+Plan the five opt-in scoped browser/mixed model tasks without a build or credentials using `npm run test:pi:browser -- --plan`. Live execution, prerequisites and retained-owner reports are documented in [release validation](docs/validation.md#reproduce-automated-checks).
 
 Plan the scoped native visual task using `npm run test:pi:visual`. Explicit execution and retained-owner handling are documented in [scoped visual agent checks](docs/windows.md#scoped-visual-agent-check).
 
