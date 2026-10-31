@@ -174,7 +174,7 @@ export function registerComputerUse(
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
     try {
-      return await worker.execute(
+      const result = await worker.execute(
         action,
         args,
         signal
@@ -182,6 +182,18 @@ export function registerComputerUse(
           : operationAbort.signal,
         operationId,
       );
+      if (
+        !result.ok &&
+        typeof result.error === "string" &&
+        /^TARGET_ACTIVATION_REFUSED(?::|$)/.test(result.error)
+      ) {
+        return {
+          ...result,
+          guidance:
+            "Windows refused activation. Re-observe the intended target and its foreground state; ask the user to bring it to the foreground if needed. Retry only after a fresh observation confirms the intended target and any prior effects.",
+        };
+      }
+      return result;
     } finally {
       signal?.removeEventListener("abort", abort);
     }

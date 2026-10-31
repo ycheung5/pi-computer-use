@@ -164,3 +164,49 @@ test("Pi browser navigation is exposed without adding a separate MCP extension",
     for (const handler of shutdown) await handler();
   }
 });
+
+test("Pi gives actionable guidance on activation refusal without replaying", async () => {
+  const tools: ToolDefinition[] = [];
+  const shutdown: Array<() => Promise<void>> = [];
+  const host = {
+    registerTool: (tool: ToolDefinition) => {
+      tools.push(tool);
+    },
+    on: (event: string, handler: () => Promise<void>) => {
+      if (event === "session_shutdown") shutdown.push(handler);
+      return () => {};
+    },
+  } as Pick<ExtensionAPI, "registerTool" | "on">;
+  const peer = `const i=require('node:readline').createInterface({input:process.stdin});let count=0;i.on('line',line=>{const r=JSON.parse(line);if(!r.action)return;count++;console.log(JSON.stringify({id:r.id,result:{ok:false,action:r.action,error:'TARGET_ACTIVATION_REFUSED',cleanupConfirmed:true,activationDiagnostic:{foreground:'unavailable'},dispatchCount:count}}));});`;
+  registerComputerUse(host, {
+    launch: async () => ({ executable: process.execPath, args: ["-e", peer] }),
+  });
+  try {
+    const tool = tools.find(
+      (item) => item.name === "windows_computer_use_type_text",
+    );
+    assert.ok(tool);
+    const result = await tool.execute(
+      "refused",
+      { text: "test" },
+      undefined,
+      undefined,
+      {} as Parameters<typeof tool.execute>[4],
+    );
+    assert.equal(result.isError, true);
+    const details = result.details as Record<string, unknown>;
+    assert.equal(details.error, "TARGET_ACTIVATION_REFUSED");
+    assert.equal(details.cleanupConfirmed, true);
+    assert.deepEqual(details.activationDiagnostic, {
+      foreground: "unavailable",
+    });
+    assert.equal(details.dispatchCount, 1);
+    const content = JSON.stringify(result.content);
+    assert.match(content, /Windows refused activation/);
+    assert.match(content, /re-observe/i);
+    assert.match(content, /ask the user/i);
+    assert.match(content, /fresh observation/i);
+  } finally {
+    for (const handler of shutdown) await handler();
+  }
+});
