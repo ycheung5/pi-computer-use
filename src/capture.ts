@@ -116,16 +116,22 @@ export async function screenshot(
       error:
         "INVALID_ARGUMENTS: invalid screenshot target, scope or maxWidth (integer 0–7680)",
     };
+  let nativeCaptureError: unknown;
+  let wgcError: unknown;
   try {
     const result = await nativeDesktop.execute(
       "screenshot",
       { ...args, scope, maxWidth },
       signal,
     );
+    nativeCaptureError = result.nativeCaptureError;
     const target = result.wgcTarget;
     delete result.wgcTarget;
     if (
-      result.ok &&
+      (result.ok ||
+        (result.error === "SCREEN_REGION_CAPTURE_FAILED" &&
+          result.cleanupConfirmed !== false &&
+          result.identityWarning === undefined)) &&
       target &&
       typeof target === "object" &&
       !Array.isArray(target)
@@ -138,6 +144,8 @@ export async function screenshot(
           { ...target, maxWidth },
           signal,
         );
+        if (result.nativeCaptureError !== undefined)
+          composited.nativeCaptureError = result.nativeCaptureError;
         if (composited.ok) {
           if (result.windowRefUnavailable !== undefined) {
             composited.windowRefUnavailable = result.windowRefUnavailable;
@@ -151,15 +159,26 @@ export async function screenshot(
           }
           return composited;
         }
-        if (/WINDOW_REFERENCE/.test(String(composited.error)))
+        wgcError = composited.error;
+        if (
+          !result.screenshot ||
+          composited.cleanupConfirmed === false ||
+          /WINDOW_REFERENCE|CANCEL|STOP|CLEANUP_UNCONFIRMED/.test(
+            String(composited.error),
+          )
+        )
           return composited;
         failure = String(composited.error);
       } catch (error) {
         if (signal?.aborted) throw error;
         failure = error instanceof Error ? error.message : String(error);
+        wgcError = failure;
+        if (/WINDOW_REFERENCE|CANCEL|STOP|CLEANUP_UNCONFIRMED/.test(failure))
+          throw error;
       } finally {
         await wgc.dispose();
       }
+      result.wgcError = failure;
       if (result.screenshot && typeof result.screenshot === "object") {
         const capture = result.screenshot as Record<string, unknown>;
         capture.captureWarnings = [
@@ -176,6 +195,8 @@ export async function screenshot(
       ok: false,
       action: "screenshot",
       error: error instanceof Error ? error.message : String(error),
+      ...(nativeCaptureError === undefined ? {} : { nativeCaptureError }),
+      ...(wgcError === undefined ? {} : { wgcError }),
     };
   }
 }
