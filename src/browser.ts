@@ -1582,18 +1582,17 @@ async function pressBrowserKeys(
   if (plainText || editingKey || editingShortcut || newline || adjustmentKey) {
     const element = await focusedBrowserControl(tab, signal);
     const disabled = element?.disabled === true;
-    let readonly = element?.ariaReadonly === true;
+    let restricted = disabled || element?.ariaReadonly === true;
     if (
-      !disabled &&
       element &&
-      readonly &&
+      restricted &&
       adjustmentKey &&
       !plainText &&
       !editingKey &&
       !editingShortcut &&
       !newline
     ) {
-      readonly =
+      restricted =
         element.tag === "select" ||
         (element.tag === "input" &&
           [
@@ -1618,16 +1617,16 @@ async function pressBrowserKeys(
     } else if (
       !disabled &&
       element &&
-      readonly &&
+      restricted &&
       newline &&
       !plainText &&
       !editingKey &&
       !editingShortcut
     ) {
       // Enter in a single-line input may submit a form instead of editing.
-      readonly = element.tag !== "input";
+      restricted = element.tag !== "input";
     }
-    if (disabled || readonly)
+    if (restricted)
       return fail(
         "BROWSER_NOT_EDITABLE",
         disabled ? "focused field is disabled" : "focused field is readonly",
