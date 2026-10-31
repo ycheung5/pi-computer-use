@@ -72,6 +72,7 @@
     "test:browser:profiles": "node tests/browser-profiles-host.mjs",
     "test:package": "node tests/package-host.mjs",
     "test:pi": "node tests/pi-host.mjs",
+    "test:pi:browser": "node tests/pi-browser-host.mjs",
     "benchmark:reference": "node tests/benchmark-reference.mjs",
     "test:benchmark:report": "node tests/benchmark-report.mjs",
     "test:benchmark:stop": "node tests/benchmark-report.mjs --stop",

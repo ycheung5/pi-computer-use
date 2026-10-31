@@ -28,6 +28,20 @@ flock -w 120 /tmp/pi-cu-live-tests.lock npm run test:pi
 
 This runner uses the installed development Pi 1.4.0 distribution as the test host, not a fresh OS/Windows Pi install. Its scripted provider is a test fixture, never a production dependency. Real provider quality, interactive terminal workflows, and dedicated input/user acceptance remain separate checks.
 
+The separate `test:pi:browser` companion reproduces the three scoped real-model outcomes (`form`, `advanced`, `stale`) using the existing local server and isolated headless Edge profiles. It uses the installed Pi host and its existing authentication; no credentials are printed or bundled. Unlike `test:pi`, it makes paid model requests. First build and follow [Windows-readable dependency prerequisites](runtime.md#verification). Preview safely without a build, Windows launch, credential lookup or file write:
+
+```sh
+npm run test:pi:browser -- --plan
+```
+
+Select a named case or `all` and one to three independent resets; the defaults are OpenAI, GPT-6.1 Sol and low reasoning. Requested settings and actual assistant metadata are recorded separately. For example:
+
+```sh
+PI_CU_RELEASE_OUTPUT=/tmp/pi-browser-evidence flock -w 120 /tmp/pi-cu-live-tests.lock npm run test:pi:browser -- --scenario stale --runs 3 --provider openai --model gpt-6.1-sol --thinking low
+```
+
+Each unique output directory contains its tool trace, independent report and `owner.json`. A normal report requires actual observations, exact server/file oracles, Pi settlement and scoped cleanup. Stale refreshes are explicit fixture-controlled public-tool navigation; the product must return the real stale refusal and the agent must recover with its own new observations. Prior private three-run results below remain historical evidence, not validation of this new collector. A retained report is a failure requiring investigation: its referenced keeper preserves uncertain ownership and fixture pipes, blocks later actions/cases and records identities in `owner.json`; do not treat it as completed cleanup or wait indefinitely for a pass. There are no automatic retries or arbitrary browser termination.
+
 ### Current host acceptance evidence
 
 Ticket #34 was rechecked on 2026-10-30 from WSL2, using Pi **1.4.0**, Linux Node **22.20.0**, the private Windows Node **22.23.4**, and Windows build **26200.9711**. The validation worktree started at `a905fde`; production code remained unchanged from `7a7c0c5`. Windows fixture commands ran outside the subprocess-restricted development sandbox, serialized with the shared live-test lock. No physical input, clipboard mutation, live model request, daily settings change or normal browser-profile access was performed.
