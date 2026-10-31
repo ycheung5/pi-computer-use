@@ -440,6 +440,22 @@ export function verifyOutcome(scenario, f) {
       exact(f.oracle?.events, { submissions: 1, starts: 1, ready: 1 }) &&
       delayed;
   } else if (scenario === "advanced") {
+    let alertTab = null,
+      alertHandled = false;
+    for (const d of f.observations ?? []) {
+      if (d.ok !== true || d.tab?.url !== `${f.base}advanced`) continue;
+      if (d.dialog?.type === "alert" && typeof d.tab.id === "string") {
+        alertTab = d.tab.id;
+        alertHandled = false;
+      }
+      if (
+        alertTab &&
+        d.action === "keypress" &&
+        d.tab.id === alertTab &&
+        ["accepted", "dismissed"].includes(d.handledDialog)
+      )
+        alertHandled = true;
+    }
     const completed = new Map(
       (f.downloads ?? [])
         .filter(
@@ -457,6 +473,7 @@ export function verifyOutcome(scenario, f) {
       (f.finalReport.includes(path) ||
         f.finalReport.includes(path.replaceAll("\\", "/")));
     outcome =
+      alertHandled &&
       f.downloadExact === true &&
       reported &&
       exact(f.oracle?.upload, {
@@ -465,7 +482,7 @@ export function verifyOutcome(scenario, f) {
       }) &&
       f.oracle?.uploadRequests === 1 &&
       f.oracle?.downloads === 1 &&
-      ["child", "returned", "prompt", "confirm", "alert", "upload"].every(
+      ["child", "returned", "prompt", "confirm", "upload"].every(
         (k) => f.advancedObserved?.[k] === true,
       );
   } else if (scenario === "stale") {

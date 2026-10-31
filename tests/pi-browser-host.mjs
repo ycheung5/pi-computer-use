@@ -56,6 +56,9 @@ try {
   process.exitCode = 2;
 }
 async function live(selected, options) {
+  const timeoutMs = Number(process.env.PI_CU_TEST_TIMEOUT_MS ?? 180000);
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 50 || timeoutMs > 180000)
+    throw Error("PI_CU_TEST_TIMEOUT_MS must be between 50 and 180000");
   const { spawn, execFileSync } = await import("node:child_process");
   const fs = await import("node:fs/promises");
   const { once } = await import("node:events");
@@ -138,6 +141,7 @@ async function live(selected, options) {
         scenario,
         reset,
         revision,
+        timeoutMs,
         dir,
       };
       let retention;
@@ -205,7 +209,7 @@ async function live(selected, options) {
         await write("owner.json", ownership);
         const ownedState = () => {
           const prefix = profile.replaceAll("'", "''");
-          const ps = `$p='${prefix}';$a=@(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'"|Where-Object {$_.CommandLine -and $_.CommandLine.Contains($p)});$r=$a|Where-Object {$_.CommandLine -notmatch '--type='}|Select-Object -First 1;$v=if($r.ExecutablePath){(Get-Item -LiteralPath $r.ExecutablePath).VersionInfo.ProductVersion}else{$null};[Console]::Write((@{count=$a.Count;version=$v}|ConvertTo-Json -Compress))`;
+          const ps = `$ErrorActionPreference='Stop';$p='${prefix}';$a=@(Get-CimInstance Win32_Process -ErrorAction Stop -Filter "Name='msedge.exe'"|Where-Object {$_.CommandLine -and $_.CommandLine.Contains($p)});$r=$a|Where-Object {$_.CommandLine -notmatch '--type='}|Select-Object -First 1;$v=if($r.ExecutablePath){(Get-Item -LiteralPath $r.ExecutablePath).VersionInfo.ProductVersion}else{$null};[Console]::Write((@{count=$a.Count;version=$v}|ConvertTo-Json -Compress))`;
           return win(
             `const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');const n=cp.execFileSync(p.join(process.env.WINDIR,'System32','WindowsPowerShell','v1.0','powershell.exe'),['-NoProfile','-EncodedCommand',${JSON.stringify(Buffer.from(ps, "utf16le").toString("base64"))}],{encoding:'utf8'}).trim();const s=JSON.parse(n);if(!Number.isInteger(s.count))throw Error('process evidence unavailable');console.log(JSON.stringify({browserVersion:s.version,profileEmpty:fs.readdirSync(${JSON.stringify(profile)}).length===0,processCount:s.count}))`,
           );
@@ -278,6 +282,7 @@ async function live(selected, options) {
         pi.stdin.end();
         pi.stderr.resume();
         const facts = {
+          base: source.url,
           requested: options.requested,
           effective: [],
           lifecycle: { settled: false },
@@ -290,11 +295,10 @@ async function live(selected, options) {
         let unsafe = false,
           stopped = false,
           parseError = false,
-          toolStarts = 0,
-          alertPending = false;
+          toolStarts = 0;
         const watchdog = setTimeout(() => {
           void retain("host-deadline-ownership-retained");
-        }, 180000);
+        }, timeoutMs);
         for await (const line of createInterface({ input: pi.stdout })) {
           let event;
           try {
@@ -374,15 +378,6 @@ async function live(selected, options) {
           )
             facts.promptObserved = true;
           if (text.includes("Confirm: false")) observed.confirm = true;
-          if (d.dialog?.type === "alert") alertPending = true;
-          else if (
-            alertPending &&
-            u === `${source.url}advanced` &&
-            text.includes("Advanced browser fixture")
-          ) {
-            observed.alert = true;
-            alertPending = false;
-          }
           if (text.includes("Uploaded: fixture-upload.txt"))
             observed.upload = true;
           facts.downloads.push(...(d.downloads ?? []));
