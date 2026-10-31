@@ -36,10 +36,15 @@ const built = spawnSync(
 );
 assert.equal(built.status, 0, built.stdout + built.stderr);
 const fixtureTitle = `Owned lifetime ${Date.now()}`;
-const fixture = spawn(executable, [fixtureTitle, "--lifetime"], {
-  stdio: ["pipe", "pipe", "pipe"],
-  windowsHide: true,
-});
+const expiryOnly = process.argv.includes("--expiry-only");
+const fixture = spawn(
+  executable,
+  [fixtureTitle, "--lifetime", ...(expiryOnly ? ["--expiry"] : [])],
+  {
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  },
+);
 const fixtureClosed = once(fixture, "close");
 const lines = createInterface({ input: fixture.stdout })[
   Symbol.asyncIterator
@@ -326,9 +331,166 @@ async function verifyTerminalTargets() {
   });
   assert.equal(closed.verification, "observed");
 }
+// Actual elapsed-time coverage: no clock override, reference refresh or helper restart.
+async function verifyReferenceExpiry() {
+  const initial = await next();
+  const target = {
+    nativeWindowHandle: initial.hwnd,
+    processId: initial.pid,
+    activate: false,
+  };
+  const observed = await call("find", {
+    ...target,
+    query: "Fixture action",
+    ocrFallback: false,
+  });
+  assert.equal(observed.ok, true, JSON.stringify(observed));
+  assert.equal(observed.matches.length, 1);
+  assert.equal(typeof observed.windowRef, "string");
+  const oldElement = observed.matches[0].id;
+  assert.equal(typeof oldElement, "string");
+  const started = performance.now(),
+    startedUtc = new Date().toISOString();
+  const identities = () =>
+    powershellJson(
+      `$rows=@();$pending=@(${process.pid});for($i=0;$i -lt $pending.Count;$i++){foreach($p in @(Get-CimInstance Win32_Process -Filter ('ParentProcessId='+$pending[$i]) -ErrorAction Stop)){if($p.ProcessId -ne $PID -and $p.Name -notin @('conhost.exe','OpenConsole.exe')){$pending+=@($p.ProcessId);$rows+=@(@{pid=$p.ProcessId;parent=$p.ParentProcessId;name=$p.Name;creation=$p.CreationDate.ToUniversalTime().ToString('o');executable=$p.ExecutablePath;command=$p.CommandLine})}}};ConvertTo-Json -Compress -Depth 4 -InputObject @($rows)`,
+    );
+  const before = identities();
+  receipts.push({ expiryProcessPreflight: before });
+  const fixtureIdentity = before.find((row) => row.pid === fixture.pid);
+  const workerIdentity = before.filter(
+    (row) =>
+      row.name === "node.exe" &&
+      /[\\/]dist[\\/]worker\.js/.test(row.command ?? ""),
+  );
+  assert.ok(fixtureIdentity, "independent fixture identity required");
+  assert.equal(
+    workerIdentity.length,
+    1,
+    "exactly one current owned worker required",
+  );
+  const nativeIdentity = before.filter(
+    (row) => row.parent === workerIdentity[0].pid && row.name === "windows.exe",
+  );
+  assert.equal(
+    nativeIdentity.length,
+    2,
+    "desktop authority and stop helper must both be pinned",
+  );
+  for (const row of [fixtureIdentity, workerIdentity[0], ...nativeIdentity]) {
+    assert.ok(
+      row.creation && row.executable,
+      "creation timestamp and executable required",
+    );
+    ownedPids.add(row.pid);
+  }
+  receipts.push({
+    expiryStart: {
+      initial,
+      startedUtc,
+      identities: [fixtureIdentity, workerIdentity[0], ...nativeIdentity],
+      waitMs: 305000,
+    },
+  });
+  console.log(
+    JSON.stringify({
+      status: "waiting-real-reference-expiry",
+      startedUtc,
+      waitMs: 305000,
+    }),
+  );
+  while (performance.now() - started < 305000) {
+    await new Promise((resolve) =>
+      setTimeout(
+        resolve,
+        Math.min(30000, 305000 - (performance.now() - started)),
+      ),
+    );
+    console.log(
+      JSON.stringify({
+        status: "expiry-wait",
+        elapsedMs: performance.now() - started,
+      }),
+    );
+  }
+  const after = identities();
+  receipts.push({
+    expiryElapsed: {
+      elapsedMs: performance.now() - started,
+      endedUtc: new Date().toISOString(),
+      identities: after,
+    },
+  });
+  for (const row of [fixtureIdentity, workerIdentity[0], ...nativeIdentity]) {
+    assert.deepEqual(
+      after.find((current) => current.pid === row.pid),
+      row,
+      "same live fixture/worker/native authority must survive the entire TTL",
+    );
+  }
+  fixture.stdin.write("identity\n");
+  const stillLive = await next();
+  receipts.push({ expiryStillLive: stillLive });
+  assert.deepEqual(stillLive, initial);
+  const expired = await call("snapshot", {
+    windowRef: observed.windowRef,
+    includeScreenshot: false,
+    activate: false,
+  });
+  assert.equal(expired.ok, false);
+  assert.match(
+    expired.error,
+    /^WINDOWS_ERROR: STALE_WINDOW_REFERENCE: reference expired; observe again$/,
+  );
+  const absent = await call("wait_for", {
+    windowRef: observed.windowRef,
+    condition: "window",
+    appear: false,
+    timeoutMs: 100,
+    intervalMs: 50,
+    activate: false,
+  });
+  assert.equal(absent.verification, "inconclusive");
+  assert.equal(absent.conclusive, false);
+  const fresh = await call("find", {
+    ...target,
+    query: "Fixture action",
+    ocrFallback: false,
+  });
+  assert.equal(fresh.ok, true);
+  assert.equal(fresh.matches.length, 1);
+  assert.equal(typeof fresh.windowRef, "string");
+  assert.notEqual(fresh.windowRef, observed.windowRef);
+  fixture.stdin.write("counter\n");
+  const counterBefore = await next();
+  const old = await call("invoke", {
+    ...target,
+    elementId: oldElement,
+    fallbackClick: false,
+  });
+  assert.equal(old.ok, false);
+  assert.match(old.error, /STALE_(?:WINDOW_REFERENCE|ELEMENT)/);
+  fixture.stdin.write("counter\n");
+  const counterAfter = await next();
+  receipts.push({
+    expiryEffects: { before: counterBefore, after: counterAfter },
+  });
+  assert.deepEqual(counterBefore, { clicks: 0 });
+  assert.deepEqual(counterAfter, counterBefore);
+  const finalIdentities = identities();
+  for (const row of nativeIdentity)
+    assert.deepEqual(
+      finalIdentities.find((current) => current.pid === row.pid),
+      row,
+      "all expiry checks used the original native helpers",
+    );
+}
 let ok = false;
 try {
-  if (process.argv.includes("--terminal-only")) {
+  if (expiryOnly) {
+    await verifyReferenceExpiry();
+    ok = true;
+  } else if (process.argv.includes("--terminal-only")) {
     await verifyTerminalTargets();
     ok = true;
   } else if (process.argv.includes("--provider-only")) {
