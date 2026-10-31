@@ -122,6 +122,16 @@ try {
     assert.equal(enabled.ok, true);
     const shown = await worker.execute("indicator_preview", { show: true });
     assert.equal(shown.presentation.visible, true);
+    assert.deepEqual(
+      shown.presentation.frameErrors,
+      [],
+      "every requested screen-edge frame must render without errors",
+    );
+    assert.equal(
+      shown.presentation.visibleWindows,
+      shown.presentation.layout.length * 2 + 1,
+      "preview shows one screen-edge frame and status bar per monitor, plus the pointer tag",
+    );
     assert.equal(
       shown.presentation.clickThroughHitTestPassed,
       true,
