@@ -1,0 +1,115 @@
+{
+  "name": "pi-computer-use",
+  "version": "0.1.0",
+  "description": "Native Pi tools for Windows computer use from Windows and WSL2",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "computer-use",
+    "windows"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "GLOSSARY.md",
+    "docs/",
+    "assets/"
+  ],
+  "pi": {
+    "extensions": [
+      "./dist/extension.js"
+    ]
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "format": "biome format --write .",
+    "lint": "biome check .",
+    "check": "npm run typecheck && npm run lint && npm test",
+    "prepack": "npm run build",
+    "lint:fix": "biome check --write .",
+    "test:native": "node tests/native-health.mjs",
+    "test:native:windows": "node tests/native-windows.mjs",
+    "test:wsl": "node tests/wsl-health.mjs",
+    "test:native:accessibility": "node tests/native-accessibility.mjs",
+    "test:native:nullable-uia": "node tests/native-nullable-uia.mjs",
+    "test:native:chromium": "node tests/native-chromium-accessibility.mjs",
+    "test:ownership": "node tests/ownership-host.mjs",
+    "test:native:capture": "node tests/native-capture.mjs",
+    "test:reference:capture": "node tests/reference-capture.mjs",
+    "test:reference:capture:report": "node tests/reference-capture-report.mjs",
+    "test:native:ocr": "node tests/native-ocr.mjs",
+    "test:stop": "node tests/stop-host.mjs",
+    "test:stop:busy": "node tests/native-stop-busy.mjs",
+    "test:stop:busy:check": "node tests/stop-busy-check.mjs",
+    "test:stop:pi-host": "node tests/pi-host-stop.mjs",
+    "test:stop:pi-host:check": "node tests/pi-host-stop-outcome-check.mjs",
+    "test:stop:pi-host:job": "node tests/pi-host-job.mjs",
+    "test:stop:pi-host:job:check": "node tests/pi-host-job-check.mjs",
+    "test:browser": "node tests/browser-host.mjs",
+    "test:native:controls": "node tests/native-controls.mjs",
+    "test:native:waits": "node tests/native-waits.mjs",
+    "test:settings": "node tests/settings-host.mjs",
+    "test:native:management": "node tests/native-window-management.mjs",
+    "test:reference:focus-foreground": "node tests/foreground-focus-comparison.mjs",
+    "test:reference:management": "node tests/window-management-comparison.mjs",
+    "test:native:session:locked": "node tests/native-session-activation.mjs",
+    "test:native:activation": "node tests/native-activation-roundtrip.mjs",
+    "test:native:pointer:guards": "node tests/native-pointer-guards.mjs",
+    "test:native:pointer:physical": "node tests/native-pointer-physical.mjs",
+    "test:native:text": "node tests/native-text.mjs",
+    "test:native:text:physical": "node tests/native-text-physical.mjs",
+    "test:native:notepad:unicode": "node tests/native-notepad-unicode.mjs",
+    "test:native:clipboard:ole": "node tests/native-ole-clipboard.mjs",
+    "test:browser:actions": "node tests/browser-actions-host.mjs",
+    "test:browser:firefox:endpoint": "node tests/browser-firefox-endpoint.mjs",
+    "test:indicators": "node tests/indicators-host.mjs",
+    "test:browser:profiles": "node tests/browser-profiles-host.mjs",
+    "test:package": "node tests/package-host.mjs",
+    "test:pi": "node tests/pi-host.mjs",
+    "benchmark:reference": "node tests/benchmark-reference.mjs",
+    "test:benchmark:report": "node tests/benchmark-report.mjs",
+    "test:benchmark:stop": "node tests/benchmark-report.mjs --stop",
+    "test:parity": "node tests/parity-host.mjs",
+    "test:browser:foreground": "node tests/browser-foreground-host.mjs",
+    "test:reference:transport": "node tests/reference-client-check.mjs",
+    "test:dsh:host-preflight": "node tests/dsh-host-preflight.mjs",
+    "test:browser:comparison": "node tests/browser-comparison.mjs",
+    "test:browser:comparison:oracle": "node tests/browser-comparison-check.mjs",
+    "benchmark:accessibility": "node tests/accessibility-comparison.mjs",
+    "test:accessibility:report": "node tests/accessibility-comparison-check.mjs",
+    "test:accessibility:provider-walker": "node tests/provider-walker-probe.mjs",
+    "test:accessibility:provider-platform": "node tests/provider-platform-probe.mjs",
+    "test:accessibility:diagnostics": "node tests/accessibility-comparison-check.mjs --diagnostics",
+    "test:native:clipboard:plan": "node tests/native-ole-clipboard-check.mjs",
+    "test:native:ime:owner": "node tests/ime-owner.mjs",
+    "test:native:process-containment": "node tests/process-containment-check.mjs",
+    "test:native:owner-supervisor": "node tests/owner-supervisor-check.mjs",
+    "test:native:owner-backend-health": "node tests/owner-backend-health-check.mjs",
+    "test:native:owner-crash-boundary": "node tests/owner-crash-boundary-check.mjs"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.4",
+    "@earendil-works/pi-coding-agent": "1.4.0",
+    "@types/node": "22.19.19",
+    "tsx": "4.21.0",
+    "typebox": "1.3.27",
+    "typescript": "5.9.3"
+  },
+  "overrides": {
+    "undici": "8.12.2",
+    "esbuild": "0.28.1"
+  },
+  "dependencies": {
+    "puppeteer-core": "25.16.0"
+  }
+}
