@@ -172,7 +172,7 @@ try {
     "Input response did not settle",
   );
   const retry = await bounded(
-    worker.execute("list_windows", { maxWindows: 1 }, undefined, operation),
+    worker.execute("wait", { milliseconds: 1 }, undefined, operation),
     10000,
     "Stopped operation refusal not confirmed",
   );
@@ -206,8 +206,8 @@ try {
   const assessment = assessStop(evidence);
   const recovered = await bounded(
     worker.execute(
-      "list_windows",
-      { maxWindows: 1 },
+      "wait",
+      { milliseconds: 1 },
       undefined,
       `${operation}-new-user`,
     ),
