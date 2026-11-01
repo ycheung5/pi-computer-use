@@ -130,7 +130,7 @@ For #30, `npm run test:reference:management -- --plan --engine=reference` safely
 
 The desktop broker follows Windows' documented [ShellExecute automation interface](https://learn.microsoft.com/en-us/windows/win32/shell/shell-shellexecute). Window operations use [SetWindowPos](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowpos) and [PostMessage](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postmessagew); dispatch acceptance does not establish application completion.
 
-The control fixture also stages a package with a missing native source and checks its explicit failure. Its programmatic sibling-window case reports whether Windows allowed the transition; a refusal is recorded as unexercised, not evidence that physical user-interference acceptance passed. Actual hardware intervention remains a dedicated-desktop check.
+The control fixture also stages a package with a missing native source and checks its explicit failure. Its programmatic sibling-window case reports whether Windows allowed the transition; a refusal is recorded as unexercised, not evidence that physical user-interference acceptance passed. Physical suppression and explicit handback remain dedicated-desktop checks under the [control delivery plan](implementation-plan.md#exclusive-control-delivery); this older fixture does not establish them.
 
 ## Unknown UIA control types
 

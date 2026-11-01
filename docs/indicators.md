@@ -4,7 +4,7 @@ Current build: presentation follows the lifetime/settings described below. The r
 
 The independent Windows stop helper also draws Pi-branded screen edges, a status bar and a pointer tag. The screen border uses a per-pixel translucent blue falloff with a bright core, following the reference glow at 1.5 times its width: a 3-pixel core plus 27-pixel falloff at reference width scale 1, scaled by monitor width (clamped from 1 to 2). The separate Pi status bar and pointer tag retain their existing appearance. If frame preparation or presentation fails, that frame stays hidden and its error is reported until configuration or display layout causes a rebuild; the other indicators continue. It uses non-activating, disabled, layered windows; the pointer guard additionally skips the verified helper process if a Windows point-query API still returns an overlay. The tag follows the pointer, accounts for the current cursor bitmap size and stays inside its monitor's working area.
 
-## Operation lifetime
+## Current operation lifetime
 
 Arming the stop listener alone does not show indicators. Native pointer/text paths announce their first physical-input attempt only after target guards pass; background-only actions and browser calls do not start desktop indicators. Once started, presentation remains held through subsequent reads and model thinking in that computer-use operation. Individual input-completion events do not hide it. Final settlement schedules hiding after `indicatorIdleMs`; stopping hides it immediately. Thirty seconds without activity hides stale presentation, and subsequent physical input can show it again.
 
