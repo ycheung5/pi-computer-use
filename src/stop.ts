@@ -22,6 +22,14 @@ export class StopListener {
           signal,
         ),
       onStop,
+      onExit: () => {
+        const operationId = this.operationId;
+        this.operationId = undefined;
+        this.cancelEvent = undefined;
+        this.listenerProcessId = undefined;
+        this.started = false;
+        if (operationId) onStop(operationId);
+      },
     });
   }
   get hasStarted(): boolean {
@@ -104,15 +112,32 @@ export class StopListener {
       note: "Pointer and keyboard actions implement cancellation polling and held-input cleanup.",
     };
   }
-  async inputStarted(operationId: string): Promise<void> {
+  async acquire(
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<WorkerResult> {
     if (this.operationId !== operationId)
       throw new Error("STOP_OPERATION_NOT_ARMED");
-    const result = await this.control.execute("begin", { operationId });
-    if (!result.ok) throw new Error(String(result.error));
-  }
-  async touch(operationId: string): Promise<void> {
-    if (this.started && this.operationId === operationId)
-      await this.control.execute("touch", { operationId });
+    const result = await this.control.execute(
+      "take_control",
+      { operationId },
+      signal,
+    );
+    if (
+      result.ok &&
+      (result.exclusiveControl !== true ||
+        result.hookInstalled !== true ||
+        result.operationId !== operationId)
+    ) {
+      await this.signal(operationId);
+      return {
+        ok: false,
+        action: "take_control",
+        error:
+          "EXCLUSIVE_CONTROL_UNAVAILABLE: helper did not confirm protection",
+      };
+    }
+    return result;
   }
   async suspendCapture(suspended: boolean): Promise<void> {
     if (this.started) await this.control.execute("capture", { suspended });
@@ -142,7 +167,9 @@ export class StopListener {
   }
   async disarm(operationId: string): Promise<void> {
     if (this.operationId !== operationId) return;
-    await this.control.execute("disarm", { operationId });
+    const result = await this.control.execute("disarm", { operationId });
+    if (!result.ok || result.exclusiveControl !== false)
+      throw new Error("CONTROL_RELEASE_UNCONFIRMED: retain desktop ownership");
     this.operationId = undefined;
     this.cancelEvent = undefined;
   }

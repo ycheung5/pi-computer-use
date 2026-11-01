@@ -123,7 +123,7 @@ partial class WindowsBridge {
     InteractionGuard interaction=null;
     EventWaitHandle cancel=null;
     try {
-      interaction=new InteractionGuard();before=GetForegroundWindow();GetCursorPos(out original);last=original;
+      interaction=new InteractionGuard(TextOption(args,"_cancelEvent",""),NumberOption(args,"_stopProcessId",0));before=GetForegroundWindow();GetCursorPos(out original);last=original;
       // Resolve without activation: validate identity and point before any takeover.
       Dictionary<string,object> quiet=new Dictionary<string,object>(args);quiet["activate"]=false;
       if(args.ContainsKey("elementId"))element=ResolveObservedElement(TextOption(args,"elementId",""),quiet,out window);
@@ -171,7 +171,7 @@ partial class WindowsBridge {
       }
       PointerCheck(cancel,window,owner,path[0],false);
       if(!PointerRootAllowed(GetForegroundWindow(),window,owner) && (action!="move" || Option(args,"activate",false))) {
-        interaction.Check();if(cancel.WaitOne(0))throw new InvalidOperationException("COMPUTER_USE_STOPPED");
+        if(cancel.WaitOne(0))throw new InvalidOperationException("COMPUTER_USE_STOPPED");interaction.Check();
         Dictionary<string,object> activation=new Dictionary<string,object>();
         if(!ManagementActivate(window,owner,activation) || GetForegroundWindow()!=window){activation["foregroundAtRefusal"]=ManagementForegroundRelationship(GetForegroundWindow(),window,owner);result["activationDiagnostic"]=activation;throw new InvalidOperationException("TARGET_ACTIVATION_REFUSED");}
         activated=true;

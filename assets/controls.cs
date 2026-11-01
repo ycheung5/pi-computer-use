@@ -9,7 +9,6 @@ partial class WindowsBridge {
   [StructLayout(LayoutKind.Sequential)] struct ControlPoint { public int X,Y; }
   [StructLayout(LayoutKind.Sequential)] struct ControlGuiInfo { public uint Size,Flags; public IntPtr Active,Focus,Capture,MenuOwner,MoveSize,Caret; public Rect CaretRect; }
   [DllImport("user32.dll")] static extern bool GetCursorPos(out ControlPoint point);
-  [DllImport("user32.dll")] static extern bool SetCursorPos(int x,int y);
   [DllImport("user32.dll",EntryPoint="GetWindowLongPtrW")] static extern IntPtr ControlStyle(IntPtr window,int index);
   [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window,uint command);
   [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint thread,ref ControlGuiInfo info);
@@ -18,8 +17,8 @@ partial class WindowsBridge {
   [DllImport("user32.dll")] static extern int GetScrollPos(IntPtr window,int bar);
 
   // Shared in-process observer: never calls UIA and never captures text.
-  // Only our tagged SendInput and exactly expected SetCursorPos moves are
-  // excluded; physical and foreign injected input both invalidate restoration.
+  // Tagged agent input and physically suppressed input are excluded.
+  // Foreign injected input still invalidates the action and restoration.
   static readonly UIntPtr OwnedInputMarker=new UIntPtr(0x50494355);
   sealed class InteractionGuard {
     delegate IntPtr Hook(int code,IntPtr message,IntPtr data);
@@ -33,27 +32,29 @@ partial class WindowsBridge {
     [DllImport("user32.dll")] static extern bool TranslateMessage(ref Message message);
     [DllImport("user32.dll")] static extern IntPtr DispatchMessage(ref Message message);
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode)] static extern IntPtr GetModuleHandle(string name);
-    sealed class ExpectedMove {public int X,Y;public long Until;}
     static readonly object gate=new object();
-    static readonly Queue<ExpectedMove> expected=new Queue<ExpectedMove>();
     static readonly ManualResetEvent ready=new ManualResetEvent(false);
     static readonly Hook mouseCallback=OnMouse,keyCallback=OnKey;
     static bool started;static volatile bool available;static long activity;
     readonly long baseline;
+    readonly bool requiresProtection;
+    static EventWaitHandle protection,cancellation;
+    static Process protector;
+    static string protectionName;
+    static bool Protected() {lock(gate)return protection!=null && !protector.HasExited && protection.WaitOne(0);}
     static IntPtr OnMouse(int code,IntPtr message,IntPtr data) {
+      IntPtr consumed=CallNextHookEx(IntPtr.Zero,code,message,data);
       if(code>=0) {
         Mouse input=(Mouse)Marshal.PtrToStructure(data,typeof(Mouse));bool ours=(input.Flags & 1)!=0 && input.Extra==OwnedInputMarker;
-        if(!ours && message.ToInt64()==0x200)lock(gate) {
-          long now=Stopwatch.GetTimestamp();while(expected.Count>0 && expected.Peek().Until<now)expected.Dequeue();
-          ExpectedMove[] moves=expected.ToArray();for(int i=0;i<moves.Length;i++)if(moves[i].X==input.Point.X && moves[i].Y==input.Point.Y){for(int remove=0;remove<=i;remove++)expected.Dequeue();ours=true;break;}
-        }
+        if((input.Flags & 1)==0 && consumed!=IntPtr.Zero && Protected())ours=true;
         if(!ours)Interlocked.Increment(ref activity);
       }
-      return CallNextHookEx(IntPtr.Zero,code,message,data);
+      return consumed;
     }
     static IntPtr OnKey(int code,IntPtr message,IntPtr data) {
-      if(code>=0){Key input=(Key)Marshal.PtrToStructure(data,typeof(Key));if((input.Flags & 0x10)==0 || input.Extra!=OwnedInputMarker)Interlocked.Increment(ref activity);}
-      return CallNextHookEx(IntPtr.Zero,code,message,data);
+      IntPtr consumed=CallNextHookEx(IntPtr.Zero,code,message,data);
+      if(code>=0){Key input=(Key)Marshal.PtrToStructure(data,typeof(Key));if(!((input.Flags & 0x10)!=0 && input.Extra==OwnedInputMarker) && !((input.Flags & 0x10)==0 && consumed!=IntPtr.Zero && Protected()))Interlocked.Increment(ref activity);}
+      return consumed;
     }
     static void Ensure() {
       lock(gate)if(!started){started=true;Thread thread=new Thread(delegate(){
@@ -64,12 +65,29 @@ partial class WindowsBridge {
       });thread.IsBackground=true;thread.Start();}
       if(!ready.WaitOne(1000) || !available)throw new InvalidOperationException("USER_ACTIVITY_OBSERVER_UNAVAILABLE: no input sent");
     }
-    public InteractionGuard(){Ensure();baseline=Interlocked.Read(ref activity);}
-    public bool Undisturbed {get {return available && baseline==Interlocked.Read(ref activity);}}
-    public void Check(){if(!Undisturbed)throw new InvalidOperationException("USER_INPUT_CHANGED: intervening input stopped automation");}
+    public InteractionGuard(string cancelName="",int listenerPid=0){
+      if(cancelName.Length>0)lock(gate){
+        if(protectionName!=cancelName){
+          EventWaitHandle next=EventWaitHandle.OpenExisting(cancelName+"-exclusive");
+          EventWaitHandle nextCancellation=null;Process nextProcess=null;
+          try {nextCancellation=EventWaitHandle.OpenExisting(cancelName);nextProcess=Process.GetProcessById(listenerPid);IntPtr identity=nextProcess.Handle;}
+          catch{next.Dispose();if(nextCancellation!=null)nextCancellation.Dispose();if(nextProcess!=null)nextProcess.Dispose();throw;}
+          if(protection!=null)protection.Dispose();if(cancellation!=null)cancellation.Dispose();if(protector!=null)protector.Dispose();
+          protection=next;cancellation=nextCancellation;protector=nextProcess;protectionName=cancelName;
+        }
+        requiresProtection=true;
+      }
+      Ensure();baseline=Interlocked.Read(ref activity);
+    }
+    public bool Undisturbed {get {return available && (!requiresProtection || Protected()) && baseline==Interlocked.Read(ref activity);}}
+    public void Check(){if(requiresProtection && cancellation.WaitOne(0))throw new InvalidOperationException("COMPUTER_USE_STOPPED");if(requiresProtection && !Protected())throw new InvalidOperationException("EXCLUSIVE_CONTROL_LOST: no further input");if(!Undisturbed)throw new InvalidOperationException("USER_INPUT_CHANGED: intervening input stopped automation");}
     public static bool Move(int x,int y) {
-      lock(gate)expected.Enqueue(new ExpectedMove{X=x,Y=y,Until=Stopwatch.GetTimestamp()+Stopwatch.Frequency/10});
-      return SetCursorPos(x,y);
+      int left=GetSystemMetrics(76),top=GetSystemMetrics(77),width=GetSystemMetrics(78),height=GetSystemMetrics(79);
+      if(width<=0 || height<=0 || x<left || x>=left+width || y<top || y>=top+height)return false;
+      PointerInput input=new PointerInput {Type=0,Data=new InputUnion {Mouse=new MouseInput {
+        X=(int)(((long)(x-left)*65536+32768)/width),Y=(int)(((long)(y-top)*65536+32768)/height),
+        Flags=0xC001,Extra=OwnedInputMarker}}};
+      return SendInput(1,new PointerInput[]{input},Marshal.SizeOf(typeof(PointerInput)))==1;
     }
   }
 

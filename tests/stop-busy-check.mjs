@@ -10,6 +10,7 @@ assert.deepEqual(
     after: 2,
     total: 400,
     keysReleased: true,
+    unexpectedCharacters: 0,
     dispatch: {
       value: {
         ok: false,
@@ -29,6 +30,8 @@ for (const change of [
   { before: 400 },
   { after: 3 },
   { keysReleased: false },
+  { unexpectedCharacters: 1 },
+  { unexpectedCharacters: undefined },
   { dispatch: { value: { ok: true, action: "type_text" } } },
   {
     dispatch: {
@@ -55,6 +58,7 @@ for (const change of [
     after: 2,
     total: 400,
     keysReleased: true,
+    unexpectedCharacters: 0,
     dispatch: {
       value: {
         ok: false,

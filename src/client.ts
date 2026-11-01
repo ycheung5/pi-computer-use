@@ -14,6 +14,7 @@ export interface WorkerClientOptions {
   canTerminate?: () => boolean;
   onStop?: (operationId: string) => void;
   onInputState?: (active: boolean, operationId?: string) => void;
+  onExit?: () => void;
 }
 
 interface Pending {
@@ -195,15 +196,17 @@ export class WorkerClient {
             child.pid === undefined,
           ),
         );
-        child.once("close", (code) =>
+        child.once("close", (code) => {
+          const current = this.child === child;
           this.fail(
             child,
             new Error(
               `WORKER_EXITED: code ${code}${diagnostic ? `; ${diagnostic.trim()}` : ""}`,
             ),
             true,
-          ),
-        );
+          );
+          if (current) this.options.onExit?.();
+        });
         child.stdin.on("error", (error) =>
           this.fail(child, new Error(`WORKER_WRITE_FAILED: ${error.message}`)),
         );

@@ -1,6 +1,6 @@
 # Desktop ownership
 
-Desktop ownership currently excludes competing agents, not physical user input. [Exclusive control](spec.md#exclusive-control) is a separate, pending requirement.
+Desktop ownership excludes competing agents. The candidate adds [exclusive control](spec.md#exclusive-control) for physical user input; input cleanup and confirmed control release precede ownership handoff.
 
 The Windows worker acquires an OS named mutex on the first desktop request in a computer-use operation. A separate small helper holds the mutex, so UI Automation work cannot block ownership control. The mutex is scoped to the Windows interactive session; both native Windows and WSL2 hosts use Windows workers and therefore contend for the same mutex.
 
@@ -9,6 +9,8 @@ Competing sessions receive `COMPUTER_USE_BUSY` immediately instead of queueing s
 ## Pi lifecycle
 
 The extension assigns an operation identifier when a user run starts, retains it through model turns, low-level `agent_end` events and custom continuations, and sends the internal `operation_end` request at `agent_settled`. A new user run ends prior owned activity before starting another operation. Session shutdown disposes the worker and its helpers. Health does not acquire desktop ownership.
+
+Human handback uses the same final-settlement path: the agent explains the human step and finishes its run before the user acts. The next user message starts a fresh operation, with fresh observation before further input. There is no separate pause controller or model-facing handback tool.
 
 The internal worker envelope accepts an optional operation identifier; direct worker consumers without one use the worker's process-scoped operation. They must end the operation or dispose the worker to release ownership. This control is not an additional model-facing tool.
 

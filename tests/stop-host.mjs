@@ -77,6 +77,65 @@ try {
   );
   assert.equal(gated.ok, false);
   assert.match(gated.error, /TARGET_IDENTITY_CHANGED/);
+  const controlling = await worker.execute("health", {});
+  assert.equal(controlling.control.exclusiveControl, true);
+  assert.equal(controlling.control.presentation.visible, true);
+  await assertEvent(`${fresh.cancelEvent}-exclusive`, true);
+  await worker.execute("operation_end", {}, undefined, "new-user-operation");
+  const handedBack = await worker.execute("health", {});
+  assert.equal(handedBack.control.exclusiveControl, false);
+  assert.equal(handedBack.control.presentation.visible, false);
+  await assertEvent(`${fresh.cancelEvent}-exclusive`, false);
+  const exitOperation = "owned-listener-exit";
+  const exitReady = await worker.execute(
+    "prepare_input",
+    {},
+    undefined,
+    exitOperation,
+  );
+  const exitGuard = await worker.execute(
+    "click",
+    { x: 0, y: 0, nativeWindowHandle: 1, processId: 1 },
+    undefined,
+    exitOperation,
+  );
+  assert.equal(exitGuard.ok, false);
+  assert.match(exitGuard.error, /TARGET_IDENTITY_CHANGED/);
+  assert.equal(exitGuard.cleanupConfirmed, true);
+  // No physical input was dispatched. Pin the owned helper's OS handle,
+  // parent and creation time before requesting an unexpected cooperative listener exit.
+  const listenerId = Number(exitReady.listenerProcessId);
+  const workerId = Number(controlling.processId);
+  assert.ok(Number.isSafeInteger(listenerId) && listenerId > 0);
+  assert.ok(Number.isSafeInteger(workerId) && workerId > 0);
+  const exitScript = `$ErrorActionPreference='Stop';$p=Get-Process -Id ${listenerId};$identity=$p.Handle;$c=Get-CimInstance Win32_Process -Filter 'ProcessId=${listenerId}';if($c.ParentProcessId -ne ${workerId} -or $p.Path -ne $c.ExecutablePath -or [Math]::Abs(($p.StartTime.ToUniversalTime()-$c.CreationDate.ToUniversalTime()).TotalMilliseconds) -ge 1){throw 'owned helper identity mismatch'};$main=@($p.Threads|Sort-Object StartTime)[0];Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class StopFixtureExit31{[DllImport("user32.dll",SetLastError=true)]public static extern bool PostThreadMessage(uint id,uint msg,IntPtr w,IntPtr l);}';if(-not [StopFixtureExit31]::PostThreadMessage($main.Id,0x12,[IntPtr]::Zero,[IntPtr]::Zero)){throw 'cooperative listener exit refused'};if(-not $p.WaitForExit(3000)){throw 'helper exit unconfirmed'};$p.Dispose()`;
+  await run("powershell.exe", [
+    "-NoProfile",
+    "-NonInteractive",
+    "-EncodedCommand",
+    Buffer.from(exitScript, "utf16le").toString("base64"),
+  ]);
+  const exitDeadline = Date.now() + 3000;
+  while (!seen.includes(exitOperation)) {
+    if (Date.now() > exitDeadline)
+      throw new Error("Listener exit did not stop its operation");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const afterExit = await worker.execute(
+    "wait",
+    { milliseconds: 1 },
+    undefined,
+    exitOperation,
+  );
+  assert.equal(afterExit.ok, false);
+  assert.match(afterExit.error, /STOPPED/);
+  const exitEnd = await worker.execute(
+    "operation_end",
+    {},
+    undefined,
+    exitOperation,
+  );
+  assert.equal(exitEnd.ok, true);
   console.log(
     JSON.stringify({
       ok: true,
@@ -87,6 +146,11 @@ try {
       sameOperationBlocked: true,
       newOperation: true,
       guardFailureSentPhysicalInput: false,
+      exclusiveControlAcquired: true,
+      workerProcessId: controlling.processId,
+      listenerProcessId: fresh.listenerProcessId,
+      handbackReleasedControl: true,
+      idleListenerExitStops: true,
       physicalEsc: "manual check pending",
     }),
   );

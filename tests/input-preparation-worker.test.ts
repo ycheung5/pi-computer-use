@@ -15,7 +15,46 @@ for (const action of ["click", "scroll"] as const)
     () => testInputBarrier(action),
   );
 
-async function testInputBarrier(action: "click" | "scroll") {
+test(
+  "real worker refuses physical dispatch when exclusive control cannot be acquired",
+  { skip: process.platform === "win32", timeout: 15000 },
+  () => testInputBarrier("click", "refused"),
+);
+
+test(
+  "real worker refuses physical dispatch without confirmed exclusive control",
+  { skip: process.platform === "win32", timeout: 15000 },
+  () => testInputBarrier("click", "unconfirmed"),
+);
+
+test(
+  "real worker retains desktop ownership when exclusive-control release is unconfirmed",
+  { skip: process.platform === "win32", timeout: 15000 },
+  () => testInputBarrier("click", "release-unconfirmed"),
+);
+
+test(
+  "real worker stops the operation after physical protection is lost",
+  { skip: process.platform === "win32", timeout: 15000 },
+  () => testInputBarrier("click", "lost"),
+);
+
+test(
+  "real worker stops an idle controlled operation when its listener exits",
+  { skip: process.platform === "win32", timeout: 15000 },
+  () => testInputBarrier("click", "listener-exit"),
+);
+
+async function testInputBarrier(
+  action: "click" | "scroll",
+  refuseControl:
+    | false
+    | "refused"
+    | "unconfirmed"
+    | "release-unconfirmed"
+    | "lost"
+    | "listener-exit" = false,
+) {
   const args =
     action === "scroll"
       ? { elementId: "uia:owned-scroller", deltaY: 240 }
@@ -37,7 +76,7 @@ async function testInputBarrier(action: "click" | "scroll") {
   );
   await writeFile(
     fake,
-    `#!/usr/bin/env node\nconst {createInterface}=require('node:readline');const {appendFileSync}=require('node:fs');createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.cancel)return;if(r.action==='click'||r.action==='scroll'){appendFileSync(process.env.PI_CU_BARRIER_JOURNAL,'dispatch\\n');if(process.env.PI_CU_BARRIER_HOLD==='1')return;}console.log(JSON.stringify({id:r.id,result:{ok:true,action:r.action,listenerProcessId:process.pid,cleanupConfirmed:process.env.PI_CU_BARRIER_HOLD!=='uncertain'}}));});\n`,
+    `#!/usr/bin/env node\nconst {createInterface}=require('node:readline');const {appendFileSync,existsSync}=require('node:fs');createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.cancel)return;if(r.action==='take_control'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='refused'){console.log(JSON.stringify({id:r.id,result:{ok:false,action:r.action,error:'EXCLUSIVE_CONTROL_UNAVAILABLE'}}));return;}if(r.action==='release'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='release-unconfirmed')appendFileSync(process.env.PI_CU_BARRIER_JOURNAL,'release\\n');if(r.action==='click'||r.action==='scroll'){appendFileSync(process.env.PI_CU_BARRIER_JOURNAL,'dispatch\\n');if(process.env.PI_CU_BARRIER_HOLD==='1')return;}console.log(JSON.stringify({id:r.id,result:{ok:!(r.action==='click'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='lost'),error:r.action==='click'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='lost'?'EXCLUSIVE_CONTROL_LOST: test protection loss':undefined,action:r.action,operationId:r.args.operationId,exclusiveControl:(r.action==='take_control'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL!=='unconfirmed')||(r.action==='disarm'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='release-unconfirmed'),hookInstalled:true,listenerProcessId:process.pid,cleanupConfirmed:process.env.PI_CU_BARRIER_HOLD!=='uncertain'}}));if(r.action==='take_control'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='listener-exit')setInterval(()=>{if(existsSync(process.env.PI_CU_BARRIER_JOURNAL+'.exit-listener'))process.exit(0);},5);});\n`,
     { mode: 0o755 },
   );
   await writeFile(
@@ -60,6 +99,7 @@ async function testInputBarrier(action: "click" | "scroll") {
         PI_CU_SETTINGS_FILE: join(root, "settings.json"),
         PI_CU_BARRIER_PEER: fake,
         PI_CU_BARRIER_JOURNAL: journal,
+        PI_CU_BARRIER_REFUSE_CONTROL: refuseControl || "",
       },
       stdio: ["pipe", "pipe", "pipe"],
     },
@@ -109,9 +149,72 @@ async function testInputBarrier(action: "click" | "scroll") {
       `${JSON.stringify({ inputAck: preparation.token, requestId: 1 })}\n`,
     );
     let result = await next();
-    while (result.id !== 1) result = await next();
+    let inputReleased = false;
+    while (result.id !== 1) {
+      if (result.event === "input_state" && result.active === false)
+        inputReleased = true;
+      result = await next();
+    }
+    if (refuseControl === "lost" || refuseControl === "listener-exit") {
+      if (refuseControl === "lost") {
+        assert.equal(result.result.ok, false);
+        assert.match(result.result.error, /EXCLUSIVE_CONTROL_LOST/);
+      } else {
+        assert.equal(result.result.ok, true);
+        await writeFile(`${journal}.exit-listener`, "exit");
+        let stopped = await next();
+        while (stopped.event !== "stopped") stopped = await next();
+        assert.equal(stopped.operationId, "barrier-test");
+      }
+      child.stdin.write(
+        `${JSON.stringify({ id: 5, action, args, operationId: "barrier-test" })}\n`,
+      );
+      let retry = await next();
+      while (retry.id !== 5) {
+        assert.notEqual(
+          retry.event,
+          "input_prepare",
+          "lost protection must reject before preparing another input",
+        );
+        retry = await next();
+      }
+      assert.equal(retry.result.ok, false);
+      assert.match(retry.result.error, /STOPPED/);
+      assert.equal(
+        await readFile(journal, "utf8"),
+        "dispatch\n",
+        "lost protection must prevent subsequent dispatch",
+      );
+      return;
+    }
+    if (refuseControl === "refused" || refuseControl === "unconfirmed") {
+      assert.equal(result.result.ok, false);
+      assert.match(result.result.error, /EXCLUSIVE_CONTROL_UNAVAILABLE/);
+      assert.equal(
+        inputReleased,
+        true,
+        "pre-dispatch refusal releases the input lease",
+      );
+      assert.equal(await readFile(journal, "utf8").catch(() => ""), "");
+      return;
+    }
     assert.equal(result.result.ok, true, JSON.stringify(result));
     assert.equal(await readFile(journal, "utf8"), "dispatch\n");
+    if (refuseControl === "release-unconfirmed") {
+      child.stdin.write(
+        `${JSON.stringify({ id: 5, action: "operation_end", args: {}, operationId: "barrier-test" })}\n`,
+      );
+      let ended = await next();
+      while (ended.id !== 5) ended = await next();
+      assert.equal(ended.result.ok, false);
+      assert.match(ended.result.error, /CONTROL_RELEASE_UNCONFIRMED/);
+      assert.equal(
+        await readFile(journal, "utf8"),
+        "dispatch\n",
+        "uncertain control release must not release desktop ownership",
+      );
+      return;
+    }
     child.stdin.write(
       `${JSON.stringify({ id: 2, action, args, operationId: "barrier-test" })}\n`,
     );

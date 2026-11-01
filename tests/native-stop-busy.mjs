@@ -19,6 +19,7 @@ assert.equal(
   "Dedicated idle interactive Windows desktop required",
 );
 const mode = process.argv[2] ?? "esc";
+const testSuppression = process.argv.includes("--interference");
 assert.ok(["esc", "shortcut"].includes(mode), "Use esc or shortcut");
 const statusFile = process.env.PI_CU_STOP_STATUS_FILE;
 if (statusFile)
@@ -109,9 +110,20 @@ const worker = new WorkerClient({
 const observe = async () => {
   const result = line(/^state:/);
   fixture.stdin.write("observe\n");
-  const match = (await result).match(/^state:(\d+):(released|held)$/);
+  const match = (await result).match(/^state:(\d+):(released|held):(\d+)$/);
   assert.ok(match);
-  return { count: Number(match[1]), keysReleased: match[2] === "released" };
+  const health = await worker.execute("health", {});
+  assert.equal(health.ok, true, JSON.stringify(health));
+  const control = health.control;
+  return {
+    count: Number(match[1]),
+    keysReleased:
+      match[2] === "released" &&
+      (control.started !== true ||
+        (control.physicalKeysHeld === 0 && control.physicalButtonsHeld === 0)),
+    unexpectedCharacters: Number(match[3]),
+    control,
+  };
 };
 try {
   const ready = (await line(/^ready:/)).match(/^ready:(\d+)$/);
@@ -129,7 +141,9 @@ try {
   });
   assert.equal(settings.ok, true, JSON.stringify(settings));
   const initial = await observe();
-  assert.deepEqual(initial, { count: 0, keysReleased: true });
+  assert.equal(initial.count, 0);
+  assert.equal(initial.keysReleased, true);
+  assert.equal(initial.unexpectedCharacters, 0);
   const total = 2000;
   console.log("Fixture ready. Send start followed by Enter on stdin to begin.");
   await status("ready");
@@ -162,10 +176,8 @@ try {
   const deadline = Date.now() + 40000;
   while (!stopped && Date.now() < deadline)
     await new Promise((resolve) => setTimeout(resolve, 25));
-  if (!stopped) {
-    worker.stopOperation(operation);
-    throw new Error("Physical stop was not observed before the deadline");
-  }
+  const physicalStopObserved = stopped;
+  if (!physicalStopObserved) worker.stopOperation(operation);
   const dispatch = await bounded(
     typing,
     10000,
@@ -194,16 +206,23 @@ try {
   const after = await observe();
   const evidence = {
     started,
-    stopped,
+    stopped: physicalStopObserved,
     settled,
     before: before.count,
     after: after.count,
     total,
     keysReleased: before.keysReleased && after.keysReleased,
+    unexpectedCharacters: after.unexpectedCharacters,
     releasePollObservations: before.observations,
     dispatch,
   };
   const assessment = assessStop(evidence);
+  const suppression =
+    after.control.suppressedKeys > 6 &&
+    after.control.suppressedMouse > 0 &&
+    after.control.suppressedButtons > 0 &&
+    after.control.exclusiveControl === false &&
+    after.unexpectedCharacters === 0;
   const recovered = await bounded(
     worker.execute(
       "wait",
@@ -223,16 +242,25 @@ try {
   assert.equal(recoveryEnd.ok, true, JSON.stringify(recoveryEnd));
   console.log(
     JSON.stringify({
-      ...assessment,
+      ok: assessment.ok && (!testSuppression || suppression),
       mode,
+      physicalStopTimedOut: !physicalStopObserved,
       evidence,
       dispatch,
       sameOperationBlocked: true,
       newOperationRecovered: true,
+      control: after.control,
+      suppression: testSuppression ? suppression : "not requested",
       scope: "Pi worker and physical key only; no held-key or DSH host claim",
     }),
   );
   assert.equal(assessment.ok, true);
+  if (testSuppression)
+    assert.equal(
+      suppression,
+      true,
+      "physical attempts must be observed and suppressed",
+    );
 } finally {
   if (inputAttempted && !settled) {
     // Retain the live input owner and fixture if the cleanup barrier did not complete.
@@ -258,4 +286,7 @@ try {
     maxRetries: 10,
     retryDelay: 100,
   });
+  // Windows can retain a console read after readline closes. All owners have
+  // settled before closing this fixture's start-gate stream.
+  process.stdin.destroy();
 }

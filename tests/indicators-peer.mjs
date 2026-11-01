@@ -1,4 +1,4 @@
-// Normal helper protocol, no input and both visual channels disabled.
+// Normal helper protocol: required border survives disabled optional visuals. No input.
 import assert from "node:assert/strict";
 import { WorkerClient } from "../dist/client.js";
 import { compileNative } from "../dist/native.js";
@@ -36,10 +36,11 @@ try {
     ).ok,
     true,
   );
-  const begun = await helper.execute("begin", { operationId });
+  const begun = await helper.execute("take_control", { operationId });
   assert.equal(begun.presentation.held, true);
-  assert.equal(begun.presentation.visible, false);
-  const touched = await helper.execute("touch", { operationId });
+  assert.equal(begun.exclusiveControl, true);
+  assert.equal(begun.presentation.visible, true);
+  const touched = await helper.execute("status", {});
   assert.equal(
     touched.presentation.held,
     true,
@@ -58,14 +59,15 @@ try {
   assert.equal(resumed.presentation.suspended, false);
   const ended = await helper.execute("disarm", { operationId });
   assert.equal(ended.presentation.held, false);
-  assert.equal(ended.presentation.endDelayMs, 200);
+  assert.equal(ended.presentation.visible, false);
+  assert.equal(ended.exclusiveControl, false);
   assert.equal(ended.armed, false);
   console.log(
     JSON.stringify({
       ok: true,
       operationLeaseRetained: true,
       captureKeepsStopArmed: true,
-      endDelay: true,
+      handbackImmediate: true,
       physicalInput: false,
     }),
   );

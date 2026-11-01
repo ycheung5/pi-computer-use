@@ -17,7 +17,7 @@ Read the row matching the task; follow section links before reading whole docume
 | Publish or read issues | [Issue tracker](agents/issue-tracker.md), [triage labels](agents/triage-labels.md) |
 | What works, remaining outcomes, next work and cleanup decisions | [Delivery map](tickets.md#delivery-outcomes-and-ownership), [execution queue](tickets.md#execution-queue), [cleanup dispositions](tickets.md#cleanup-dispositions), [original obligations](tickets.md#original-issue-disposition) |
 | Worker setup, protocol and test evidence | [Runtime and validation](runtime.md) |
-| Exclusive control, human handback and emergency stopping | [Control contract](spec.md#exclusive-control), [delivery/test slices](implementation-plan.md#exclusive-control-delivery), [ADR 0003](adr/0003-exclusive-desktop-control.md), [current stopping implementation](stopping.md) |
+| Exclusive control, human handback and emergency stopping | [Control contract](spec.md#exclusive-control), [delivery/test slices](implementation-plan.md#exclusive-control-delivery), [ADR 0003](adr/0003-exclusive-desktop-control.md), [current stopping implementation](stopping.md), [candidate evidence](validation.md#exclusive-control-candidate) |
 | Control indicators, preview and manual acceptance | [Indicators](indicators.md) |
 | Desktop ownership and operation lifecycle | [Ownership](ownership.md) |
 | Native window discovery and validation | [Windows discovery](windows.md), [accessibility observations](windows.md#accessibility-observations), [locked sessions](windows.md#locked-session-refusals) |

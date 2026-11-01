@@ -287,6 +287,37 @@ test("Drop report retains an input owner when cleanup is explicitly unconfirmed"
       JSON.stringify({
         dispatch: {
           status: "fulfilled",
+          value: {
+            ok: false,
+            action: "drag",
+            cleanupConfirmed: true,
+            error: "TARGET_ACTIVATION_REFUSED",
+          },
+        },
+        state: { drops: 0, held: 0 },
+      }),
+    );
+    const refused = spawnSync(
+      process.execPath,
+      [runner, `--report-drop=${report}`],
+      {
+        cwd: folder,
+        encoding: "utf8",
+        env: { ...process.env, PI_CU_DEDICATED_INPUT_DESKTOP: "" },
+      },
+    );
+    assert.equal(refused.status, 1, refused.stderr);
+    assert.equal(JSON.parse(refused.stdout).ok, false);
+    assert.equal(
+      JSON.parse(refused.stdout).cleanupVerification,
+      "released",
+      "failed objective does not invalidate an acknowledged, independently observed release",
+    );
+    await writeFile(
+      report,
+      JSON.stringify({
+        dispatch: {
+          status: "fulfilled",
           value: { ok: true, action: "move", cleanupConfirmed: true },
         },
         state: { drops: 1, held: 0 },

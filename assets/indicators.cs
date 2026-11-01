@@ -107,7 +107,7 @@ partial class StopBridge {
     bool? affinityApplied=null;
     string caption="Pi is controlling the computer",position="top",layoutKey="";
     int endDelay=800;
-    DateTime lastActivity=DateTime.MinValue,hideAt=DateTime.MinValue,previewUntil=DateTime.MinValue,lastLayout=DateTime.MinValue;
+    DateTime previewUntil=DateTime.MinValue,lastLayout=DateTime.MinValue;
     public Presentation() {
       timer=new System.Windows.Forms.Timer { Interval=40 };
       timer.Tick+=delegate { Tick(); };timer.Start();
@@ -120,10 +120,12 @@ partial class StopBridge {
       endDelay=values.TryGetValue("indicatorIdleMs",out value)?Convert.ToInt32(value):800;
       layoutKey="";Refresh();
     }
-    public void Begin() { held=true;preview=false;hideAt=DateTime.MinValue;lastActivity=DateTime.UtcNow;Refresh(); }
-    public void Touch() { if(held)lastActivity=DateTime.UtcNow; }
-    public void End() { held=false;preview=false;hideAt=DateTime.UtcNow.AddMilliseconds(endDelay); }
-    public void Stop() { held=false;preview=false;hideAt=DateTime.MinValue;Hide(); }
+    public void Begin() {
+      held=true;preview=false;Refresh();
+      if(!BorderReady)throw new InvalidOperationException("EXCLUSIVE_CONTROL_UNAVAILABLE: control border failed");
+    }
+    public bool BorderReady {get {return held && (suspended || (frames.Count>0 && frames.TrueForAll(frame=>frame.Visible && frame.FrameError.Length==0)));}}
+    public void Stop() { held=false;preview=false;Hide(); }
     public void Suspend(bool value) { if(value)captureSuspensions++;suspended=value;Refresh(); }
     public void Preview(bool show) {
       if(!show) {
@@ -139,7 +141,7 @@ partial class StopBridge {
       }
       preview=true;previewUntil=DateTime.UtcNow.AddMilliseconds(2000);Refresh();
     }
-    bool Wanted() { return !suspended && (held || preview || hideAt>DateTime.UtcNow); }
+    bool Wanted() { return !suspended && (held || preview); }
     static float MonitorScale(Screen screen) {
       uint x,y;
       try {
@@ -204,7 +206,7 @@ partial class StopBridge {
     void Refresh() {
       if(!Wanted()) { Hide();return; }
       Rebuild();
-      foreach(IndicatorWindow form in frames)Apply(form,screenEnabled);
+      foreach(IndicatorWindow form in frames)Apply(form,screenEnabled || held);
       foreach(IndicatorWindow form in bars)Apply(form,screenEnabled);
       if(pointer!=null) {
         System.Drawing.Point cursor=Cursor.Position;Screen screen=Screen.FromPoint(cursor);float scale=MonitorScale(screen);Size extent=CursorExtent();
@@ -221,7 +223,6 @@ partial class StopBridge {
     }
     void Tick() {
       DateTime now=DateTime.UtcNow;
-      if(held && (now-lastActivity).TotalMilliseconds>=30000){held=false;hideAt=DateTime.MinValue;}
       if(preview && now>=previewUntil)preview=false;
       if(!Wanted()){Hide();return;}
       Refresh();
@@ -237,7 +238,7 @@ partial class StopBridge {
       return new Dictionary<string,object> {
         {"held",held},{"renderChecked",renderChecked},{"previewPath",previewPath},{"preview",preview},{"suspended",suspended},{"visible",visible>0},{"visibleWindows",visible},
         {"screenEnabled",screenEnabled},{"pointerEnabled",pointerEnabled},{"remoteVisible",remoteVisible},{"captureAffinityApplied",affinityApplied},
-        {"text",caption},{"position",position},{"endDelayMs",endDelay},{"operationIdleMs",30000},{"previewDurationMs",2000},
+        {"text",caption},{"position",position},{"endDelayMs",endDelay},{"operationIdleMs",0},{"previewDurationMs",2000},
         {"nonActivating",true},{"clickThrough",true},{"layout",Layout()},
         {"frameErrors",frames.FindAll(frame=>frame.FrameError.Length>0).ConvertAll(frame=>frame.FrameError)}
         ,{"clickThroughHitTestPassed",hitTest},{"captureSuspensions",captureSuspensions}

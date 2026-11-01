@@ -9,6 +9,7 @@ export function assessStop(evidence) {
     total,
     keysReleased,
     dispatch,
+    unexpectedCharacters,
   } = evidence;
   const result = dispatch?.value;
   if (
@@ -25,7 +26,8 @@ export function assessStop(evidence) {
     before <= 0 ||
     before >= total ||
     after !== before ||
-    keysReleased !== true
+    keysReleased !== true ||
+    unexpectedCharacters !== 0
   ) {
     return { ok: false };
   }

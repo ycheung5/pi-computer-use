@@ -21,7 +21,7 @@ import {
   listWindowsParameters,
   retireDesktop,
 } from "./desktop.js";
-import { observeNativeInput, runNativeOperation } from "./native.js";
+import { runNativeOperation } from "./native.js";
 import { disposeOcr, ocrDesktop, ocrParameters } from "./ocr.js";
 import {
   acquireDesktop,
@@ -135,15 +135,6 @@ const stopListener = new StopListener((operationId) => {
   );
 });
 
-observeNativeInput((active, operationId) => {
-  if (active)
-    void stopListener
-      .inputStarted(operationId)
-      .catch(() => stopOperation(operationId))
-      .catch((error) =>
-        process.stderr.write(`PRESENTATION_FAILED: ${String(error)}\n`),
-      );
-});
 let presentationUpdating = false;
 let presentationError: string | undefined;
 const presentationPoll = setInterval(() => {
@@ -260,6 +251,16 @@ async function guardedInput(
   await acknowledgeInputPreparation(requestId, operationId, signal);
   try {
     signal.throwIfAborted();
+    if (prepared._quietScroll !== true) {
+      const control = await stopListener.acquire(operationId, signal);
+      if (!control.ok) {
+        process.stdout.write(
+          `${JSON.stringify({ event: "input_state", active: false })}\n`,
+        );
+        return { ...control, action, cleanupConfirmed: true };
+      }
+      signal.throwIfAborted();
+    }
   } catch (error) {
     process.stdout.write(
       `${JSON.stringify({ event: "input_state", active: false })}\n`,
@@ -285,6 +286,13 @@ async function guardedInput(
   process.stdout.write(
     `${JSON.stringify({ event: "input_state", active: false })}\n`,
   );
+  if (
+    !result.ok &&
+    /^(COMPUTER_USE_STOPPED|EXCLUSIVE_CONTROL_LOST|STOP_LISTENER_UNAVAILABLE)/.test(
+      String(result.error),
+    )
+  )
+    await stopOperation(operationId);
   return result;
 }
 
@@ -354,7 +362,6 @@ async function dispatch(
   }
   const configuration = settings.currentSettings;
   if (configuration) await stopListener.configure(configuration);
-  await stopListener.touch(operationId);
   if (
     configuration &&
     process.platform === "win32" &&

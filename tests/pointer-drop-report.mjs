@@ -9,13 +9,13 @@ export function assessDrop({ dispatch, state, observationError }) {
   const released =
     !observationError &&
     dispatch?.status === "fulfilled" &&
-    value?.ok === true &&
+    typeof value?.ok === "boolean" &&
     value?.action === "drag" &&
     value?.cleanupConfirmed === true &&
     !explicitlyUnconfirmed &&
     state?.held === 0;
   return {
-    ok: released && state?.drops === 1,
+    ok: released && value?.ok === true && state?.drops === 1,
     cleanupVerification: released ? "released" : "unconfirmed",
   };
 }

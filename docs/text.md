@@ -1,6 +1,6 @@
 # Text and key entry
 
-Current build: physical text entry detects user interference. The accepted [exclusive-control contract](spec.md#exclusive-control) changes that behavior; implementation is pending.
+The candidate acquires [exclusive control](spec.md#exclusive-control) before physical text entry. Suppressed physical events do not invalidate typing; foreign injected or unconsumed events still do. Physical and actual-host acceptance remains pending.
 
 `type_text` accepts `text`, `method: auto | clipboard | sendinput | background`, `focusMode: preserve | main`, `restoreClipboard` (default true), and native target options. Browser options retain browser-first routing. `keypress` accepts a `keys` array with exactly one non-modifier key and optional Ctrl/Alt/Shift modifiers. Windows/Cmd/Meta keys are blocked; unsupported names/layout mappings fail without input. Explicit background keypress supports one printable character only.
 

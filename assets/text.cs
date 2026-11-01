@@ -75,8 +75,8 @@ partial class WindowsBridge {
   }
   static void TextCheck(EventWaitHandle cancel,Process listener,IntPtr window,uint owner,IntPtr expectedFocus,bool checkFocus,InteractionGuard interaction) {
     CheckWindowReference(window);
-    interaction.Check();
     if(cancel.WaitOne(0))throw new InvalidOperationException("COMPUTER_USE_STOPPED");
+    interaction.Check();
     if(listener.HasExited)throw new InvalidOperationException("STOP_LISTENER_UNAVAILABLE");
     if(!IsWindow(window) || WindowOwner(window)!=owner || !IsWindowEnabled(window) || !IsWindowVisible(window) || IsIconic(window))throw new InvalidOperationException("TARGET_IDENTITY_CHANGED");
     if(GetForegroundWindow()!=window)throw new InvalidOperationException("TARGET_FOREGROUND_CHANGED: no more text sent");
@@ -142,7 +142,7 @@ partial class WindowsBridge {
     InteractionGuard interaction=null;
     AutomationElement main=null;bool cleanup=true;
     try {
-      interaction=new InteractionGuard();before=GetForegroundWindow();GetCursorPos(out pointer);
+      interaction=new InteractionGuard(TextOption(args,"_cancelEvent",""),NumberOption(args,"_stopProcessId",0));before=GetForegroundWindow();GetCursorPos(out pointer);
       Dictionary<string,object> quiet=new Dictionary<string,object>(args);quiet["activate"]=false;
       if(args.ContainsKey("_elementId")) {
         main=ResolveObservedElement(TextOption(args,"_elementId",""),quiet,out window);

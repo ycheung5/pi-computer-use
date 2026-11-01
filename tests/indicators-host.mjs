@@ -103,8 +103,9 @@ try {
   );
   assert.equal(guarded.ok, false);
   const afterGuard = await worker.execute("health", {});
-  assert.equal(afterGuard.control.presentation.held, false);
-  assert.equal(afterGuard.control.presentation.visible, false);
+  assert.equal(afterGuard.control.exclusiveControl, true);
+  assert.equal(afterGuard.control.presentation.held, true);
+  assert.equal(afterGuard.control.presentation.visible, true);
   worker.stopOperation(operation);
   const stopped = await worker.execute(
     "list_windows",
@@ -168,8 +169,9 @@ try {
       check: "independent indicator/shortcut helper",
       quietStartup: true,
       nonvisualRendering: true,
-      disabledIndicatorsStillStop: true,
-      invalidPointerQuiet: true,
+      optionalIndicatorsDoNotDisableStop: true,
+      requiredBorderDespiteSettings: true,
+      invalidPointerInputRefused: true,
       monitorsReported: preview.presentation.layout.length,
       shortcutConfigured: true,
       injectedFilter: "configured; physical test pending",

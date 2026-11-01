@@ -102,7 +102,7 @@ Deliver one installable Pi package with native computer-use tools, reference-equ
 
 ## Exclusive control
 
-Accepted product decision, 2026-11-01; implementation and acceptance are pending. [ADR 0003](adr/0003-exclusive-desktop-control.md) records the deliberate departure from reference behavior. Desktop ownership excludes competing agents; exclusive control additionally suppresses ordinary physical user input.
+Accepted product decision, 2026-11-01; implementation is in progress and full acceptance is pending. [ADR 0003](adr/0003-exclusive-desktop-control.md) records the deliberate departure from reference behavior. Desktop ownership excludes competing agents; exclusive control additionally suppresses ordinary physical user input.
 
 - Before the first physical action, establish independent stop protection, physical-input suppression and the visible local blue border. Continue protection across tool gaps, observations and model thinking until human handback or final settlement. Quiet-only UIA/browser operations do not acquire exclusive control; mixed workflows retain it once acquired.
 - During control, ordinary physical clicks, pointer movement and typing must neither reach applications nor cancel or modify agent actions. Agent-generated input remains available. Esc and the configured stop shortcut always stop the operation; their physical events, including chord modifiers, must not leak into the target or become an ordinary-interference failure. Agent-generated Escape remains usable without triggering emergency stop.
