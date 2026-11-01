@@ -1,5 +1,7 @@
 # Control indicators
 
+Current build: presentation follows the lifetime/settings described below. The required border lifetime for [exclusive control](spec.md#exclusive-control) is pending under #20/#31.
+
 The independent Windows stop helper also draws Pi-branded screen edges, a status bar and a pointer tag. The screen border uses a per-pixel translucent blue falloff with a bright core, following the reference glow at 1.5 times its width: a 3-pixel core plus 27-pixel falloff at reference width scale 1, scaled by monitor width (clamped from 1 to 2). The separate Pi status bar and pointer tag retain their existing appearance. If frame preparation or presentation fails, that frame stays hidden and its error is reported until configuration or display layout causes a rebuild; the other indicators continue. It uses non-activating, disabled, layered windows; the pointer guard additionally skips the verified helper process if a Windows point-query API still returns an overlay. The tag follows the pointer, accounts for the current cursor bitmap size and stays inside its monitor's working area.
 
 ## Operation lifetime
@@ -24,9 +26,9 @@ A later approximately ten-second preview used temporary settings and showed the 
 
 ## Manual acceptance checklist
 
-- [ ] On a dedicated interactive desktop, perform pointer and keyboard workflows; verify no indicators for background-only UIA/browser work and visibility only after guarded physical input starts.
-- [ ] Verify indicators remain during same-operation reads/thinking, hide after settlement delay, stop immediately, and recover on a new user operation. Check the 30-second stale-activity limit.
-- [ ] Press physical Esc and the configured extra shortcut while UIA is busy. Confirm held input is released and same-operation retries remain blocked, including with both indicators disabled.
+- [ ] Verify the required border and control acquisition/release in the [exclusive-control delivery cases](implementation-plan.md#exclusive-control-delivery); quiet-only UIA/browser work remains outside takeover.
+- [ ] Verify border visibility through reads/thinking and idle periods, release before human handback, and reacquisition on explicit continuation. A stale-presentation timer must not silently hide active exclusive control.
+- [ ] Press physical Esc and the configured extra shortcut while UIA is busy. Confirm suppression and held input are released and same-operation retries remain blocked; optional indicator settings must preserve the required local control border.
 - [ ] Send an agent Escape action to a disposable dialog and confirm it does not trigger global stopping. Injected-key filtering is source/protocol checked automatically; this complete keyboard workflow remains unrun until dedicated-desktop acceptance.
 - [ ] Click/drag beneath each overlay region and pointer tag on disposable fixtures. Verify focus/pointer restoration and absence of own-overlay occlusion errors.
 - [ ] Change monitor arrangement, scaling and primary display; check edges, bar placement and the large-cursor tag on each display.

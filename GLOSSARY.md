@@ -22,6 +22,12 @@ Coverage of the agreed reference capabilities, including desktop and browser aut
 **Desktop ownership**:
 Exclusive permission for one Pi session to operate a Windows desktop during a computer-use operation, shared across native Windows and WSL2 hosts.
 
+**Exclusive control**:
+A period in which the agent operates the desktop and ordinary physical keyboard and mouse input is suppressed, while emergency stopping remains available.
+
+**Human handback**:
+A pause in automation during which exclusive control has ended and the user can interact normally. Resuming requires an explicit user continuation.
+
 **Computer-use operation**:
 A session's related computer-use activity across model turns until processing settles or the operation is stopped. Individual tool calls are steps within the operation.
 

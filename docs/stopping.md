@@ -1,5 +1,7 @@
 # Emergency stopping
 
+Current build: stop signaling does not suppress ordinary user input. The accepted [exclusive-control contract](spec.md#exclusive-control) is pending under #31.
+
 Use `/computer-stop` to stop the current computer-use operation without waiting for a tool response. Pi cancellation also stops the operation. Queued calls are cancelled, active work is signaled, and subsequent calls in that operation are rejected with `COMPUTER_USE_STOPPED`. A model turn, retry or custom continuation does not reset stopping; a genuine new user run does.
 
 ## Independent Windows listener

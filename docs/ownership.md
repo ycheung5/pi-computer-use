@@ -1,5 +1,7 @@
 # Desktop ownership
 
+Desktop ownership currently excludes competing agents, not physical user input. [Exclusive control](spec.md#exclusive-control) is a separate, pending requirement.
+
 The Windows worker acquires an OS named mutex on the first desktop request in a computer-use operation. A separate small helper holds the mutex, so UI Automation work cannot block ownership control. The mutex is scoped to the Windows interactive session; both native Windows and WSL2 hosts use Windows workers and therefore contend for the same mutex.
 
 Competing sessions receive `COMPUTER_USE_BUSY` immediately instead of queueing stale actions. The owning client's requests are serialized before execution deadlines start; queued cancellation does not send the cancelled request. A Windows mutex has no heartbeat expiry: a slow live owner is not displaced, and Windows releases the mutex when its owning thread/process exits. No filesystem lease is stolen based on elapsed time.

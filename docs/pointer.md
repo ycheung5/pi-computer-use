@@ -1,5 +1,7 @@
 # Guarded pointer actions
 
+Current build: physical pointer actions abort on interference. Suppression under the accepted [exclusive-control contract](spec.md#exclusive-control) is not implemented.
+
 `click`, `double_click`, `move`, `drag` and coordinate `scroll` use screen coordinates in physical desktop pixels. Convert image coordinates using the screenshot's `origin`, `imageScale` and `imageScaleY`; do not treat a resized PNG's pixels as desktop coordinates. Negative monitor coordinates are supported. Observed HWND/PID origins are scoped to the operation; source-window movement shifts coordinate points/the whole drag path by the observed delta. A remembered title resolving to a replacement window fails closed until fresh observation.
 
 Auto left clicks on an observed element try native/UIA background behavior, then unconfirmed background messages. Explicit `dispatch: background` posts messages and never authorizes physical fallback. Auto double/right clicks and `dispatch: foreground` use physical input. Move retains the requested hover position and activates only with `activate: true`. Other physical actions return the pointer when it is still where automation left it; foreground restoration respects `activate: true`, user movement/focus changes and opened menus/dialogs. Target activation shares the existing native thread-attachment helper used by window management, without synthetic Alt/keyboard workarounds. Windows may refuse foreground activation/restoration; results report that refusal.

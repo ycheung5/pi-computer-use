@@ -1,5 +1,7 @@
 # Text and key entry
 
+Current build: physical text entry detects user interference. The accepted [exclusive-control contract](spec.md#exclusive-control) changes that behavior; implementation is pending.
+
 `type_text` accepts `text`, `method: auto | clipboard | sendinput | background`, `focusMode: preserve | main`, `restoreClipboard` (default true), and native target options. Browser options retain browser-first routing. `keypress` accepts a `keys` array with exactly one non-modifier key and optional Ctrl/Alt/Shift modifiers. Windows/Cmd/Meta keys are blocked; unsupported names/layout mappings fail without input. Explicit background keypress supports one printable character only.
 
 Auto text first tries the focused native Edit/RichEdit control using bounded `EM_REPLACESEL`, preserving its selection. This quiet path handles Unicode without clipboard or physical keys; multiline text, main-focus selection and unsupported controls require physical entry. An uncertain edit-message result is never retried as clipboard input. Background WM_CHAR delivery is explicitly unverified. Read-only/disabled controls refuse mutation.
