@@ -777,7 +777,9 @@ Scoped checks on 2026-11-01:
 
 The physical run's production source hashes still match the candidate; later changes only repair fixture cleanup/reporting and documentation. Raw source/result/cleanup receipts: `/tmp/pi-cu31-exclusive-j4l0h39e/`. Recorded-PID absence establishes those actors' exit, not universal descendant containment. Process-tree inspection excludes entries predating their recorded parent lifetime; parent PID alone is insufficient.
 
-**Still open:** silent Windows hook removal and the nonelevated `BlockInput` denial (Win32 error 5), physical Esc, real Pi-host/DSH-host and known-held-modifier acceptance, broader capture/idle/handback and lock/failure cases. The [delivery plan](implementation-plan.md#exclusive-control-delivery) retains these gates; #31 is not complete.
+**Accepted platform limit, 2026-11-01:** the user chose hooks with documented Windows limits for the first release after the nonelevated `BlockInput` denial (Win32 error 5). [ADR 0003](adr/0003-exclusive-desktop-control.md) records the decision; it does not turn silent hook removal into a passed test or guarantee physical suppression/stop keys after removal.
+
+**Still open:** physical Esc, real Pi-host/DSH-host and known-held-modifier acceptance, broader capture/idle/handback and lock/failure cases. The [delivery plan](implementation-plan.md#exclusive-control-delivery) retains these gates; #31 is not complete.
 
 ### Remaining cancellation and locked-clipboard test boundaries
 
