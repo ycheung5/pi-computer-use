@@ -4,6 +4,10 @@ Release status: **not accepted**. Automated and passive fixture results are evid
 
 The next validation cycle follows the [current implementation phases](implementation-plan.md#detailed-milestones). The [alignment scenario catalog](#alignment-scenario-catalog) below is planned coverage, not additional passing evidence.
 
+## Design cleanup checkpoint
+
+The 2026-11-01 design review and first cleanup are recorded in the [plan](implementation-plan.md#design-revision) and [dispositions](tickets.md#cleanup-dispositions). Shared test-host reuse and in-process report verification preserve all existing assertions. Public worker checks cover argument limits before and after removal of redundant browser validation. Portable checks remain 160 passed with one skipped; build and the 87-entry package/document-link check passed. No Windows desktop or paid-model acceptance was rerun for this cleanup; earlier live results retain their original source scopes.
+
 ## Reproduce automated checks
 
 From a clean checkout with Node 22.19+ and npm:

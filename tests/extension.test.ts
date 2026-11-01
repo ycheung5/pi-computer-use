@@ -1,24 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import type {
-  ExtensionAPI,
-  ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
 import { registerComputerUse } from "../src/extension.js";
+import { computerUseHost } from "./native-host.mjs";
 
 test("Pi health tool reaches worker and session shutdown rejects subsequent calls", async () => {
-  const tools: ToolDefinition[] = [];
-  const shutdown: Array<() => Promise<void>> = [];
-  const host = {
-    registerTool: (tool: ToolDefinition) => {
-      tools.push(tool);
-    },
-    on: (event: string, handler: () => Promise<void>) => {
-      if (event === "session_shutdown") shutdown.push(handler);
-      return () => {};
-    },
-  } as Pick<ExtensionAPI, "registerTool" | "on">;
+  const { registrations: tools, shutdown, api: host } = computerUseHost();
   registerComputerUse(host, {
     launch: async () => ({
       executable: process.execPath,
@@ -66,17 +53,7 @@ test("Pi health tool reaches worker and session shutdown rejects subsequent call
 });
 
 test("Pi observation tools expose argument failures through normal execution", async () => {
-  const tools: ToolDefinition[] = [];
-  const shutdown: Array<() => Promise<void>> = [];
-  const host = {
-    registerTool: (tool: ToolDefinition) => {
-      tools.push(tool);
-    },
-    on: (event: string, handler: () => Promise<void>) => {
-      if (event === "session_shutdown") shutdown.push(handler);
-      return () => {};
-    },
-  } as Pick<ExtensionAPI, "registerTool" | "on">;
+  const { registrations: tools, shutdown, api: host } = computerUseHost();
   registerComputerUse(host, {
     launch: async () => ({
       executable: process.execPath,
@@ -117,17 +94,7 @@ test("Pi observation tools expose argument failures through normal execution", a
 });
 
 test("Pi browser navigation is exposed without adding a separate MCP extension", async () => {
-  const tools: ToolDefinition[] = [];
-  const shutdown: Array<() => Promise<void>> = [];
-  const host = {
-    registerTool: (tool: ToolDefinition) => {
-      tools.push(tool);
-    },
-    on: (event: string, handler: () => Promise<void>) => {
-      if (event === "session_shutdown") shutdown.push(handler);
-      return () => {};
-    },
-  } as Pick<ExtensionAPI, "registerTool" | "on">;
+  const { registrations: tools, shutdown, api: host } = computerUseHost();
   registerComputerUse(host, {
     launch: async () => ({
       executable: process.execPath,
@@ -166,17 +133,7 @@ test("Pi browser navigation is exposed without adding a separate MCP extension",
 });
 
 test("Pi gives actionable guidance on activation refusal without replaying", async () => {
-  const tools: ToolDefinition[] = [];
-  const shutdown: Array<() => Promise<void>> = [];
-  const host = {
-    registerTool: (tool: ToolDefinition) => {
-      tools.push(tool);
-    },
-    on: (event: string, handler: () => Promise<void>) => {
-      if (event === "session_shutdown") shutdown.push(handler);
-      return () => {};
-    },
-  } as Pick<ExtensionAPI, "registerTool" | "on">;
+  const { registrations: tools, shutdown, api: host } = computerUseHost();
   const peer = `const i=require('node:readline').createInterface({input:process.stdin});let count=0;i.on('line',line=>{const r=JSON.parse(line);if(!r.action)return;count++;const error=r.action==='snapshot'?'WINDOWS_ERROR: TARGET_ACTIVATION_REFUSED: Windows did not grant foreground access':r.action==='find'?'WINDOWS_ERROR: OTHER_FAILURE: TARGET_ACTIVATION_REFUSED':'TARGET_ACTIVATION_REFUSED';console.log(JSON.stringify({id:r.id,result:{ok:false,action:r.action,error,cleanupConfirmed:true,activationDiagnostic:{foreground:'unavailable'},dispatchCount:count}}));});`;
   registerComputerUse(host, {
     launch: async () => ({ executable: process.execPath, args: ["-e", peer] }),
@@ -252,11 +209,7 @@ test("Pi gives actionable guidance on activation refusal without replaying", asy
 });
 
 test("Pi native targeting exposes one opaque lifetime reference consistently", async () => {
-  const tools: ToolDefinition[] = [];
-  const host = {
-    registerTool: (tool: ToolDefinition) => tools.push(tool),
-    on: () => () => {},
-  } as Pick<ExtensionAPI, "registerTool" | "on">;
+  const { registrations: tools, api: host } = computerUseHost();
   registerComputerUse(host);
   for (const action of [
     "snapshot",

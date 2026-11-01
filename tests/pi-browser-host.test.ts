@@ -88,19 +88,12 @@ const formReport = () => ({
     },
   ],
 });
-const verify = async (scenario: string, facts: unknown) => {
-  const script =
-    "const {verifyOutcome}=await import(process.argv[1]);console.log(JSON.stringify(verifyOutcome(process.argv[2],JSON.parse(process.argv[3]))));";
-  const result = await run(process.execPath, [
-    "--input-type=module",
-    "-e",
-    script,
-    new URL("./pi-browser-fixture.mjs", import.meta.url).href,
-    scenario,
-    JSON.stringify(facts),
-  ]);
-  return JSON.parse(result.stdout);
-};
+const { verifyOutcome } = await import(
+  new URL("./pi-browser-fixture.mjs", import.meta.url).href
+);
+const verify = async (scenario: string, facts: unknown) =>
+  verifyOutcome(scenario, JSON.parse(JSON.stringify(facts)));
+
 test("form acceptance requires actual delayed evidence, effective settings and confirmed cleanup", async () => {
   const facts = formReport();
   assert.equal((await verify("form", facts)).pass, true);
@@ -599,27 +592,29 @@ for (const mode of [
       await copyFile(journal, guardJournal);
       const script =
         "const handlers=new Map(),tools=new Map();const {default:scope}=await import(process.argv[1]);await scope({on:(n,h)=>handlers.set(n,h),registerTool:d=>tools.set(d.name,d)});let dispatches=0;const event={toolName:'windows_computer_use_set_value',input:{elementId:'new-tab',value:process.env.FIXTURE_BASE+'form'}};const blocked=await handlers.get('tool_call')(event);if(!blocked?.block){await tools.get(event.toolName).execute('id',event.input);dispatches++;}console.log(JSON.stringify({blocked:blocked?.block,dispatches}));";
-      const blocked = await run(
-        process.execPath,
-        [
-          "--input-type=module",
-          "-e",
-          script,
-          new URL(`file://${folder}/tests/pi-browser-fixture.mjs`).href,
-        ],
-        {
-          env: {
-            ...process.env,
-            FIXTURE_BASE: owner?.fixtureUrl,
-            PI_CU_TEST_SPEC: JSON.stringify({
-              base: owner?.fixtureUrl,
-              scenario: "form",
-              auditFile: join(folder, "guard.jsonl"),
-              journal: guardJournal,
-            }),
+      const probe = () =>
+        run(
+          process.execPath,
+          [
+            "--input-type=module",
+            "-e",
+            script,
+            new URL(`file://${folder}/tests/pi-browser-fixture.mjs`).href,
+          ],
+          {
+            env: {
+              ...process.env,
+              FIXTURE_BASE: owner?.fixtureUrl,
+              PI_CU_TEST_SPEC: JSON.stringify({
+                base: owner?.fixtureUrl,
+                scenario: "form",
+                auditFile: join(folder, "guard.jsonl"),
+                journal: guardJournal,
+              }),
+            },
           },
-        },
-      );
+        );
+      const blocked = await probe();
       assert.deepEqual(JSON.parse(blocked.stdout), {
         blocked: true,
         dispatches: 0,
@@ -629,27 +624,7 @@ for (const mode of [
         phase: "running",
       };
       await writeFile(guardJournal, JSON.stringify(running));
-      const allowed = await run(
-        process.execPath,
-        [
-          "--input-type=module",
-          "-e",
-          script,
-          new URL(`file://${folder}/tests/pi-browser-fixture.mjs`).href,
-        ],
-        {
-          env: {
-            ...process.env,
-            FIXTURE_BASE: owner?.fixtureUrl,
-            PI_CU_TEST_SPEC: JSON.stringify({
-              base: owner?.fixtureUrl,
-              scenario: "form",
-              auditFile: join(folder, "guard.jsonl"),
-              journal: guardJournal,
-            }),
-          },
-        },
-      );
+      const allowed = await probe();
       assert.deepEqual(
         JSON.parse(allowed.stdout),
         { dispatches: 1 },

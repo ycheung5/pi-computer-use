@@ -8,6 +8,25 @@ Requirements and behavioral contracts are authoritative in the [specification](s
 
 Keep flat, responsibility-named TypeScript modules in `src/`, tests in `tests/`, and packaged assets in `assets/`. Keep host-specific launcher and Windows interop logic separate from reusable orchestration through modules, without pre-creating nested directories. The [repository layout](README.md#repository-layout) is the navigation guide.
 
+## Design revision
+
+The 2026-11-01 review covers the current runtime module structure, native-helper responsibilities, test runners and documentation ownership. It is a design review with a bounded first cleanup, not a claim that every line or Windows behavior has been revalidated. No product requirement or reference behavior is dropped.
+
+| Area | Finding and design decision |
+| --- | --- |
+| Pi integration, launcher and worker | Preserve the host adapter and worker transport. Native Windows and WSL2 are real launch variations; callers should use the same tool interface. Keep native implementation details behind that interface. |
+| Native execution, stopping and ownership | Preserve independent stopping and the ownership lease. Cleanup and uncertain-effect checks belong with the code that owns the processes or input; deleting them for brevity would weaken the contract. |
+| Argument validation | Keep one existing schema/normalizer responsible for each routed action. Remove unreachable alternatives and repeated identical validation. Native and browser policies differ, so a universal validator is not justified by similar loops alone. |
+| Browser implementation | Session/profile lifecycle, engine-specific observations and action dispatch are distinct responsibilities in the large browser module. Isolate a responsibility when a concrete change needs it; keep its small caller interface and existing external tests. Chromium/Firefox adapters are justified only for genuinely shared operations with different implementations. |
+| Test host setup | Reuse the existing `computerUseHost` adapter rather than rebuilding mocks in individual tests. Retain registration history as well as the current tool map so duplicate registration remains observable. |
+| Test orchestration and verification | Pure report verification runs in process. Process framing, cancellation, real Pi integration and Windows execution retain process tests. Keep one implementation of each guard; portable negative tests and live outcome checks have different jobs. The browser fixture still combines scope enforcement, task briefs and report verification; separate these responsibilities only when it reduces coupling without adding a framework. |
+| Diagnostics | Each retained probe must answer a named unresolved question. Replace obsolete probes with behavior-level regression coverage before removing their command/documentation references. Do not keep adding ownership controllers to test ownership controllers. |
+| Documentation | Requirements stay in the spec, design/delivery here, accepted evidence in validation, and next actions in the ticket queue. Replace repeated status prose rather than append another account of the same result. |
+
+The first cleanup removes duplicate test setup, process wrappers around pure verification, unreachable browser validation and a redundant limit pass. It preserves the existing assertions and strengthens the existing public-worker argument test before deleting validation. It introduces no planner, controller, production dependency or tool interface. The only new file is a type declaration for the reused test host. See [cleanup dispositions](tickets.md#cleanup-dispositions) for the current decisions.
+
+Continue with one responsibility at a time: identify the concrete duplication or coupling, show the smaller interface or deletion, and run the affected existing checks. A file split that merely relocates the same complexity is not a simplification. Full runtime restructuring and remaining live acceptance are not represented as complete by this cleanup.
+
 ## Feasibility gates
 
 These original feasibility gates remain regression obligations. Reuse recorded evidence; repeat checks when changes or missing evidence warrant it:

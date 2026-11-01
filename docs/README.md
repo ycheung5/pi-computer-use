@@ -6,7 +6,7 @@ Read the row matching the task; follow section links before reading whole docume
 | --- | --- |
 | Requirements and scope | [Spec: solution](spec.md#solution), [user stories](spec.md#user-stories), [out of scope](spec.md#out-of-scope) |
 | Implementation contracts | [Spec: implementation decisions](spec.md#implementation-decisions) |
-| Delivery and feasibility | [Plan: detailed milestones](implementation-plan.md#detailed-milestones), [feasibility gates](implementation-plan.md#feasibility-gates) |
+| Delivery, design review and feasibility | [Design revision](implementation-plan.md#design-revision), [plan: detailed milestones](implementation-plan.md#detailed-milestones), [feasibility gates](implementation-plan.md#feasibility-gates) |
 | Test design and release validation | [Spec: testing decisions](spec.md#testing-decisions), [plan: coverage matrix](implementation-plan.md#coverage-matrix) |
 | DSH alignment, phased testing and agent recovery acceptance | [Current phases](implementation-plan.md#detailed-milestones), [baseline audit](validation.md#baseline-identity-and-schema-evidence), [guidance inventory](validation.md#model-visible-guidance-inventory), [scenario catalog](validation.md#alignment-scenario-catalog) |
 | Release checks, capability coverage and pending acceptance | [Validation](validation.md) |

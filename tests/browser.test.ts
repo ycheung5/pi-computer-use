@@ -67,6 +67,25 @@ test("browser tools validate options before touching a document", async () => {
     assert.match(String(unknown.error), /INVALID_ARGUMENTS.*unknown/);
     const missingQuery = await client.execute("find", { browserTab: "t123" });
     assert.match(String(missingQuery.error), /INVALID_ARGUMENTS.*query/);
+    for (const [action, options] of [
+      ["snapshot", { maxDepth: -1 }],
+      ["snapshot", { maxDepth: 13 }],
+      ["snapshot", { maxNodes: 0 }],
+      ["snapshot", { maxNodes: 2001 }],
+      ["accessibility_tree", { maxNodes: 3001 }],
+      ["find", { query: "fixture", maxNodes: 5001 }],
+      ["find", { query: "fixture", maxResults: 201 }],
+      ["snapshot", { maxWidth: -1 }],
+      ["snapshot", { maxWidth: 7681 }],
+      ["wait_for", { condition: "element", query: "fixture", maxDepth: 13 }],
+    ] as const) {
+      const result = await client.execute(action, {
+        browserTab: "t123",
+        ...options,
+      });
+      assert.equal(result.ok, false);
+      assert.match(String(result.error), /INVALID_ARGUMENTS/, action);
+    }
   } finally {
     await client.dispose();
   }

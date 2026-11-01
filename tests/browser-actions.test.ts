@@ -4,11 +4,8 @@ import { once } from "node:events";
 import { createInterface } from "node:readline";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import type {
-  ExtensionAPI,
-  ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
 import { registerComputerUse } from "../src/extension.js";
+import { computerUseHost } from "./native-host.mjs";
 
 test("browser form fixture retains submission shape and resets independent delayed-event evidence", async () => {
   const fixture = spawn(process.execPath, [
@@ -48,17 +45,7 @@ test("browser form fixture retains submission shape and resets independent delay
 });
 
 test("Pi exposes browser actions through the existing computer-use tools", async () => {
-  const tools: ToolDefinition[] = [];
-  const shutdown: Array<() => Promise<void>> = [];
-  const host = {
-    registerTool: (tool: ToolDefinition) => {
-      tools.push(tool);
-    },
-    on: (event: string, handler: () => Promise<void>) => {
-      if (event === "session_shutdown") shutdown.push(handler);
-      return () => {};
-    },
-  } as Pick<ExtensionAPI, "registerTool" | "on">;
+  const { registrations: tools, shutdown, api: host } = computerUseHost();
   registerComputerUse(host, {
     launch: async () => ({
       executable: process.execPath,

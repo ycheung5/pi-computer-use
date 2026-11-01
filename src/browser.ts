@@ -2229,20 +2229,13 @@ function validateBrowserOptions(
     | { properties: Record<string, Rule>; required?: string[] }
     | undefined;
   const properties: Record<string, Rule> =
-    action === "set_value"
+    action === "screenshot"
       ? {
-          elementId: { type: "string", minLength: 1 },
-          value: { type: "string" },
-          fallbackType: { type: "boolean" },
-          restoreClipboard: { type: "boolean" },
+          scope: { type: "string", enum: ["active_window", "desktop"] },
+          maxWidth: { type: "integer", minimum: 0, maximum: 7680 },
+          activate: { type: "boolean" },
         }
-      : action === "screenshot"
-        ? {
-            scope: { type: "string", enum: ["active_window", "desktop"] },
-            maxWidth: { type: "integer", minimum: 0, maximum: 7680 },
-            activate: { type: "boolean" },
-          }
-        : { ...definition?.properties };
+      : { ...definition?.properties };
   properties.browserTab = { type: "string", minLength: 1 };
   for (const key of Object.keys(args)) {
     const rule = properties[key];
@@ -2261,9 +2254,7 @@ function validateBrowserOptions(
     )
       fail("INVALID_ARGUMENTS", `${key} has an unsupported value`);
   }
-  for (const key of action === "set_value"
-    ? ["elementId", "value"]
-    : (definition?.required ?? []))
+  for (const key of definition?.required ?? [])
     if (!Object.hasOwn(args, key))
       fail("INVALID_ARGUMENTS", `${key} is required`);
 }
@@ -2298,21 +2289,6 @@ export async function browse(
         "INVALID_ARGUMENTS",
         "browserTab must be a tab id from list_windows",
       );
-    for (const [key, low, high] of [
-      ["maxDepth", 0, 12],
-      ["maxNodes", 1, 5000],
-      ["maxResults", 1, 200],
-      ["maxWidth", 0, 7680],
-    ] as const) {
-      const value = args[key];
-      if (
-        value !== undefined &&
-        (!Number.isSafeInteger(value) ||
-          Number(value) < low ||
-          Number(value) > high)
-      )
-        return fail("INVALID_ARGUMENTS", `${key} is outside supported bounds`);
-    }
     const id = typeof args.elementId === "string" ? args.elementId : undefined;
     const address = id && elementPattern.exec(id);
     if (
