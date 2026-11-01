@@ -1,15 +1,20 @@
 // Native Windows Pi CLI with a scripted provider; dedicated desktop and real physical key required.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
+import { commandRows, commandWorkerIdentity } from "./pi-host-command.mjs";
 import {
   launchStopHost,
   requireHostContainment,
+  runStopHostPreflight,
+  stopHostActorsAbsent,
+  stopHostParticipants,
+  stopHostSource,
 } from "./pi-host-stop-containment.mjs";
 import { assessHostStop, canDiscardHost } from "./pi-host-stop-outcome.mjs";
 import { observeReleased, waitForStart } from "./stop-busy-coordination.mjs";
@@ -45,19 +50,30 @@ if (selectedMode === "preflight") {
   );
   const mode = process.argv[2] ?? "esc";
   assert.ok(["esc", "shortcut"].includes(mode));
-  requireHostContainment();
-  const cli = process.env.PI_CU_PI_CLI;
-  assert.ok(cli, "PI_CU_PI_CLI must name the installed Pi CLI");
+  const source = await stopHostSource();
+  const prerequisites = [
+    await runStopHostPreflight(),
+    await runStopHostPreflight("host-exit"),
+  ];
+  requireHostContainment(prerequisites, source);
   const statusFile = process.env.PI_CU_STOP_STATUS_FILE;
   if (statusFile)
-    await writeFile(statusFile, JSON.stringify({ phase: "setup", mode }), {
-      flag: "wx",
-    });
-  const status = async (phase) => {
+    await writeFile(
+      statusFile,
+      JSON.stringify({ phase: "setup", mode, coordinatorPid: process.pid }),
+      {
+        flag: "wx",
+      },
+    );
+  const status = async (phase, extra = {}) => {
     if (statusFile)
-      await writeFile(statusFile, JSON.stringify({ phase, mode }));
+      await writeFile(
+        statusFile,
+        JSON.stringify({ phase, mode, coordinatorPid: process.pid, ...extra }),
+      );
   };
   const folder = await mkdtemp(join(tmpdir(), "pi-cu-host-stop-"));
+  await status("setup", { folder });
   const agent = join(folder, "agent");
   await mkdir(agent);
   const settings = join(folder, "settings.json");
@@ -100,7 +116,6 @@ if (selectedMode === "preflight") {
   let host,
     toolStarted = false,
     toolEnded = false,
-    dispatchStopped = false,
     stoppedKey = false,
     settled = false,
     hostClean = false,
@@ -151,9 +166,13 @@ if (selectedMode === "preflight") {
   const observe = async () => {
     const response = line(/^state:/);
     fixture.stdin.write("observe\n");
-    const m = (await response).match(/^state:(\d+):(released|held)$/);
+    const m = (await response).match(/^state:(\d+):(released|held):(\d+)$/);
     assert.ok(m);
-    return { count: Number(m[1]), keysReleased: m[2] === "released" };
+    return {
+      count: Number(m[1]),
+      keysReleased: m[2] === "released",
+      unexpectedCharacters: Number(m[3]),
+    };
   };
   try {
     const match = (await line(/^ready:/)).match(/^ready:(\d+)$/);
@@ -162,22 +181,46 @@ if (selectedMode === "preflight") {
       nativeWindowHandle: Number(match[1]),
       processId: fixture.pid,
     };
-    assert.deepEqual(await observe(), { count: 0, keysReleased: true });
+    assert.deepEqual(await observe(), {
+      count: 0,
+      keysReleased: true,
+      unexpectedCharacters: 0,
+    });
     console.log("Fixture ready. Send start followed by Enter on stdin.");
-    await status("ready");
+    await status("ready", { target });
     await waitForStart(process.stdin, 120000);
-    host = launchStopHost({ cli, folder, agent, settings, target });
+    const trace = join(folder, "worker.jsonl"),
+      gate = join(folder, "input-authorized");
+    host = launchStopHost({ folder, agent, settings, target, trace, gate });
+    const hostClosed = once(host, "close");
+    const hostPin = commandWorkerIdentity(process.execPath, host.pid);
+    assert.ok(hostPin);
+    const until = async (check, label) => {
+      const deadline = Date.now() + 15000;
+      while (true) {
+        const found = check();
+        if (found) return found;
+        if (Date.now() > deadline) throw Error(`Unconfirmed: ${label}`);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    };
+    const rows = () => commandRows(trace);
     host.stdin.on("error", () => {
       extensionErrors++;
     });
     host.stderr.resume();
     const events = createInterface({ input: host.stdout });
     let aborted = false,
+      settlementCount = 0,
+      recoveryResolve,
       settlementResolve,
       settlementReject;
     const settlement = new Promise((resolve, reject) => {
       settlementResolve = resolve;
       settlementReject = reject;
+    });
+    const recovered = new Promise((resolve) => {
+      recoveryResolve = resolve;
     });
     events.on("line", (line) => {
       let event;
@@ -198,19 +241,21 @@ if (selectedMode === "preflight") {
         event.toolName === "windows_computer_use_type_text"
       ) {
         toolEnded = true;
-        const resultText = JSON.stringify(event.result ?? {});
-        dispatchStopped =
-          event.isError === true &&
-          /COMPUTER_USE_STOPPED|AbortError|aborted/i.test(resultText);
       }
       if (
         event.type === "tool_execution_end" &&
         event.toolName === "windows_computer_use_health"
-      )
-        workerPid = event.result?.details?.processId;
+      ) {
+        const pid = event.result?.details?.processId;
+        if (workerPid && pid !== workerPid) extensionErrors++;
+        workerPid ??= pid;
+      }
       if (event.type === "agent_settled") {
-        aborted = event.aborted === true;
-        settlementResolve();
+        settlementCount++;
+        if (settlementCount === 1) {
+          aborted = event.aborted === true;
+          settlementResolve();
+        } else recoveryResolve();
       }
     });
     host.once("error", settlementReject);
@@ -220,16 +265,31 @@ if (selectedMode === "preflight") {
           new Error(`Pi exited before verified settlement: ${code}/${signal}`),
         );
     });
+    inputAttempted = true;
+    host.stdin.write(
+      `${JSON.stringify({ id: "fixture-prompt", type: "prompt", message: "Execute the scripted stop fixture." })}\n`,
+    );
+    await until(() => {
+      try {
+        return (
+          rows().filter(
+            (r) => r.kind === "output" && r.result?.action === "health",
+          ).length === 2
+        );
+      } catch (error) {
+        if (error.code === "ENOENT") return false;
+        throw error;
+      }
+    }, "control setup before typing");
+    const identities = stopHostParticipants(host.pid, hostPin, rows());
+    requireHostContainment(prerequisites, await stopHostSource());
+    await writeFile(gate, "authorized", { flag: "wx" });
     const notification = line(/^started$/, 20000).then(async () => {
       await status("started");
       console.log(
         `Input started. Press ${mode === "esc" ? "Esc" : "Ctrl+Alt+F9"} physically now.`,
       );
     });
-    inputAttempted = true;
-    host.stdin.write(
-      `${JSON.stringify({ id: "fixture-prompt", type: "prompt", message: "Execute the scripted stop fixture." })}\n`,
-    );
     await notification;
     try {
       await bounded(
@@ -252,16 +312,27 @@ if (selectedMode === "preflight") {
       throw error;
     }
     settled = true;
+    await until(
+      () => assessHostStop({ workerTrace: rows() }).cleanupConfirmed,
+      "actual input cleanup and operation release",
+    );
     const before = await observeReleased(
       observe,
       (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     );
     await new Promise((resolve) => setTimeout(resolve, 500));
     const after = await observe();
+    host.stdin.write(
+      `${JSON.stringify({ id: "released-health", type: "prompt", message: "Observe health after human handback." })}\n`,
+    );
+    await bounded(
+      recovered,
+      15000,
+      "Post-release health settlement unconfirmed",
+    );
     const evidence = {
       toolStarted,
       toolEnded,
-      dispatchStopped,
       settled,
       aborted,
       extensionErrors,
@@ -270,15 +341,34 @@ if (selectedMode === "preflight") {
       after: after.count,
       total: 2000,
       keysReleased: before.keysReleased && after.keysReleased,
+      unexpectedCharacters: Math.max(
+        before.unexpectedCharacters,
+        after.unexpectedCharacters,
+      ),
+      workerTrace: rows(),
+      abortRequested,
     };
     const assessment = assessHostStop(evidence);
     assert.ok(
       Number.isSafeInteger(workerPid) && workerPid > 0,
       "Worker identity unavailable",
     );
+    assert.equal(
+      assessment.releaseConfirmed,
+      true,
+      "INPUT_OR_CONTROL_RELEASE_UNCONFIRMED: retain owners",
+    );
     host.stdin.end();
-    if (host.exitCode === null)
-      await bounded(once(host, "exit"), 10000, "Pi orderly exit unconfirmed");
+    const hostExit = await bounded(
+      hostClosed,
+      15000,
+      "Pi orderly exit unconfirmed",
+    );
+    assert.deepEqual(hostExit, [0, null]);
+    await until(
+      () => stopHostActorsAbsent(identities),
+      "recorded participant exit",
+    );
     let workerExited = false;
     try {
       process.kill(workerPid, 0);
@@ -305,10 +395,11 @@ if (selectedMode === "preflight") {
     assert.equal(assessment.ok, true);
   } finally {
     if (inputAttempted && (!settled || !hostClean)) {
-      if (!settled && !abortRequested && host?.exitCode === null) {
+      if (!abortRequested && host?.exitCode === null) {
         host.stdin.write(
-          `${JSON.stringify({ id: "fixture-abort", type: "abort" })}\n`,
+          `${JSON.stringify({ id: "fixture-retain-stop", type: "prompt", message: "/computer-stop" })}\n`,
         );
+        abortRequested = true;
       }
       console.error(
         JSON.stringify({
@@ -332,5 +423,6 @@ if (selectedMode === "preflight") {
       maxRetries: 10,
       retryDelay: 100,
     });
+    process.stdin.destroy();
   }
 }

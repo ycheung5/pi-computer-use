@@ -148,24 +148,89 @@ export default async function provider(pi: ExtensionAPI): Promise<void> {
     !Number.isSafeInteger(target.processId)
   )
     throw new Error("PI_CU_HOST_STOP_TARGET_INVALID");
+  const gate = process.env.PI_CU_HOST_STOP_GATE;
+  if (!gate) throw new Error("PI_CU_HOST_STOP_GATE_REQUIRED");
+  let authorized = false,
+    typed = false,
+    initialized = false;
+  const textArgs = {
+    ...target,
+    text: "x".repeat(2000),
+    method: "sendinput",
+    activate: true,
+  };
+  pi.on("tool_call", (event) => {
+    const a = JSON.stringify(event.input);
+    if (event.toolName === "windows_computer_use_health" && a === "{}") return;
+    if (
+      event.toolName === "windows_computer_use_click" &&
+      !initialized &&
+      a === JSON.stringify({ x: 0, y: 0, nativeWindowHandle: 1, processId: 1 })
+    ) {
+      initialized = true;
+      return;
+    }
+    if (
+      event.toolName === "windows_computer_use_type_text" &&
+      authorized &&
+      !typed &&
+      a === JSON.stringify(textArgs)
+    ) {
+      typed = true;
+      return;
+    }
+    return { block: true, reason: "OWNED_STOP_FIXTURE_SCOPE" };
+  });
   const faux = fauxProvider({
     provider: "pi-cu-stop-host",
     api: "pi-cu-stop-host-fixture",
     models: [{ id: "fixture", contextWindow: 200000, maxTokens: 2000 }],
   });
-  faux.setResponses([
+  const health = () =>
     fauxAssistantMessage(fauxToolCall("windows_computer_use_health", {}), {
       stopReason: "toolUse",
-    }),
+    });
+  faux.setResponses([
+    health(),
     fauxAssistantMessage(
-      fauxToolCall("windows_computer_use_type_text", {
-        ...target,
-        text: "x".repeat(2000),
-        method: "sendinput",
-        activate: true,
+      fauxToolCall("windows_computer_use_click", {
+        x: 0,
+        y: 0,
+        nativeWindowHandle: 1,
+        processId: 1,
       }),
       { stopReason: "toolUse" },
     ),
+    health(),
+    async (_context, options) => {
+      const { readFile, unlink } = await import("node:fs/promises");
+      const { setTimeout } = await import("node:timers/promises");
+      const deadline = Date.now() + 120000;
+      while (true) {
+        options?.signal?.throwIfAborted();
+        try {
+          if ((await readFile(gate, "utf8")) !== "authorized")
+            throw new Error("INVALID_INPUT_GATE");
+          await unlink(gate);
+          authorized = true;
+          break;
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !("code" in error) ||
+            error.code !== "ENOENT"
+          )
+            throw error;
+        }
+        if (Date.now() > deadline) throw new Error("INPUT_GATE_TIMEOUT");
+        await setTimeout(25, undefined, { signal: options?.signal });
+      }
+      return fauxAssistantMessage(
+        fauxToolCall("windows_computer_use_type_text", textArgs),
+        { stopReason: "toolUse" },
+      );
+    },
+    health(),
     fauxAssistantMessage("Scripted host fixture finished."),
   ]);
   pi.registerProvider(faux.provider);

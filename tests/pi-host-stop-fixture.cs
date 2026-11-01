@@ -23,7 +23,8 @@ class StopBusyFixture {
         if(command=="observe") form.BeginInvoke((Action)delegate {
           bool released=true;
           foreach(int key in new int[]{1,2,4,16,17,18,27,91,92,120}) if(GetAsyncKeyState(key)<0) released=false;
-          Reply("state:"+count+":"+(released?"released":"held"));
+          int unexpected=0;foreach(char c in edit.Text)if(c!='x')unexpected++;
+          Reply("state:"+count+":"+(released?"released":"held")+":"+unexpected);
         });
         if(command=="stop") { form.BeginInvoke((Action)delegate { form.Close(); }); return; }
       }

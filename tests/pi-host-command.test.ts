@@ -289,6 +289,7 @@ test("command host selector plans safely without a build or child-command PATH",
       "pi-host-stop-containment.mjs",
       "pi-host-stop-outcome.mjs",
       "stop-busy-coordination.mjs",
+      "stop-busy-outcome.mjs",
       "pi-visual-host.mjs",
       "pi-visual-fixture.mjs",
     ])
