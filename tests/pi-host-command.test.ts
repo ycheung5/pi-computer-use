@@ -8,6 +8,49 @@ import test from "node:test";
 
 const helper = () =>
   import(new URL("./pi-host-command.mjs", import.meta.url).href);
+test("host participant receipt records child lifetime and cleanup without payloads", async () => {
+  const { commandObserver } = await helper();
+  const folder = await mkdtemp(join(tmpdir(), "pi-command-participants-"));
+  try {
+    const trace = join(folder, "trace.jsonl");
+    const source = `import {spawn} from 'node:child_process';const c=spawn(process.execPath,['-e','process.exit(0)','PRIVATE_ARGUMENT'],{env:{PRIVATE_ENV:'PRIVATE_VALUE'}});c.on('close',()=>process.stdout.write(JSON.stringify({id:9,result:{ok:false,action:'click',cleanupConfirmed:true,error:'TARGET_IDENTITY_CHANGED'}})+'\\n'));`;
+    const child = spawn(process.execPath, [
+      "--import",
+      commandObserver(trace, null, true),
+      "--input-type",
+      "module",
+      "-e",
+      source,
+    ]);
+    const closed = once(child, "close");
+    child.stdout.resume();
+    child.stderr.resume();
+    child.stdin.end();
+    assert.deepEqual(await closed, [0, null]);
+    const text = await readFile(trace, "utf8");
+    const rows = text
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const started = rows.find((row) => row.kind === "child_spawn");
+    assert.equal(started?.executable, process.execPath);
+    assert.ok(Number.isSafeInteger(started?.childPid) && started.childPid > 0);
+    const ended = rows.find((row) => row.kind === "child_exit");
+    assert.equal(ended?.childPid, started.childPid);
+    assert.equal(ended?.code, 0);
+    assert.equal(ended?.signal, null);
+    assert.equal(
+      rows.find((row) => row.id === 9)?.result.cleanupConfirmed,
+      true,
+    );
+    assert.equal(
+      /PRIVATE_ARGUMENT|PRIVATE_ENV|PRIVATE_VALUE/.test(text),
+      false,
+    );
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
 test("passive host observer preserves real stdin/stdout frames and callbacks", async () => {
   const { commandObserver } = await helper();
   const folder = await mkdtemp(join(tmpdir(), "pi-command-observer-"));

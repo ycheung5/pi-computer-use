@@ -11,17 +11,27 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { keepVisualOwnership } from "./pi-visual-host.mjs";
 
-export function commandObserver(file, navigationHash = null) {
+export function commandObserver(
+  file,
+  navigationHash = null,
+  participants = false,
+) {
   const source = `import {appendFileSync} from 'node:fs';import {StringDecoder} from 'node:string_decoder';import {createHash} from 'node:crypto';
 let sequence=0,fault=false;const file=${JSON.stringify(file)},navigationHash=${JSON.stringify(navigationHash)};
 const record=row=>{try{appendFileSync(file,JSON.stringify({sequence:++sequence,pid:process.pid,time:Date.now(),monotonicMs:performance.now(),fault,...row})+'\\n',{mode:0o600});}catch{fault=true;}};
 record({kind:'ready',executable:process.execPath,worker:process.argv[1],cwd:process.cwd(),settingsFile:process.env.PI_CU_SETTINGS_FILE});
 const decoder={input:new StringDecoder('utf8'),output:new StringDecoder('utf8')},buffer={input:'',output:''};
-const observe=(kind,chunk)=>{try{buffer[kind]+=typeof chunk==='string'?chunk:decoder[kind].write(chunk);let end;while((end=buffer[kind].indexOf('\\n'))>=0){const line=buffer[kind].slice(0,end);buffer[kind]=buffer[kind].slice(end+1);const r=JSON.parse(line),d=r.result;const nav=navigationHash&&r.action==='set_value'&&typeof r.args?.value==='string'&&typeof r.args?.elementId==='string'&&(r.args.elementId==='new-tab'||r.args.elementId.endsWith(':address'))&&createHash('sha256').update(r.args.value).digest('hex')===navigationHash;record({kind,navigationHash:nav?navigationHash:undefined,target:nav?(r.args.elementId==='new-tab'?'new-tab':'address'):undefined,id:r.id,action:r.action,operationId:r.operationId,milliseconds:r.args?.milliseconds,stop:r.stop,cancel:r.cancel,event:r.event,phase:r.phase,result:d?{ok:d.ok,action:d.action,error:navigationHash&&d.error&&!['COMPUTER_USE_STOPPED','COMPUTER_USE_CANCELLED'].includes(d.error)?'OTHER_WORKER_ERROR':d.error,processId:d.processId,released:d.released}:undefined});}if(buffer[kind].length>65536){fault=true;record({kind:'fault',error:'oversized protocol frame'});}}catch{fault=true;record({kind:'fault',error:'malformed protocol frame'});}};
+const observe=(kind,chunk)=>{try{buffer[kind]+=typeof chunk==='string'?chunk:decoder[kind].write(chunk);let end;while((end=buffer[kind].indexOf('\\n'))>=0){const line=buffer[kind].slice(0,end);buffer[kind]=buffer[kind].slice(end+1);const r=JSON.parse(line),d=r.result;const nav=navigationHash&&r.action==='set_value'&&typeof r.args?.value==='string'&&typeof r.args?.elementId==='string'&&(r.args.elementId==='new-tab'||r.args.elementId.endsWith(':address'))&&createHash('sha256').update(r.args.value).digest('hex')===navigationHash;record({kind,navigationHash:nav?navigationHash:undefined,target:nav?(r.args.elementId==='new-tab'?'new-tab':'address'):undefined,id:r.id,action:r.action,operationId:r.operationId,milliseconds:r.args?.milliseconds,stop:r.stop,cancel:r.cancel,event:r.event,phase:r.phase,result:d?{ok:d.ok,action:d.action,error:navigationHash&&d.error&&!['COMPUTER_USE_STOPPED','COMPUTER_USE_CANCELLED'].includes(d.error)?'OTHER_WORKER_ERROR':d.error,processId:d.processId,released:d.released,cleanupConfirmed:d.cleanupConfirmed,control:d.control?{listenerProcessId:d.control.listenerProcessId,exclusiveControl:d.control.exclusiveControl,hookInstalled:d.control.hookInstalled}:undefined}:undefined});}if(buffer[kind].length>65536){fault=true;record({kind:'fault',error:'oversized protocol frame'});}}catch{fault=true;record({kind:'fault',error:'malformed protocol frame'});}};
 const emit=process.stdin.emit;process.stdin.emit=function(...args){if(args[0]==='data')observe('input',args[1]);return Reflect.apply(emit,this,args);};
 const write=process.stdout.write;process.stdout.write=function(...args){observe('output',args[0]);return Reflect.apply(write,this,args);};`;
+  const children = participants
+    ? `
+const {default:cp}=await import('node:child_process');const {syncBuiltinESMExports}=await import('node:module');
+const spawn=cp.spawn;cp.spawn=function(...args){const child=Reflect.apply(spawn,this,args);child.once('spawn',()=>record({kind:'child_spawn',childPid:child.pid,executable:args[0]}));child.once('exit',(code,signal)=>record({kind:'child_exit',childPid:child.pid,code,signal}));return child;};syncBuiltinESMExports();`
+    : "";
   return (
-    "data:text/javascript;base64," + Buffer.from(source).toString("base64")
+    "data:text/javascript;base64," +
+    Buffer.from(source + children).toString("base64")
   );
 }
 

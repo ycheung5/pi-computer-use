@@ -7,6 +7,45 @@ import {
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default async function provider(pi: ExtensionAPI): Promise<void> {
+  if (process.env.PI_CU_HOST_STOP_PREFLIGHT === "1") {
+    // The only pointer request has a deliberately invalid HWND/PID. No fallback.
+    pi.on("tool_call", (event) => {
+      const a = event.input;
+      const health =
+        event.toolName === "windows_computer_use_health" &&
+        Object.keys(a).length === 0;
+      const wait =
+        event.toolName === "windows_computer_use_wait" &&
+        JSON.stringify(a) === JSON.stringify({ milliseconds: 30000 });
+      const invalid =
+        event.toolName === "windows_computer_use_click" &&
+        JSON.stringify(a) ===
+          JSON.stringify({ x: 0, y: 0, nativeWindowHandle: 1, processId: 1 });
+      if (!health && !wait && !invalid)
+        return { block: true, reason: "NO_INPUT_PREFLIGHT_SCOPE" };
+    });
+    const passive = fauxProvider({
+      provider: "pi-cu-stop-host",
+      api: "pi-cu-stop-host-fixture",
+      models: [{ id: "fixture", contextWindow: 200000, maxTokens: 2000 }],
+    });
+    const tool = (name: string, args: Record<string, number>) =>
+      fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" });
+    passive.setResponses([
+      tool("windows_computer_use_health", {}),
+      tool("windows_computer_use_click", {
+        x: 0,
+        y: 0,
+        nativeWindowHandle: 1,
+        processId: 1,
+      }),
+      tool("windows_computer_use_health", {}),
+      tool("windows_computer_use_wait", { milliseconds: 30000 }),
+      fauxAssistantMessage("No-input host preflight finished."),
+    ]);
+    pi.registerProvider(passive.provider);
+    return;
+  }
   if (process.env.PI_CU_HOST_STOP_COMMAND) {
     const { readFileSync, appendFileSync } = await import("node:fs");
     // Load built runtime modules while checking their types before a build exists.

@@ -1,18 +1,27 @@
 // Native Windows Pi CLI with a scripted provider; dedicated desktop and real physical key required.
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { requireHostContainment } from "./pi-host-stop-containment.mjs";
+import {
+  launchStopHost,
+  requireHostContainment,
+} from "./pi-host-stop-containment.mjs";
 import { assessHostStop, canDiscardHost } from "./pi-host-stop-outcome.mjs";
 import { observeReleased, waitForStart } from "./stop-busy-coordination.mjs";
 
 const selectedMode = process.argv[2] ?? "esc";
-if (selectedMode === "command") {
+if (selectedMode === "preflight") {
+  const { runStopHostPreflight } = await import(
+    "./pi-host-stop-containment.mjs"
+  );
+  assert.ok(process.argv.length <= 4, "Unknown preflight arguments");
+  await runStopHostPreflight(process.argv[3] ?? "command");
+} else if (selectedMode === "command") {
   const { runPassiveCommandStop, commandOptions } = await import(
     "./pi-host-command.mjs"
   );
@@ -39,12 +48,6 @@ if (selectedMode === "command") {
   requireHostContainment();
   const cli = process.env.PI_CU_PI_CLI;
   assert.ok(cli, "PI_CU_PI_CLI must name the installed Pi CLI");
-  const extension = fileURLToPath(
-    new URL("../dist/extension.js", import.meta.url),
-  );
-  const provider = fileURLToPath(
-    new URL("./pi-host-stop-provider.ts", import.meta.url),
-  );
   const statusFile = process.env.PI_CU_STOP_STATUS_FILE;
   if (statusFile)
     await writeFile(statusFile, JSON.stringify({ phase: "setup", mode }), {
@@ -163,38 +166,7 @@ if (selectedMode === "command") {
     console.log("Fixture ready. Send start followed by Enter on stdin.");
     await status("ready");
     await waitForStart(process.stdin, 120000);
-    const args = [
-      cli,
-      "--mode",
-      "rpc",
-      "--no-session",
-      "--no-extensions",
-      "--no-context-files",
-      "--no-skills",
-      "--no-prompt-templates",
-      "--no-themes",
-      "--no-mcp",
-      "--offline",
-      "--provider",
-      "pi-cu-stop-host",
-      "--model",
-      "fixture",
-      "-e",
-      extension,
-      "-e",
-      provider,
-    ];
-    host = spawn(process.execPath, args, {
-      cwd: folder,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        PI_CODING_AGENT_DIR: agent,
-        PI_CU_SETTINGS_FILE: settings,
-        PI_OFFLINE: "1",
-        PI_CU_HOST_STOP_TARGET: JSON.stringify(target),
-      },
-    });
+    host = launchStopHost({ cli, folder, agent, settings, target });
     host.stdin.on("error", () => {
       extensionErrors++;
     });
