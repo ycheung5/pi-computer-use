@@ -1,17 +1,36 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, readFileSync } from "node:fs";
-export const scenarios = ["form", "advanced", "stale", "mixed"];
-export async function formState(base) {
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+export const scenarios = [
+  "form",
+  "advanced",
+  "stale",
+  "mixed",
+  "partial",
+  "cancel",
+];
+// Both local fixture consumers run their HTTP reads in Windows, including from a WSL Pi host.
+async function fixtureState(base, paths) {
   const { nativeWorkerLaunch } = await import("../dist/launcher.js");
   const native = await nativeWorkerLaunch();
-  const js = `Promise.all([fetch(${JSON.stringify(base + "form/state")}).then(r=>r.json()),fetch(${JSON.stringify(base + "form/delayed/state")}).then(r=>r.json())]).then(([payload,events])=>console.log(JSON.stringify({payload,events})))`;
+  const js = `Promise.all(${JSON.stringify(paths)}.map(path=>fetch(${JSON.stringify(base)}+path,{signal:AbortSignal.timeout(2000)}).then(r=>{if(!r.ok)throw Error('FIXTURE_HTTP_'+r.status);return r.json()}))).then(rows=>console.log(JSON.stringify(rows)))`;
   return JSON.parse(
     execFileSync(native.executable, ["-e", js], {
       encoding: "utf8",
-      timeout: 10000,
+      timeout: 5000,
       stdio: ["ignore", "pipe", "ignore"],
     }),
   );
+}
+export async function formState(base) {
+  const [payload, events] = await fixtureState(base, [
+    "form/state",
+    "form/delayed/state",
+  ]);
+  return { payload, events };
+}
+export async function heldState(base) {
+  const [held] = await fixtureState(base, ["held/state"]);
+  return held;
 }
 const allowed = new Set([
   "snapshot",
@@ -90,15 +109,26 @@ export default async function (pi) {
       () => {},
     );
   }
-  const { default: computerUse } = await import("../dist/extension.js");
+  const { default: computerUse, registerComputerUse } = await import(
+    "../dist/extension.js"
+  );
   if (!/^http:\/\/127\.0\.0\.1:\d+\/$/.test(base ?? ""))
     throw Error("trusted fixture base required");
   if (!scenarios.includes(scenario)) throw Error("unknown fixture scenario");
   const form = base + "form",
     advanced = base + "advanced",
-    initial = scenario === "advanced" ? advanced : form,
+    initial =
+      scenario === "cancel"
+        ? config.cancel.heldUrl
+        : scenario === "advanced"
+          ? advanced
+          : form,
     urls = new Set(
-      scenario === "advanced" ? [advanced, base + "child"] : [form, advanced],
+      scenario === "cancel"
+        ? [initial]
+        : scenario === "advanced"
+          ? [advanced, base + "child"]
+          : [form, advanced],
     );
   const tabs = new Set(),
     files = new Set();
@@ -136,6 +166,89 @@ export default async function (pi) {
         return before ? deny("fixture audit or state unavailable") : undefined;
       }
     };
+  let cancelSupport;
+  if (scenario === "cancel") {
+    if (
+      !initial.startsWith(base + "held-") ||
+      !/^[a-f0-9]{64}$/.test(config.cancel.hash)
+    )
+      throw Error("owned held fixture required");
+    cancelSupport = await import("./pi-host-command.mjs");
+  }
+  function watchHeld(ctx) {
+    let busy = false,
+      closed = false,
+      pin;
+    const tick = async () => {
+      if (busy || closed || state.stopped || state.guardFault) return;
+      busy = true;
+      try {
+        let rows;
+        try {
+          rows = cancelSupport.commandRows(config.cancel.trace);
+        } catch (error) {
+          if (error.code === "ENOENT") return;
+          throw error;
+        }
+        const ready = rows.find((row) => row.kind === "ready");
+        if (ready && !pin) {
+          pin = cancelSupport.commandWorkerIdentity(
+            config.cancel.windowsNode,
+            ready.pid,
+          );
+          if (
+            !pin ||
+            pin.executable.toLowerCase() !== ready.executable.toLowerCase()
+          )
+            throw Error("worker identity unknown");
+          audit({ type: "cancel_worker_pin", pin });
+        }
+        const held = await heldState(base);
+        if (closed) return;
+        if (held.entries > 1 || held.completed > 0)
+          throw Error("held navigation entry ambiguous or completed");
+        const pending = cancelSupport.heldNavigationEntry(
+          cancelSupport.commandRows(config.cancel.trace),
+          held,
+          config.cancel.hash,
+        );
+        if (!pending || !pin) return;
+        if (pending.pid !== pin.pid || typeof ctx?.abort !== "function")
+          throw Error("real SDK abort context unavailable");
+        audit({
+          type: "controlled_cancel",
+          pending,
+          witness: held,
+          workerPin: pin,
+        });
+        state.stopped = true; // Fence dispatch before the actual SDK abort.
+        ctx.abort();
+      } catch (error) {
+        state.guardFault = true;
+        try {
+          const owner = JSON.parse(readFileSync(journal, "utf8"));
+          writeFileSync(
+            journal,
+            JSON.stringify({
+              ...owner,
+              phase: "retained",
+              reason: "cancel-observation-unknown",
+              error: String(error),
+            }),
+          );
+        } catch {
+          /* Local fault fence remains authoritative even if audit storage failed. */
+        }
+      } finally {
+        busy = false;
+      }
+    };
+    const timer = setInterval(() => void tick(), 50);
+    return () => {
+      closed = true;
+      clearInterval(timer);
+    };
+  }
   const oracle = () => formState(base);
   const before = (e) => {
     if (state.guardFault)
@@ -472,13 +585,51 @@ export default async function (pi) {
               if (!stale || tree.details?.ok !== true) state.haltWrites = true;
               return result;
             }
+            if (
+              scenario === "cancel" &&
+              n === "set_value" &&
+              args.value === initial
+            ) {
+              const result = definition.execute(...params),
+                stopWatch = watchHeld(ctx);
+              try {
+                const value = await result;
+                if (state.guardFault)
+                  await new Promise(() => setInterval(() => {}, 60000));
+                return value;
+              } catch (error) {
+                if (state.guardFault)
+                  await new Promise(() => setInterval(() => {}, 60000));
+                throw error;
+              } finally {
+                stopWatch();
+              }
+            }
             return definition.execute(...params);
           },
         });
       };
     },
   });
-  computerUse(wrapped);
+  if (scenario === "cancel") {
+    const { nativeWorkerLaunch } = await import("../dist/launcher.js");
+    registerComputerUse(wrapped, {
+      launch: async (signal) => {
+        const launch = await nativeWorkerLaunch(signal);
+        return {
+          ...launch,
+          args: [
+            "--import",
+            cancelSupport.commandObserver(
+              config.cancel.windowsTrace,
+              config.cancel.hash,
+            ),
+            ...launch.args,
+          ],
+        };
+      },
+    });
+  } else computerUse(wrapped);
 }
 
 const first = {
@@ -514,6 +665,10 @@ export function brief(scenario, source) {
     return `At ${form}, submit name “${mixedExpected.name}”, notes “${mixedExpected.notes}”, accept terms and choose Beta. The submitted form returns a confirmation code. In our owned native window HWND ${source.native.nativeWindowHandle}, PID ${source.native.processId}, title ${JSON.stringify(source.native.title)}, invoke the one neutral CODE button bearing that returned code exactly once and preserve the other button. Confirm the browser's native-completion acknowledgement and report the code. Use only this local browser tab and owned native window with public observed references. Native controls require semantic Invoke with fallbackClick:false and activate:false; snapshots must use captureWindow:true for owned-window images. No keyboard, pointer, clipboard, launch, other windows or desktop images. Reobserve after conclusive no-effect refusal; do not replay uncertain effects; stop on actual cancellation or unknown cleanup.`;
   if (scenario === "form")
     return `At ${form}, submit name “${formExpected.name}”, notes “${formExpected.notes}”, accept terms and choose Beta. Start the delayed result and verify “Delayed result ready”, preserving disabled/read-only fields.${safety}`;
+  if (scenario === "cancel")
+    return `Open ${source.heldUrl}, verify its confirmation, and report the result.${safety}`;
+  if (scenario === "partial")
+    return `At ${form}, submit name “${formExpected.name}”, notes “${formExpected.notes}”, accept terms and choose Beta. Verify the submission and preserve disabled/read-only fields.${safety}`;
   if (scenario === "advanced")
     return `At ${advanced}, visit ${source.url}child, verify its identity and return to the advanced document. Answer its prompt “fixture answer 中文”, reject confirmation and dismiss the alert. Upload only ${source.upload} through Upload fixture; download the fixture once and report its completed owned file path. Verify the outcomes.${safety}`;
   return `At ${form}, submit a first form: name “${first.name}”, notes “${first.notes}”, terms accepted, Alpha. In the same tab visit ${advanced} and answer its prompt “continue 中文”. Return to a fresh ${form} and submit name “${second.name}”, notes “${second.notes}”, terms accepted, Beta. Verify both submissions and prompt response; preserve disabled/read-only fields. A controlled document refresh may occur.${safety}`;
@@ -616,6 +771,206 @@ function mixedStatusEvidence(d, request, known) {
   return names;
 }
 
+function partialRecovery(f) {
+  const requests = new Map(),
+    known = new Map(),
+    statuses = new Map(),
+    effects = new Set(),
+    limitations = new Set();
+  const reads = new Set([
+    "find",
+    "snapshot",
+    "accessibility_tree",
+    "element_info",
+  ]);
+  let tab,
+    partial = false,
+    edited = false,
+    submitted = false,
+    confirmed = false,
+    bad = false,
+    focused;
+  const preserved = new Set();
+  for (const e of f.audit ?? []) {
+    if (e.type === "guard_tool_call") {
+      requests.set(e.toolCallId, e);
+      continue;
+    }
+    const request = requests.get(e.toolCallId),
+      d = e.details;
+    if (e.type !== "guard_tool_result" || !request || d?.ok !== true) continue;
+    const action = request.toolName?.replace(/^windows_computer_use_/, ""),
+      args = request.input ?? {};
+    const nodes = [
+      ...(d.nodes ?? []),
+      ...(d.matches ?? []),
+      ...(d.results ?? []),
+      ...(d.element ? [d.element] : []),
+    ];
+    if (action === "set_value" && args.elementId === "new-tab") {
+      if (
+        partial ||
+        edited ||
+        submitted ||
+        args.value !== f.base + "form" ||
+        d.tab?.url !== args.value
+      )
+        return { pass: false, limitations: [] };
+      tab = d.tab.id;
+      partial =
+        d.source === "browser-accessibility" &&
+        d.nodeCount === 500 &&
+        d.nodes?.length === 500 &&
+        d.truncated === true &&
+        d.truncationReason === "budget" &&
+        !nodes.some(
+          (n) => n.id && ["Name", "Notes", "Submit form"].includes(n.name),
+        );
+      if (!partial) return { pass: false, limitations: [] };
+      continue;
+    }
+    if (!partial || d.tab?.id !== tab || d.tab?.url !== f.base + "form")
+      continue;
+    if (reads.has(action)) {
+      for (const node of nodes) {
+        // AX may return a button and its StaticText with the same opaque ID.
+        if (
+          typeof node.id === "string" &&
+          ["textbox", "checkbox", "combobox", "option", "button"].includes(
+            node.role,
+          )
+        ) {
+          const previous = known.get(node.id);
+          if (
+            previous &&
+            (previous.name !== node.name || previous.role !== node.role)
+          )
+            return {
+              pass: false,
+              limitations: ["contradictory observed actionable identity"],
+            };
+          known.set(node.id, node);
+        }
+        if (
+          submitted &&
+          node.name === "Disabled field" &&
+          node.disabled === true &&
+          node.value === "Disabled value"
+        )
+          preserved.add("disabled");
+        if (
+          submitted &&
+          node.name === "Read-only field" &&
+          node.readonly === true &&
+          node.value === "Read-only value"
+        )
+          preserved.add("readonly");
+      }
+    }
+    const node = known.get(args.elementId);
+    if (action === "focus" || (action === "click" && node?.role === "textbox"))
+      focused = node;
+    if (reads.has(action))
+      for (const candidate of nodes)
+        if (candidate.focused === true && known.has(candidate.id))
+          focused = candidate;
+    if (
+      ["set_value", "type_text", "click", "invoke", "keypress"].includes(action)
+    ) {
+      if (!known.size || (args.elementId && !node)) {
+        bad = true;
+        continue;
+      }
+      // Browser type_text uses actual focus, not its optional elementId hint.
+      const target = action === "type_text" ? focused : node;
+      if (
+        ["set_value", "type_text"].includes(action) &&
+        target?.role === "textbox" &&
+        ["Name", "Notes"].includes(target.name)
+      ) {
+        const expected =
+          target.name === "Name" ? formExpected.name : formExpected.notes;
+        const text = action === "set_value" ? args.value : args.text;
+        if (
+          typeof text === "string" &&
+          text.length &&
+          (action === "set_value" ? text === expected : expected.includes(text))
+        )
+          effects.add(target.name);
+      }
+      if (action === "type_text" && !target)
+        limitations.add("typing target lacks observed focus proof");
+      if (
+        target?.name === "Accept terms" &&
+        target.role === "checkbox" &&
+        (["click", "invoke"].includes(action) ||
+          (action === "set_value" &&
+            /^(true|1|yes|on|checked)$/i.test(String(args.value).trim())))
+      )
+        effects.add("terms");
+      if (
+        (target?.name === "Choice" &&
+          target.role === "combobox" &&
+          action === "set_value" &&
+          String(args.value).toLowerCase() === "beta") ||
+        (target?.name === "Beta" &&
+          target.role === "option" &&
+          ["click", "invoke"].includes(action))
+      )
+        effects.add("choice");
+      edited = effects.size === 4;
+      const enter =
+        action === "keypress" &&
+        args.keys?.some((key) => String(key).toLowerCase() === "enter");
+      if (
+        edited &&
+        [...known.values()].some(
+          (n) => n.name === "Submit form" && n.role === "button",
+        ) &&
+        ((["click", "invoke"].includes(action) &&
+          node?.name === "Submit form" &&
+          node.role === "button") ||
+          enter)
+      )
+        submitted = true;
+      if (
+        action === "keypress" &&
+        !submitted &&
+        ["checkbox", "combobox", "option"].includes(focused?.role)
+      )
+        limitations.add(
+          "keyboard field selection not covered by this verifier",
+        );
+      if (action === "keypress") focused = undefined;
+    }
+    if (submitted && (reads.has(action) || action === "wait_for"))
+      for (const name of mixedStatusEvidence(d, request, statuses)) {
+        if (!name.startsWith("Form confirmation: ")) continue;
+        try {
+          if (
+            exact(
+              JSON.parse(name.slice("Form confirmation: ".length)),
+              formExpected,
+            )
+          )
+            confirmed = true;
+        } catch {}
+      }
+  }
+  return {
+    pass:
+      partial &&
+      edited &&
+      submitted &&
+      confirmed &&
+      !bad &&
+      preserved.size === 2 &&
+      exact(f.oracle?.payload, formExpected) &&
+      exact(f.oracle?.events, { submissions: 1, starts: 0, ready: 0 }),
+    limitations: [...limitations],
+  };
+}
+
 export function verifyOutcome(scenario, f) {
   const provenance =
     f.effective?.length > 0 &&
@@ -627,15 +982,37 @@ export function verifyOutcome(scenario, f) {
     );
   const settled =
     f.lifecycle?.settled === true &&
-    f.lifecycle.aborted === false &&
+    f.lifecycle.aborted === (scenario === "cancel") &&
     f.lifecycle.exitCode === 0 &&
     f.lifecycle.parseError !== true;
   const cleanup =
     f.cleanup?.profileEmpty === true &&
     f.cleanup.processCount === 0 &&
     f.cleanup.fixtureExited === true;
-  let outcome = false;
-  if (scenario === "mixed") {
+  let outcome = false,
+    partialResult;
+  if (scenario === "cancel") {
+    const c = f.cancel;
+    outcome =
+      c?.assessment?.status === "observed" &&
+      c.assessment.response?.id === c.pending?.id &&
+      c.assessment.response?.pid === c.pending?.pid &&
+      ["COMPUTER_USE_STOPPED", "COMPUTER_USE_CANCELLED"].includes(
+        c.assessment.response?.result?.error,
+      ) &&
+      c.assessment.acknowledgment?.result?.released === true &&
+      c.http?.urlHash === c.pending?.navigationHash &&
+      c.workerRetired === true &&
+      c.http?.entries === 1 &&
+      c.http.completed === 0 &&
+      c.http.closed === 1 &&
+      c.noPostStopBusiness === true &&
+      c.noCompletionClaim === true &&
+      c.triggerCount === 1;
+  } else if (scenario === "partial") {
+    partialResult = partialRecovery(f);
+    outcome = partialResult.pass;
+  } else if (scenario === "mixed") {
     const native = f.native,
       code = native?.initial?.approve?.code,
       ids = new Set(),
@@ -872,6 +1249,9 @@ export function verifyOutcome(scenario, f) {
       freshAction;
   }
   return {
+    ...(partialResult
+      ? { verifierLimitations: partialResult.limitations }
+      : {}),
     provenance: Boolean(provenance),
     settled,
     cleanup,

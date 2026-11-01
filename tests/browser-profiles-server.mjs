@@ -1,8 +1,10 @@
 // Dedicated cookie origin and storage root; no daily profiles or real sign-ins.
 
 import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import {
+  access,
   mkdir,
   mkdtemp,
   readdir,
@@ -15,6 +17,45 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
+// Fixture ownership seam: unknown query facts never authorize browser closure.
+function orphanProof(expected, current, writerPresent, lease, originalLease) {
+  if (
+    writerPresent !== false ||
+    !Number.isSafeInteger(expected?.processId) ||
+    expected.processId < 1 ||
+    typeof expected.creationDate !== "string" ||
+    !expected.creationDate ||
+    typeof expected.executable !== "string" ||
+    !expected.executable ||
+    typeof expected.profile?.path !== "string" ||
+    !expected.profile.path ||
+    typeof lease !== "string" ||
+    !lease ||
+    !current ||
+    current.processId !== expected.processId ||
+    current.creationDate !== expected.creationDate ||
+    current.executable?.toLowerCase() !== expected.executable?.toLowerCase() ||
+    current.profile?.path !== expected.profile?.path ||
+    lease !== originalLease
+  )
+    throw new Error("LIVE_ORPHAN_OWNERSHIP_UNCONFIRMED");
+}
+if (process.argv.includes("--orphan-proof-check")) {
+  try {
+    const f = JSON.parse(process.argv.at(-1));
+    orphanProof(
+      f.expected,
+      f.current,
+      f.writerPresent,
+      f.lease,
+      f.originalLease,
+    );
+    console.log(JSON.stringify({ ok: true }));
+  } catch {
+    console.log(JSON.stringify({ ok: false }));
+  }
+  process.exit(0);
+}
 const directory = await mkdtemp(join(tmpdir(), "pi-browser-profiles-"));
 const root = join(directory, "profiles");
 const settings = join(directory, "settings.json");
@@ -23,7 +64,7 @@ await writeFile(
   JSON.stringify({
     browserApp: process.argv[2] ?? "edge",
     browserVisible: false,
-    browserSignIn: true,
+    browserSignIn: !process.argv.includes("--dispose-only"),
   }),
 );
 const server = createServer(async (request, response) => {
@@ -50,10 +91,24 @@ server.listen(0, "127.0.0.1", () =>
       url: `http://127.0.0.1:${server.address().port}`,
       settings,
       root,
+      ...(process.argv.includes("--dispose-only") ||
+      process.argv.includes("--live-orphan")
+        ? {
+            server: (() => {
+              const own = processAt(process.pid);
+              return {
+                processId: own.pid,
+                creationDate: own.creationDate,
+                executable: own.executable,
+              };
+            })(),
+          }
+        : {}),
     }),
   ),
 );
 const observedRoots = new Map();
+let liveOrphan;
 let cleanupControlChild;
 let cleanupControlClosed;
 function rememberRoot(row, profile) {
@@ -131,6 +186,14 @@ async function inspect(workerPid) {
     creationDate: row.creationDate,
     executable: row.executable,
     profile: { kept: true, path },
+    ...(process.argv.includes("--live-orphan")
+      ? {
+          leaseOwner: {
+            workerPid: owner.workerPid,
+            tokenSha256: createHash("sha256").update(owner.token).digest("hex"),
+          },
+        }
+      : {}),
   };
 }
 async function armCleanupControl() {
@@ -166,6 +229,179 @@ async function armCleanupControl() {
     profile,
     processId: row.pid,
     creationDate: row.creationDate,
+  };
+}
+async function orphanState(request = {}) {
+  if (!liveOrphan?.expected) throw new Error("orphan not recorded");
+  const current = await inspect(liveOrphan.writerPid),
+    lease = await readFile(liveOrphan.profile.lock + "/owner.json", "utf8");
+  orphanProof(
+    liveOrphan.expected,
+    current,
+    Boolean(processAt(liveOrphan.writerPid)),
+    lease,
+    liveOrphan.lease,
+  );
+  if (request.retiredWorkerPid && processAt(request.retiredWorkerPid))
+    throw new Error("contender worker still alive");
+  if (
+    (await readdir(root)).some(
+      (n) => n.endsWith(".recover") || n.includes(".abandoned-"),
+    )
+  )
+    throw new Error("unexpected recovery artifact");
+  const content = await liveOrphan.page.content();
+  if (!content.includes("Cookie: remembered"))
+    throw new Error("original page/cookie unavailable");
+  return {
+    ok: true,
+    ...current,
+    writerAbsent: true,
+    writer: liveOrphan.writer,
+    leaseUnchanged: true,
+    cookieRemembered: true,
+  };
+}
+async function armOrphan(request) {
+  if (!process.argv.includes("--live-orphan") || liveOrphan)
+    throw new Error("orphan mode unavailable");
+  const previous = request.browser;
+  if (
+    !observedRoots.has(`${previous.processId}:${previous.creationDate}`) ||
+    processAt(previous.processId) ||
+    processAt(request.workerPid)
+  )
+    throw new Error("setup actor retirement unproved");
+  liveOrphan = {};
+  const ownerSource = `import {createInterface} from 'node:readline';const {acquireBrowserProfile,recordProfileBrowser}=await import(process.argv[1]);const p=await acquireBrowserProfile(process.argv[2],process.argv[3],true);console.log(JSON.stringify(p));for await(const line of createInterface({input:process.stdin})){const cmd=JSON.parse(line);if(cmd.browserPid){await recordProfileBrowser(p,cmd.browserPid);console.log('recorded')}else if(cmd.exit){process.exit(0)}else throw Error('unsupported owner command')}`;
+  const child = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      ownerSource,
+      new URL("../dist/browser-profiles.js", import.meta.url).href,
+      process.argv[2],
+      previous.executable,
+    ],
+    {
+      env: { ...process.env, PI_CU_BROWSER_PROFILE_ROOT: root },
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+  liveOrphan.child = child;
+  liveOrphan.writerPid = child.pid;
+  liveOrphan.closed = once(child, "close");
+  child.stderr.resume();
+  await writeFile(
+    join(directory, "live-orphan.json"),
+    JSON.stringify({ phase: "owner-started", writerPid: child.pid }),
+  );
+  const writer = processAt(child.pid);
+  if (
+    !writer ||
+    writer.executable?.toLowerCase() !== process.execPath.toLowerCase()
+  )
+    throw new Error("writer identity unavailable");
+  liveOrphan.writer = {
+    processId: writer.pid,
+    creationDate: writer.creationDate,
+    executable: writer.executable,
+  };
+  await writeFile(
+    join(directory, "live-orphan.json"),
+    JSON.stringify({ phase: "writer-pinned", writer: liveOrphan.writer }),
+  );
+  const input = createInterface({ input: child.stdout });
+  const nextOwner = () =>
+    Promise.race([
+      once(input, "line"),
+      liveOrphan.closed.then(() => {
+        throw new Error("writer closed before acknowledgement");
+      }),
+    ]);
+  const ready = nextOwner();
+  const profile = JSON.parse((await ready)[0]);
+  liveOrphan.profile = profile;
+  if (profile.path !== previous.profile.path || !profile.kept)
+    throw new Error("unexpected owned lease path");
+  const { default: puppeteer } = await import("puppeteer-core");
+  const browser = await puppeteer.launch({
+    executablePath: previous.executable,
+    userDataDir: profile.path,
+    headless: true,
+    timeout: 20000,
+    protocolTimeout: 20000,
+    handleSIGINT: false,
+    handleSIGTERM: false,
+    handleSIGHUP: false,
+  });
+  liveOrphan.browser = browser;
+  const browserPid = browser.process()?.pid;
+  if (!browserPid) throw new Error("browser PID unavailable");
+  await writeFile(
+    join(directory, "live-orphan.json"),
+    JSON.stringify({
+      phase: "browser-started",
+      writerPid: child.pid,
+      browserPid,
+      profile: profile.path,
+    }),
+  );
+  const recorded = nextOwner();
+  child.stdin.write(JSON.stringify({ browserPid }) + "\n");
+  if ((await recorded)[0] !== "recorded")
+    throw new Error("lease registration missing");
+  liveOrphan.expected = await inspect(child.pid);
+  liveOrphan.lease = await readFile(profile.lock + "/owner.json", "utf8");
+  const currentWriter = processAt(child.pid);
+  if (
+    !currentWriter ||
+    currentWriter.creationDate !== liveOrphan.writer.creationDate ||
+    currentWriter.executable?.toLowerCase() !==
+      liveOrphan.writer.executable.toLowerCase()
+  )
+    throw new Error("writer identity changed");
+  await writeFile(
+    join(directory, "live-orphan.json"),
+    JSON.stringify({
+      phase: "lease-recorded",
+      writer: liveOrphan.writer,
+      browser: liveOrphan.expected,
+      leaseSha256: createHash("sha256").update(liveOrphan.lease).digest("hex"),
+    }),
+  );
+  liveOrphan.page = await browser.newPage();
+  const url = `http://127.0.0.1:${server.address().port}`;
+  await liveOrphan.page.goto(url + "/set");
+  await liveOrphan.page.goto(url + "/read");
+  child.stdin.write(JSON.stringify({ exit: true }) + "\n");
+  const [code] = await liveOrphan.closed;
+  if (code !== 0) throw new Error("lease writer exit unconfirmed");
+  input.close();
+  const proof = await orphanState();
+  await writeFile(
+    join(directory, "live-orphan.json"),
+    JSON.stringify({
+      phase: "live-browser-dead-writer",
+      writer: liveOrphan.writer,
+      leaseSha256: createHash("sha256").update(liveOrphan.lease).digest("hex"),
+      ...proof,
+    }),
+  );
+  return proof;
+}
+async function closeOrphan() {
+  const before = await orphanState();
+  await liveOrphan.browser.close();
+  if (processAt(before.processId)) throw new Error("orphan close unconfirmed");
+  return {
+    ok: true,
+    browserAbsent: true,
+    writerAbsent: true,
+    writer: liveOrphan.writer,
+    profile: before.profile,
   };
 }
 async function closeOwned(request) {
@@ -243,12 +479,116 @@ async function closeOwned(request) {
     creationDate: observed.creationDate,
   };
 }
+
+let disposal;
+function profileRoots(path) {
+  const escaped = path.replaceAll("'", "''");
+  const result = execFileSync(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `$ErrorActionPreference='Stop';$prefix='${escaped}';$rows=@(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.Contains($prefix) });ConvertTo-Json -Compress -InputObject @($rows|ForEach-Object{@{pid=$_.ProcessId;creationDate=$_.CreationDate.ToUniversalTime().ToString('o');executable=$_.ExecutablePath}})`,
+    ],
+    { encoding: "utf8", windowsHide: true, timeout: 10000 },
+  );
+  return JSON.parse(result);
+}
+async function inspectDisposal(workerPid) {
+  assertPid(workerPid);
+  if (!process.argv.includes("--dispose-only") || disposal)
+    throw new Error("disposal inspection unavailable");
+  const dirs = (await readdir(root)).filter((name) =>
+    /^temporary-[A-Za-z0-9_-]+$/.test(name),
+  );
+  if (dirs.length !== 1)
+    throw new Error("expected exactly one temporary profile");
+  const path = join(root, dirs[0]);
+  const owner = JSON.parse(await readFile(path + ".lock/owner.json", "utf8"));
+  if (owner.workerPid !== workerPid || owner.phase !== "running")
+    throw new Error("owned temporary lease mismatch");
+  const worker = processAt(workerPid);
+  const browser = processAt(owner.browserPid);
+  if (process.argv[2] !== "firefox")
+    throw new Error("Firefox disposal mode required");
+  const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const argument = new RegExp(
+    '(?:^|\\s)--?profile\\s+(?:"' + escaped + '"|' + escaped + ")(?=\\s|$)",
+    "i",
+  );
+  if (
+    !worker?.executable?.toLowerCase().endsWith("\\node.exe") ||
+    !worker.commandLine?.includes("worker.js") ||
+    !browser?.executable?.toLowerCase().endsWith("\\firefox.exe") ||
+    !argument.test(browser.commandLine) ||
+    !/(?:^|\s)--?headless(?:=|\s|$)/i.test(browser.commandLine)
+  )
+    throw new Error("owned worker/browser/profile identity unavailable");
+  const matching = profileRoots(path);
+  if (
+    !matching.some(
+      (row) =>
+        row.pid === browser.pid && row.creationDate === browser.creationDate,
+    )
+  )
+    throw new Error("profile matcher positive control missing");
+  rememberRoot(worker, path);
+  rememberRoot(browser, path);
+  for (const row of matching) rememberRoot(row, path);
+  const clean = (row) => ({
+    processId: row.pid,
+    creationDate: row.creationDate,
+    executable: row.executable,
+  });
+  disposal = {
+    profile: path,
+    worker: clean(worker),
+    browser: clean(browser),
+    matching,
+  };
+  return { ok: true, ...disposal, headless: true, kept: false };
+}
+async function verifyDisposal() {
+  if (!disposal) throw new Error("disposal identity missing");
+  for (const row of observedRoots.values())
+    if (processAt(row.processId))
+      throw new Error("recorded root live/reused; retain storage");
+  if (profileRoots(disposal.profile).length)
+    throw new Error("owned profile processes remain; retain storage");
+  for (const path of [disposal.profile, disposal.profile + ".lock"]) {
+    try {
+      await access(path);
+      throw new Error("profile/lock retained after disposal");
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  return {
+    ok: true,
+    recordedRootsAbsent: true,
+    profileProcessesAbsent: true,
+    profileAbsent: true,
+    lockAbsent: true,
+  };
+}
+
 const lines = createInterface({ input: process.stdin });
 for await (const line of lines) {
   try {
     const request = JSON.parse(line);
     let response;
-    if (request.action === "arm-cleanup-control")
+    if (request.action === "arm-live-orphan")
+      response = await armOrphan(request);
+    else if (request.action === "inspect-live-orphan")
+      response = await orphanState(request);
+    else if (request.action === "close-live-orphan")
+      response = await closeOrphan();
+    else if (request.action === "inspect-disposal")
+      response = await inspectDisposal(request.workerPid);
+    else if (request.action === "verify-disposal")
+      response = await verifyDisposal();
+    else if (request.action === "arm-cleanup-control")
       response = await armCleanupControl();
     else if (request.action === "inspect-profile")
       response = await inspect(request.workerPid);

@@ -30,7 +30,14 @@ test("real-browser plan works without a build, dependencies, credentials or chil
     );
     const plan = JSON.parse(result.stdout);
     assert.equal(plan.mode, "plan");
-    assert.deepEqual(plan.scenarios, ["form", "advanced", "stale", "mixed"]);
+    assert.deepEqual(plan.scenarios, [
+      "form",
+      "advanced",
+      "stale",
+      "mixed",
+      "partial",
+      "cancel",
+    ]);
     assert.deepEqual(plan.requested, {
       provider: "openai",
       model: "gpt-6.1-sol",
@@ -81,19 +88,12 @@ const formReport = () => ({
     },
   ],
 });
-const verify = async (scenario: string, facts: unknown) => {
-  const script =
-    "const {verifyOutcome}=await import(process.argv[1]);console.log(JSON.stringify(verifyOutcome(process.argv[2],JSON.parse(process.argv[3]))));";
-  const result = await run(process.execPath, [
-    "--input-type=module",
-    "-e",
-    script,
-    new URL("./pi-browser-fixture.mjs", import.meta.url).href,
-    scenario,
-    JSON.stringify(facts),
-  ]);
-  return JSON.parse(result.stdout);
-};
+const { verifyOutcome } = await import(
+  new URL("./pi-browser-fixture.mjs", import.meta.url).href
+);
+const verify = async (scenario: string, facts: unknown) =>
+  verifyOutcome(scenario, JSON.parse(JSON.stringify(facts)));
+
 test("form acceptance requires actual delayed evidence, effective settings and confirmed cleanup", async () => {
   const facts = formReport();
   assert.equal((await verify("form", facts)).pass, true);
@@ -389,7 +389,12 @@ test("stale recovery requires a successful result for the newly observed field a
 });
 
 // These subprocess fixtures are Linux executables, never Windows workers or models.
-for (const mode of ["query-failure", "deadline"]) {
+for (const mode of [
+  "query-failure",
+  "deadline",
+  "partial-not-ready",
+  "held-not-ready",
+]) {
   test(`retained ${mode} keeps fixture ownership and fences later dispatch/cases`, {
     skip: process.platform !== "linux",
   }, async () => {
@@ -443,6 +448,7 @@ for (const mode of ["query-failure", "deadline"]) {
         "src/worker.ts",
         "dist/browser.js",
         "dist/worker.js",
+        "tests/pi-host-command.mjs",
       ])
         await put(join(folder, path), "// Passive external-host fixture\n");
       await put(join(folder, "package.json"), '{"type":"module"}');
@@ -484,9 +490,11 @@ for (const mode of ["query-failure", "deadline"]) {
       await put(join(pkg, "dist/index.js"), "export {};");
       await put(
         join(pkg, "dist/bundle/cli.js"),
-        mode === "deadline"
-          ? "setInterval(()=>{},1000);"
-          : "console.log(JSON.stringify({type:'agent_settled',aborted:false}));",
+        mode.endsWith("not-ready")
+          ? `import{writeFileSync}from'node:fs';writeFileSync(${JSON.stringify(join(folder, "model-started"))},"started");console.log(JSON.stringify({type:'agent_settled',aborted:false}));`
+          : mode === "deadline"
+            ? "setInterval(()=>{},1000);"
+            : "console.log(JSON.stringify({type:'agent_settled',aborted:false}));",
       );
       await put(
         join(folder, "tests/browser-actions-server.mjs"),
@@ -497,7 +505,15 @@ for (const mode of ["query-failure", "deadline"]) {
       );
       controller = spawn(
         process.execPath,
-        [join(folder, "tests/pi-browser-host.mjs"), "--scenario", "all"],
+        [
+          join(folder, "tests/pi-browser-host.mjs"),
+          "--scenario",
+          mode === "held-not-ready"
+            ? "cancel"
+            : mode === "partial-not-ready"
+              ? "partial"
+              : "all",
+        ],
         {
           env: {
             ...process.env,
@@ -532,8 +548,29 @@ for (const mode of ["query-failure", "deadline"]) {
         retained.reason,
         mode === "deadline"
           ? "host-deadline-ownership-retained"
-          : "owned-process-or-profile-evidence-unavailable",
+          : mode.endsWith("not-ready")
+            ? "collector-error-ownership-retained"
+            : "owned-process-or-profile-evidence-unavailable",
       );
+      if (mode.endsWith("not-ready")) {
+        assert.equal(
+          owner?.piPid,
+          undefined,
+          "unready partial fixture never launches Pi",
+        );
+        assert.deepEqual(
+          JSON.parse(
+            await readFile(
+              join(journal, "..", "fixture-readiness.json"),
+              "utf8",
+            ),
+          ),
+          { ready: false },
+        );
+        await assert.rejects(readFile(join(folder, "model-started")), {
+          code: "ENOENT",
+        });
+      }
       assert.equal(owner?.keeperPid, controller.pid);
       process.kill(controller.pid ?? 0, 0);
       assert.equal(
@@ -555,27 +592,29 @@ for (const mode of ["query-failure", "deadline"]) {
       await copyFile(journal, guardJournal);
       const script =
         "const handlers=new Map(),tools=new Map();const {default:scope}=await import(process.argv[1]);await scope({on:(n,h)=>handlers.set(n,h),registerTool:d=>tools.set(d.name,d)});let dispatches=0;const event={toolName:'windows_computer_use_set_value',input:{elementId:'new-tab',value:process.env.FIXTURE_BASE+'form'}};const blocked=await handlers.get('tool_call')(event);if(!blocked?.block){await tools.get(event.toolName).execute('id',event.input);dispatches++;}console.log(JSON.stringify({blocked:blocked?.block,dispatches}));";
-      const blocked = await run(
-        process.execPath,
-        [
-          "--input-type=module",
-          "-e",
-          script,
-          new URL(`file://${folder}/tests/pi-browser-fixture.mjs`).href,
-        ],
-        {
-          env: {
-            ...process.env,
-            FIXTURE_BASE: owner?.fixtureUrl,
-            PI_CU_TEST_SPEC: JSON.stringify({
-              base: owner?.fixtureUrl,
-              scenario: "form",
-              auditFile: join(folder, "guard.jsonl"),
-              journal: guardJournal,
-            }),
+      const probe = () =>
+        run(
+          process.execPath,
+          [
+            "--input-type=module",
+            "-e",
+            script,
+            new URL(`file://${folder}/tests/pi-browser-fixture.mjs`).href,
+          ],
+          {
+            env: {
+              ...process.env,
+              FIXTURE_BASE: owner?.fixtureUrl,
+              PI_CU_TEST_SPEC: JSON.stringify({
+                base: owner?.fixtureUrl,
+                scenario: "form",
+                auditFile: join(folder, "guard.jsonl"),
+                journal: guardJournal,
+              }),
+            },
           },
-        },
-      );
+        );
+      const blocked = await probe();
       assert.deepEqual(JSON.parse(blocked.stdout), {
         blocked: true,
         dispatches: 0,
@@ -585,27 +624,7 @@ for (const mode of ["query-failure", "deadline"]) {
         phase: "running",
       };
       await writeFile(guardJournal, JSON.stringify(running));
-      const allowed = await run(
-        process.execPath,
-        [
-          "--input-type=module",
-          "-e",
-          script,
-          new URL(`file://${folder}/tests/pi-browser-fixture.mjs`).href,
-        ],
-        {
-          env: {
-            ...process.env,
-            FIXTURE_BASE: owner?.fixtureUrl,
-            PI_CU_TEST_SPEC: JSON.stringify({
-              base: owner?.fixtureUrl,
-              scenario: "form",
-              auditFile: join(folder, "guard.jsonl"),
-              journal: guardJournal,
-            }),
-          },
-        },
-      );
+      const allowed = await probe();
       assert.deepEqual(
         JSON.parse(allowed.stdout),
         { dispatches: 1 },
@@ -736,7 +755,7 @@ test("browser fixture faults deny dispatch through actual SDK hooks", async () =
       const root=process.argv[1], base='http://127.0.0.1:1234/';
       const {default:scope}=await import(pathToFileURL(join(root,'tests/pi-browser-fixture.mjs')));
       const receipts=[];
-      for(const kind of ['running','retained','missing','malformed','unknown-phase','audit-io','window-ref','after-audit-io','after-processing-error']) {
+      for(const kind of ['running','retained','missing','malformed','unknown-phase','audit-io','window-ref','after-audit-io','after-processing-error','after-stop']) {
         const dir=join(root,kind);mkdirSync(dir);
         const journal=join(dir,'owner.json'),audit=join(dir,'audit.jsonl');
         if(kind!=='missing')writeFileSync(journal,kind==='malformed'?'{':JSON.stringify({phase:kind==='retained'?'retained':kind==='unknown-phase'?'settled':'running'}));
@@ -753,7 +772,7 @@ test("browser fixture faults deny dispatch through actual SDK hooks", async () =
           await runner.emitToolResult({...event,type:'tool_result',...result});
           event.input={elementId:'t123:e1',value:'safe owned value'};
           if(kind==='after-audit-io'){rmSync(audit);mkdirSync(audit);}
-          await runner.emitToolResult({...event,type:'tool_result',content:[],isError:kind==='after-audit-io',details:kind==='after-audit-io'?{ok:false,error:'UNKNOWN_MUTATION_RESULT'}:{ok:true,nodes:{}}});
+          await runner.emitToolResult({...event,type:'tool_result',content:[],isError:kind==='after-audit-io',details:kind==='after-audit-io'?{ok:false,error:'UNKNOWN_MUTATION_RESULT'}:kind==='after-stop'?{ok:false,error:'COMPUTER_USE_STOPPED'}:{ok:true,nodes:{}}});
           if(kind==='after-audit-io'){rmSync(audit,{recursive:true});writeFileSync(audit,'');}
         }
         if(kind==='window-ref')event.input.windowRef='native-lifetime-reference';
@@ -777,7 +796,7 @@ test("browser fixture faults deny dispatch through actual SDK hooks", async () =
       dispatches: number;
       sdkErrors: number;
     }>;
-    assert.equal(receipts.length, 9);
+    assert.equal(receipts.length, 10);
     for (const receipt of receipts) {
       assert.equal(receipt.threw, false, JSON.stringify(receipts));
       assert.equal(
@@ -1116,6 +1135,608 @@ test("mixed SDK routing preserves owned images and rejects cross-channel or unce
       /Mixed actual SDK scope\/privacy checks passed/,
     );
   } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test("partial recovery requires each observed field effect and genuine confirmation", async () => {
+  const base = "http://127.0.0.1:1234/",
+    tab = { id: "t123", url: base + "form" };
+  let serial = 0;
+  const pair = (action: string, input: object, details: object) => {
+    const toolCallId = String(++serial),
+      toolName = "windows_computer_use_" + action;
+    return [
+      { type: "guard_tool_call", toolCallId, toolName, input },
+      {
+        type: "guard_tool_result",
+        toolCallId,
+        toolName,
+        details: { ok: true, action, tab, ...details },
+      },
+    ];
+  };
+  const field = (id: string, name: string, role: string, extra = {}) => ({
+    id,
+    name,
+    role,
+    ...extra,
+  });
+  const controls = [
+    field("name", "Name", "textbox"),
+    field("notes", "Notes", "textbox"),
+    field("accepted", "Accept terms", "checkbox"),
+    field("choice", "Choice", "combobox"),
+    field("beta", "Beta", "option"),
+    field("submit", "Submit form", "button"),
+  ];
+  const restricted = [
+    field("disabled", "Disabled field", "textbox", {
+      value: "Disabled value",
+      disabled: true,
+    }),
+    field("readonly", "Read-only field", "textbox", {
+      value: "Read-only value",
+      readonly: true,
+    }),
+  ];
+  const facts = {
+    ...formReport(),
+    base,
+    oracle: {
+      ...formReport().oracle,
+      events: { submissions: 1, starts: 0, ready: 0 },
+    },
+  };
+  const initial = pair(
+    "set_value",
+    { elementId: "new-tab", value: tab.url },
+    {
+      source: "browser-accessibility",
+      nodeCount: 500,
+      truncated: true,
+      truncationReason: "budget",
+      nodes: Array.from({ length: 500 }, (_, i) => ({
+        role: "paragraph",
+        name: "Context row " + i,
+      })),
+    },
+  );
+  const read = (nodes = controls) =>
+    pair("find", { browserTab: tab.id, query: "Name" }, { nodes });
+  const effects = [
+    pair(
+      "set_value",
+      { elementId: "name", value: facts.oracle.payload.name },
+      {},
+    ),
+    pair(
+      "set_value",
+      { elementId: "notes", value: facts.oracle.payload.notes },
+      {},
+    ),
+    pair("invoke", { elementId: "accepted" }, {}),
+    pair("set_value", { elementId: "choice", value: "beta" }, {}),
+  ];
+  const submit = pair("click", { elementId: "submit" }, {});
+  const confirmationName =
+    "Form confirmation: " + JSON.stringify(facts.oracle.payload);
+  const confirmation = pair(
+    "find",
+    { browserTab: tab.id, query: "Form confirmation" },
+    { nodes: [...restricted, field("result", confirmationName, "status")] },
+  );
+  const complete = [
+    ...initial,
+    ...read(),
+    ...effects.flat(),
+    ...submit,
+    ...confirmation,
+  ];
+  const accepted = async (audit: unknown, patch = {}) =>
+    (await verify("partial", { ...facts, audit, ...patch })).pass;
+  assert.equal(await accepted(complete), true);
+  // Literal same-ID representations from the real cc70ece read-only gate.
+  const actualSubmit = {
+    id: "t96e620fc2bd3e621:226",
+    name: "Submit form",
+    role: "button",
+  };
+  const actualSubmitText = {
+    id: "t96e620fc2bd3e621:226",
+    name: "Submit form",
+    role: "StaticText",
+  };
+  assert.equal(
+    await accepted([
+      ...initial,
+      ...read([...controls.slice(0, 5), actualSubmit, actualSubmitText]),
+      ...effects.flat(),
+      ...pair("click", { elementId: actualSubmit.id }, {}),
+      ...confirmation,
+    ]),
+    true,
+    "literal real button survives its StaticText representation",
+  );
+  for (const contradiction of [
+    { ...controls[0]!, name: "Notes" },
+    { ...controls[0]!, role: "checkbox" },
+  ])
+    assert.equal(
+      await accepted([
+        ...initial,
+        ...read([...controls, contradiction]),
+        ...effects.flat(),
+        ...submit,
+        ...confirmation,
+      ]),
+      false,
+      "contradictory actionable identity cannot be guessed",
+    );
+
+  assert.equal(
+    await accepted([
+      ...initial,
+      ...read([controls[0]!, controls[5]!]),
+      ...effects[0]!,
+      ...submit,
+      ...confirmation,
+    ]),
+    false,
+    "reviewer Name-only causal false pass",
+  );
+  for (let missing = 0; missing < 4; missing++) {
+    assert.equal(
+      await accepted([
+        ...initial,
+        ...read(),
+        ...effects.filter((_, i) => i !== missing).flat(),
+        ...submit,
+        ...confirmation,
+      ]),
+      false,
+      "missing field effect " + missing,
+    );
+    assert.equal(
+      await accepted([
+        ...initial,
+        ...read(controls.filter((_, i) => i !== missing)),
+        ...effects.flat(),
+        ...submit,
+        ...confirmation,
+      ]),
+      false,
+      "missing field observation " + missing,
+    );
+  }
+  for (let wrongRole = 0; wrongRole < 4; wrongRole++)
+    assert.equal(
+      await accepted([
+        ...initial,
+        ...read(
+          controls.map((node, i) =>
+            i === wrongRole ? { ...node, role: "text" } : node,
+          ),
+        ),
+        ...effects.flat(),
+        ...submit,
+        ...confirmation,
+      ]),
+      false,
+      "wrong field role " + wrongRole,
+    );
+  const progressive = [...initial];
+  for (let i = 0; i < 4; i++)
+    progressive.push(...read([controls[i]!]), ...effects[i]!);
+  progressive.push(...read([controls[5]!]), ...submit, ...confirmation);
+  assert.equal(await accepted(progressive), true);
+  const expanded = pair(
+    "accessibility_tree",
+    { browserTab: tab.id, maxNodes: 1200 },
+    { nodes: controls },
+  );
+  assert.equal(
+    await accepted([
+      ...initial,
+      ...expanded,
+      ...effects.flat(),
+      ...submit,
+      ...confirmation,
+    ]),
+    true,
+  );
+  const alternatives = [
+    ...effects[0]!,
+    ...pair("focus", { elementId: "notes" }, {}),
+    ...pair(
+      "type_text",
+      { browserTab: tab.id, text: facts.oracle.payload.notes },
+      {},
+    ),
+    ...pair("set_value", { elementId: "accepted", value: "true" }, {}),
+    ...pair("click", { elementId: "beta" }, {}),
+  ];
+  assert.equal(
+    await accepted([
+      ...initial,
+      ...read(),
+      ...alternatives,
+      ...submit,
+      ...confirmation,
+    ]),
+    true,
+  );
+  const keyboardChoice = [
+    ...initial,
+    ...read(),
+    ...effects.slice(0, 3).flat(),
+    ...pair("focus", { elementId: "choice" }, {}),
+    ...pair("keypress", { browserTab: tab.id, keys: ["enter"] }, {}),
+    ...submit,
+    ...confirmation,
+  ];
+  const unsupported = await verify("partial", {
+    ...facts,
+    audit: keyboardChoice,
+  });
+  assert.equal(unsupported.pass, false);
+  assert.ok(
+    unsupported.verifierLimitations.includes(
+      "keyboard field selection not covered by this verifier",
+    ),
+  );
+  const waited = pair(
+    "wait_for",
+    {
+      browserTab: tab.id,
+      condition: "element",
+      controlType: "status",
+      query: confirmationName,
+    },
+    {
+      condition: "element",
+      query: confirmationName,
+      verification: "observed",
+    },
+  );
+  const waitAudit = [
+    ...initial,
+    ...read(),
+    ...effects.flat(),
+    ...submit,
+    ...read(restricted),
+    ...waited,
+  ];
+  assert.equal(await accepted(waitAudit), true);
+  const replaceDetails = (rows: typeof initial, patch: object) =>
+    rows.map((row) =>
+      "details" in row
+        ? { ...row, details: { ...row.details, ...patch } }
+        : row,
+    );
+  for (const patch of [
+    { conclusive: false },
+    { found: false },
+    { timedOut: true },
+    { condition: "text" },
+  ])
+    assert.equal(
+      await accepted([
+        ...initial,
+        ...read(),
+        ...effects.flat(),
+        ...submit,
+        ...read(restricted),
+        ...replaceDetails(waited, patch),
+      ]),
+      false,
+    );
+  for (const bad of [
+    [...read(), ...effects.flat(), ...submit, ...confirmation],
+    [
+      ...replaceDetails(initial, { nodeCount: 499 }),
+      ...read(),
+      ...effects.flat(),
+      ...submit,
+      ...confirmation,
+    ],
+    [
+      ...initial,
+      ...pair(
+        "find",
+        {
+          browserTab: tab.id,
+          query: "Name Notes Accept terms Choice Submit form",
+        },
+        { nodes: [] },
+      ),
+      ...effects.flat(),
+      ...submit,
+      ...confirmation,
+    ],
+    [
+      ...initial,
+      ...replaceDetails(read(), { tab: { id: "t999", url: tab.url } }),
+      ...effects.flat(),
+      ...submit,
+      ...confirmation,
+    ],
+    [...initial, ...effects.flat(), ...read(), ...submit, ...confirmation],
+    [
+      ...initial,
+      ...read(),
+      ...effects.flat(),
+      ...submit,
+      ...replaceDetails(confirmation, {
+        nodes: restricted,
+        query: confirmationName,
+      }),
+    ],
+    [
+      ...initial,
+      ...read(),
+      ...effects.flat(),
+      ...submit,
+      ...replaceDetails(confirmation, {
+        nodes: [
+          ...restricted,
+          field("echo", confirmationName, "textbox", { value: "echo" }),
+        ],
+      }),
+    ],
+  ])
+    assert.equal(await accepted(bad), false);
+  for (const patch of [
+    {
+      oracle: {
+        ...facts.oracle,
+        events: { submissions: 2, starts: 0, ready: 0 },
+      },
+    },
+    { effective: [{ ...effective[0], thinkingLevel: "high" }] },
+    { cleanup: { ...facts.cleanup, processCount: 1 } },
+  ])
+    assert.equal(await accepted(complete, patch), false);
+});
+
+test("partial fixture readiness reports its optional mode before model startup", async () => {
+  const { createInterface } = await import("node:readline");
+  for (const partial of ["1", "0"]) {
+    const child = spawn(
+      process.execPath,
+      ["tests/browser-actions-server.mjs", "edge", "false"],
+      {
+        env: {
+          ...process.env,
+          PI_CU_PARTIAL_FIXTURE: partial,
+          PI_CU_MIXED_FIXTURE: "",
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+    const closed = once(child, "close"),
+      lines = createInterface({ input: child.stdout });
+    child.stderr.resume();
+    try {
+      const [line] = await once(lines, "line");
+      const source = JSON.parse(line);
+      assert.equal(source.partialFixture, partial === "1" ? true : undefined);
+      const html = await (await fetch(source.url + "form")).text();
+      assert.equal(
+        (html.match(/Context row /g) ?? []).length,
+        partial === "1" ? 200 : 0,
+      );
+      assert.deepEqual(JSON.parse(await readFile(source.settings, "utf8")), {
+        browserApp: "edge",
+        browserVisible: false,
+        browserSignIn: false,
+      });
+    } finally {
+      lines.close();
+      child.stdin.end();
+      assert.equal((await closed)[0], 0);
+    }
+  }
+});
+
+test("held confirmation reports genuine HTTP entry and abort closure without completion", async () => {
+  const { createInterface } = await import("node:readline");
+  const child = spawn(
+    process.execPath,
+    ["tests/browser-actions-server.mjs", "edge", "false"],
+    {
+      env: {
+        ...process.env,
+        PI_CU_HELD_FIXTURE: "1",
+        PI_CU_PARTIAL_FIXTURE: "0",
+        PI_CU_MIXED_FIXTURE: "",
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+  const closed = once(child, "close"),
+    lines = createInterface({ input: child.stdout }),
+    abort = new AbortController();
+  child.stderr.resume();
+  try {
+    const [line] = await once(lines, "line"),
+      source = JSON.parse(line);
+    assert.equal(source.heldReady, true);
+    assert.ok(source.heldUrl.startsWith(source.url + "held-"));
+    const state = () => fetch(source.url + "held/state").then((r) => r.json());
+    assert.equal((await state()).entries, 0);
+    const pending = fetch(source.heldUrl, { signal: abort.signal }).catch(
+      (error) => error,
+    );
+    for (let i = 0; (await state()).entries !== 1; i++) {
+      assert.ok(i < 100);
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    assert.deepEqual(
+      { ...(await state()), urlHash: undefined },
+      { entries: 1, completed: 0, closed: 0, urlHash: undefined },
+    );
+    abort.abort();
+    await pending;
+    for (let i = 0; (await state()).closed !== 1; i++) {
+      assert.ok(i < 100);
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    assert.equal((await state()).completed, 0);
+  } finally {
+    abort.abort();
+    lines.close();
+    child.stdin.end();
+    assert.equal((await closed)[0], 0);
+  }
+});
+
+test("cancel acceptance requires actual stopped/released proof and an interrupted truthful task", async () => {
+  const pending = { id: 3, pid: 17, navigationHash: "a".repeat(64) };
+  const facts = {
+    ...formReport(),
+    lifecycle: { settled: true, aborted: true, exitCode: 0 },
+    cancel: {
+      pending,
+      assessment: {
+        status: "observed",
+        response: {
+          id: 3,
+          pid: 17,
+          result: {
+            ok: false,
+            action: "set_value",
+            error: "COMPUTER_USE_STOPPED",
+          },
+        },
+        acknowledgment: { result: { released: true } },
+      },
+      workerRetired: true,
+      http: {
+        entries: 1,
+        completed: 0,
+        closed: 1,
+        urlHash: pending.navigationHash,
+      },
+      noPostStopBusiness: true,
+      noCompletionClaim: true,
+      triggerCount: 1,
+    },
+  };
+  assert.equal((await verify("cancel", facts)).pass, true);
+  assert.equal(
+    (
+      await verify("cancel", {
+        ...facts,
+        cancel: {
+          ...facts.cancel,
+          assessment: {
+            ...facts.cancel.assessment,
+            response: {
+              ...facts.cancel.assessment.response,
+              result: {
+                ok: false,
+                action: "set_value",
+                error: "COMPUTER_USE_CANCELLED",
+              },
+            },
+          },
+        },
+      })
+    ).pass,
+    true,
+  );
+  for (const patch of [
+    { assessment: { status: "pending" } },
+    { workerRetired: false },
+    { http: { entries: 0, completed: 0, closed: 0 } },
+    { http: { entries: 2, completed: 0, closed: 2 } },
+    { http: { entries: 1, completed: 1, closed: 1 } },
+    { http: { entries: 1, completed: 0, closed: 0 } },
+    { noPostStopBusiness: false },
+    { noCompletionClaim: false },
+    { triggerCount: 0 },
+  ])
+    assert.equal(
+      (
+        await verify("cancel", {
+          ...facts,
+          cancel: { ...facts.cancel, ...patch },
+        })
+      ).pass,
+      false,
+    );
+  assert.equal(
+    (
+      await verify("cancel", {
+        ...facts,
+        lifecycle: { ...facts.lifecycle, aborted: false },
+      })
+    ).pass,
+    false,
+  );
+  assert.equal(
+    (
+      await verify("cancel", {
+        ...facts,
+        cleanup: { ...facts.cleanup, processCount: 1 },
+      })
+    ).pass,
+    false,
+  );
+});
+
+test("form and held-state consumers share the bounded child-runtime fixture bridge", async () => {
+  const { createInterface } = await import("node:readline");
+  const { pathToFileURL } = await import("node:url");
+  const folder = await mkdtemp(join(tmpdir(), "pi-fixture-state-bridge-"));
+  await mkdir(join(folder, "tests"));
+  await mkdir(join(folder, "dist"));
+  await writeFile(join(folder, "package.json"), '{"type":"module"}');
+  await copyFile(
+    new URL("./pi-browser-fixture.mjs", import.meta.url),
+    join(folder, "tests/pi-browser-fixture.mjs"),
+  );
+  await writeFile(
+    join(folder, "dist/launcher.js"),
+    `export async function nativeWorkerLaunch(){return {executable:${JSON.stringify(process.execPath)}}}`,
+  );
+  const child = spawn(
+    process.execPath,
+    ["tests/browser-actions-server.mjs", "edge", "false"],
+    {
+      env: {
+        ...process.env,
+        PI_CU_HELD_FIXTURE: "1",
+        PI_CU_PARTIAL_FIXTURE: "0",
+        PI_CU_MIXED_FIXTURE: "",
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+  const closed = once(child, "close"),
+    lines = createInterface({ input: child.stdout });
+  child.stderr.resume();
+  try {
+    const [line] = await once(lines, "line"),
+      source = JSON.parse(line);
+    const { formState, heldState } = await import(
+      pathToFileURL(join(folder, "tests/pi-browser-fixture.mjs")).href
+    );
+    assert.deepEqual(await formState(source.url), {
+      payload: null,
+      events: { starts: 0, ready: 0, submissions: 0 },
+    });
+    const held = await heldState(source.url);
+    assert.equal(held.entries, 0);
+    assert.equal(held.closed, 0);
+    assert.equal(held.completed, 0);
+    assert.match(held.urlHash, /^[a-f0-9]{64}$/);
+    await assert.rejects(heldState(source.url + "missing/"));
+  } finally {
+    lines.close();
+    child.stdin.end();
+    assert.equal((await closed)[0], 0);
     await rm(folder, { recursive: true, force: true });
   }
 });

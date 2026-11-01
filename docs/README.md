@@ -6,7 +6,7 @@ Read the row matching the task; follow section links before reading whole docume
 | --- | --- |
 | Requirements and scope | [Spec: solution](spec.md#solution), [user stories](spec.md#user-stories), [out of scope](spec.md#out-of-scope) |
 | Implementation contracts | [Spec: implementation decisions](spec.md#implementation-decisions) |
-| Delivery and feasibility | [Plan: detailed milestones](implementation-plan.md#detailed-milestones), [feasibility gates](implementation-plan.md#feasibility-gates) |
+| Delivery, design review and feasibility | [Design revision](implementation-plan.md#design-revision), [plan: detailed milestones](implementation-plan.md#detailed-milestones), [feasibility gates](implementation-plan.md#feasibility-gates) |
 | Test design and release validation | [Spec: testing decisions](spec.md#testing-decisions), [plan: coverage matrix](implementation-plan.md#coverage-matrix) |
 | DSH alignment, phased testing and agent recovery acceptance | [Current phases](implementation-plan.md#detailed-milestones), [baseline audit](validation.md#baseline-identity-and-schema-evidence), [guidance inventory](validation.md#model-visible-guidance-inventory), [scenario catalog](validation.md#alignment-scenario-catalog) |
 | Release checks, capability coverage and pending acceptance | [Validation](validation.md) |
@@ -21,7 +21,7 @@ Read the row matching the task; follow section links before reading whole docume
 | Control indicators, preview and manual acceptance | [Indicators](indicators.md) |
 | Desktop ownership and operation lifecycle | [Ownership](ownership.md) |
 | Native window discovery and validation | [Windows discovery](windows.md), [accessibility observations](windows.md#accessibility-observations), [locked sessions](windows.md#locked-session-refusals) |
-| Scoped mixed browser/native agent acceptance | [Mixed outcome evidence](validation.md#scoped-mixed-browsernative-outcome), [runner prerequisites](validation.md#reproduce-automated-checks) |
+| Scoped browser/mixed agent acceptance | [Held-navigation cancellation](validation.md#scoped-held-navigation-cancellation), [Partial-observation recovery](validation.md#scoped-partial-observation-recovery), [mixed outcome evidence](validation.md#scoped-mixed-browsernative-outcome), [runner prerequisites](validation.md#reproduce-automated-checks) |
 | Scoped native visual agent acceptance | [Opt-in runner](windows.md#scoped-visual-agent-check), [A04 evidence](validation.md#visual-ocr-association-preflight) |
 | Lifetime-bound native targeting and stale-reference behavior | [Window references](windows.md#window-lifetime-references), [accepted design](implementation-plan.md#window-lifetime-design) |
 | Native interop alternatives and tradeoffs | [Native interop research](native-interop-research.md) |
