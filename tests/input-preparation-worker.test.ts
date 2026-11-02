@@ -45,6 +45,12 @@ test(
   () => testInputBarrier("click", "listener-exit"),
 );
 
+test(
+  "real worker settles queued cleanup after stop cancels the preceding action",
+  { skip: process.platform === "win32", timeout: 15000 },
+  () => testInputBarrier("click", "settle-stop"),
+);
+
 async function testInputBarrier(
   action: "click" | "scroll",
   refuseControl:
@@ -53,7 +59,8 @@ async function testInputBarrier(
     | "unconfirmed"
     | "release-unconfirmed"
     | "lost"
-    | "listener-exit" = false,
+    | "listener-exit"
+    | "settle-stop" = false,
 ) {
   const args =
     action === "scroll"
@@ -76,7 +83,7 @@ async function testInputBarrier(
   );
   await writeFile(
     fake,
-    `#!/usr/bin/env node\nconst {createInterface}=require('node:readline');const {appendFileSync,existsSync}=require('node:fs');createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.cancel)return;if(r.action==='take_control'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='refused'){console.log(JSON.stringify({id:r.id,result:{ok:false,action:r.action,error:'EXCLUSIVE_CONTROL_UNAVAILABLE'}}));return;}if(r.action==='release'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='release-unconfirmed')appendFileSync(process.env.PI_CU_BARRIER_JOURNAL,'release\\n');if(r.action==='click'||r.action==='scroll'){appendFileSync(process.env.PI_CU_BARRIER_JOURNAL,'dispatch\\n');if(process.env.PI_CU_BARRIER_HOLD==='1')return;}console.log(JSON.stringify({id:r.id,result:{ok:!(r.action==='click'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='lost'),error:r.action==='click'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='lost'?'EXCLUSIVE_CONTROL_LOST: test protection loss':undefined,action:r.action,operationId:r.args.operationId,exclusiveControl:(r.action==='take_control'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL!=='unconfirmed')||(r.action==='disarm'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='release-unconfirmed'),hookInstalled:true,listenerProcessId:process.pid,cleanupConfirmed:process.env.PI_CU_BARRIER_HOLD!=='uncertain'}}));if(r.action==='take_control'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='listener-exit')setInterval(()=>{if(existsSync(process.env.PI_CU_BARRIER_JOURNAL+'.exit-listener'))process.exit(0);},5);});\n`,
+    `#!/usr/bin/env node\nconst {createInterface}=require('node:readline');const {appendFileSync,existsSync}=require('node:fs');createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.cancel)return;if(r.action==='take_control'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='refused'){console.log(JSON.stringify({id:r.id,result:{ok:false,action:r.action,error:'EXCLUSIVE_CONTROL_UNAVAILABLE'}}));return;}if(r.action==='release'&&['release-unconfirmed','settle-stop'].includes(process.env.PI_CU_BARRIER_REFUSE_CONTROL))appendFileSync(process.env.PI_CU_BARRIER_JOURNAL,'release\\n');if(r.action==='click'||r.action==='scroll'){appendFileSync(process.env.PI_CU_BARRIER_JOURNAL,'dispatch\\n');if(process.env.PI_CU_BARRIER_HOLD==='1')return;}console.log(JSON.stringify({id:r.id,result:{ok:!(r.action==='click'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='lost'),error:r.action==='click'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='lost'?'EXCLUSIVE_CONTROL_LOST: test protection loss':undefined,action:r.action,operationId:r.args.operationId,exclusiveControl:(r.action==='take_control'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL!=='unconfirmed')||(r.action==='disarm'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='release-unconfirmed'),hookInstalled:true,listenerProcessId:process.pid,cleanupConfirmed:process.env.PI_CU_BARRIER_HOLD!=='uncertain'}}));if(r.action==='take_control'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='listener-exit')setInterval(()=>{if(existsSync(process.env.PI_CU_BARRIER_JOURNAL+'.exit-listener'))process.exit(0);},5);});\n`,
     { mode: 0o755 },
   );
   await writeFile(
@@ -139,6 +146,22 @@ async function testInputBarrier(
       JSON.stringify(preparation),
     );
     assert.equal(preparation.requestId, 1);
+    if (refuseControl === "settle-stop") {
+      // Queue cleanup behind the action still waiting for preparation ACK,
+      // then stop. Protocol line order makes this cancellation race deterministic.
+      child.stdin.write(
+        `${JSON.stringify({ id: 5, action: "operation_end", args: {}, operationId: "barrier-test" })}\n${JSON.stringify({ stop: "barrier-test" })}\n`,
+      );
+      let ended = await next();
+      while (ended.id !== 5) ended = await next();
+      assert.equal(ended.result.ok, true, JSON.stringify(ended));
+      assert.equal(
+        await readFile(journal, "utf8"),
+        "release\n",
+        "cleanup releases ownership without dispatching the cancelled input",
+      );
+      return;
+    }
     assert.equal(await readFile(journal, "utf8").catch(() => ""), "");
     child.stdin.write(
       `${JSON.stringify({ inputAck: "incorrect", requestId: 1 })}\n`,

@@ -104,7 +104,7 @@ const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 let queue = Promise.resolve();
 const requests = new Map<
   number,
-  { controller: AbortController; operationId: string }
+  { controller: AbortController; operationId: string; action: string }
 >();
 const blocked = new Set<string>();
 const lastTargets = new Map<
@@ -171,7 +171,10 @@ async function stopOperation(operationId: string): Promise<void> {
       await stopListener.signal(operationId);
     } finally {
       for (const request of requests.values())
-        if (request.operationId === operationId)
+        if (
+          request.operationId === operationId &&
+          request.action !== "operation_end"
+        )
           request.controller.abort(new Error("COMPUTER_USE_STOPPED"));
       await awaitPointerCleanup();
       await clearBrowserIndicators();
@@ -703,6 +706,7 @@ input.on("line", (line) => {
   requests.set(request.id, {
     controller,
     operationId: request.operationId ?? `worker-${process.pid}`,
+    action: request.action,
   });
   queue = queue
     .then(() =>

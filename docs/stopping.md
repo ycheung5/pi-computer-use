@@ -2,7 +2,9 @@
 
 The candidate implements [exclusive control](spec.md#exclusive-control) in the existing independent helper. Acquisition/release regressions and no-input Windows checks cover scoped behavior; broader physical and actual-Pi-host acceptance remains under #31; see the [candidate results](validation.md#exclusive-control-candidate).
 
-Use `/computer-stop` to stop the current computer-use operation without waiting for a tool response. Pi cancellation also stops the operation. Queued calls are cancelled, active work is signaled, and subsequent calls in that operation are rejected with `COMPUTER_USE_STOPPED`. A model turn, retry or custom continuation does not reset stopping; a genuine new user run does.
+Use `/computer-stop` to stop the current computer-use operation without waiting for a tool response. Pi cancellation also stops the operation. Queued actions are cancelled, active work is signaled, and subsequent calls in that operation are rejected with `COMPUTER_USE_STOPPED`. A model turn, retry or custom continuation does not reset stopping; a genuine new user run does.
+
+Operation settlement (`operation_end`) remains tracked but is exempt from stop-triggered cancellation. It must finish input cleanup, disarm protection and release ownership even when queued behind the cancelled action; cancelling settlement itself can strand the cleanup acknowledgment. The actual-worker regression queues settlement before stopping a preparation-blocked action and verifies ownership release without dispatching input.
 
 ## Current Windows listener
 

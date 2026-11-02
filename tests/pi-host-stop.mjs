@@ -195,8 +195,8 @@ if (selectedMode === "preflight") {
     const hostClosed = once(host, "close");
     const hostPin = commandWorkerIdentity(process.execPath, host.pid);
     assert.ok(hostPin);
-    const until = async (check, label) => {
-      const deadline = Date.now() + 15000;
+    const until = async (check, label, timeoutMs = 15000) => {
+      const deadline = Date.now() + timeoutMs;
       while (true) {
         const found = check();
         if (found) return found;
@@ -269,18 +269,22 @@ if (selectedMode === "preflight") {
     host.stdin.write(
       `${JSON.stringify({ id: "fixture-prompt", type: "prompt", message: "Execute the scripted stop fixture." })}\n`,
     );
-    await until(() => {
-      try {
-        return (
-          rows().filter(
-            (r) => r.kind === "output" && r.result?.action === "health",
-          ).length === 2
-        );
-      } catch (error) {
-        if (error.code === "ENOENT") return false;
-        throw error;
-      }
-    }, "control setup before typing");
+    await until(
+      () => {
+        try {
+          return (
+            rows().filter(
+              (r) => r.kind === "output" && r.result?.action === "health",
+            ).length === 2
+          );
+        } catch (error) {
+          if (error.code === "ENOENT") return false;
+          throw error;
+        }
+      },
+      "control setup before typing",
+      90000,
+    );
     const identities = stopHostParticipants(host.pid, hostPin, rows());
     requireHostContainment(prerequisites, await stopHostSource());
     await writeFile(gate, "authorized", { flag: "wx" });

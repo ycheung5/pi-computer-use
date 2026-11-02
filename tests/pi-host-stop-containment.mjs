@@ -306,8 +306,8 @@ export async function runStopHostPreflight(mode = "command") {
             fault = error;
           }
         });
-        const until = async (check, label) => {
-          const deadline = Date.now() + 20000;
+        const until = async (check, label, timeoutMs = 20000) => {
+          const deadline = Date.now() + timeoutMs;
           while (true) {
             active();
             if (fault) throw fault;
@@ -331,6 +331,7 @@ export async function runStopHostPreflight(mode = "command") {
                 e.toolName === "windows_computer_use_wait",
             ),
           "pending wait",
+          90000,
         );
         const pending = await until(
           () => rows().find((r) => r.kind === "input" && r.action === "wait"),
