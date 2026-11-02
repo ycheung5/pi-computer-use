@@ -16,7 +16,7 @@ class StopBusyFixture {
     };
     int count=0;
     edit.TextChanged += delegate { count=edit.TextLength; if(count==1) Reply("started"); };
-    form.Shown += delegate { edit.Focus(); Reply("ready:"+form.Handle.ToInt64()); };
+    form.Shown += delegate { edit.Focus(); Reply("ready:"+form.Handle.ToInt64()+":"+System.Diagnostics.Process.GetCurrentProcess().Id); };
     ThreadPool.QueueUserWorkItem(delegate {
       string command;
       while((command=Console.ReadLine())!=null) {
@@ -26,6 +26,7 @@ class StopBusyFixture {
           int unexpected=0;foreach(char c in edit.Text)if(c!='x')unexpected++;
           Reply("state:"+count+":"+(released?"released":"held")+":"+unexpected);
         });
+        if(command=="human")form.BeginInvoke((Action)delegate {Reply("human:"+(edit.Text=="xabc"?1:0)+":"+(edit.Text=="xabcx"?1:0));});
         if(command=="stop") { form.BeginInvoke((Action)delegate { form.Close(); }); return; }
       }
     });

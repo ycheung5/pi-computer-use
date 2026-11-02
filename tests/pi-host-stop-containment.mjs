@@ -7,7 +7,25 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { commandObserver } from "./pi-host-command.mjs";
+import {
+  commandObserver,
+  commandWorkerIdentity,
+  linuxDescendants,
+  linuxOwner,
+  linuxOwnerAbsent,
+} from "./pi-host-command.mjs";
+
+export function stopHostWindowsPath(path) {
+  if (process.platform === "win32") return path;
+  const r = spawnSync("wslpath", ["-w", path], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout.trim();
+}
+export function stopHostIdentity(pid) {
+  return process.platform === "linux"
+    ? linuxOwner(pid)
+    : commandWorkerIdentity(process.execPath, pid);
+}
 
 const stopHostCli = () =>
   join(
@@ -27,11 +45,12 @@ export function launchStopHost({
   trace,
   preflight = false,
   gate,
+  handback = false,
 }) {
   const preload =
     "data:text/javascript;base64," +
     Buffer.from(
-      `if(process.argv[1]?.replaceAll('\\\\','/').endsWith('/dist/worker.js'))await import(${JSON.stringify(commandObserver(trace, null, true))});`,
+      `if(process.argv[1]?.replaceAll('\\\\','/').endsWith('/dist/worker.js'))await import(${JSON.stringify(commandObserver(stopHostWindowsPath(trace), null, true))});`,
     ).toString("base64");
   return spawn(
     process.execPath,
@@ -67,6 +86,24 @@ export function launchStopHost({
         PI_CU_HOST_STOP_TARGET: JSON.stringify(target),
         PI_CU_HOST_STOP_PREFLIGHT: preflight ? "1" : "",
         PI_CU_HOST_STOP_GATE: gate ?? "",
+        PI_CU_HOST_STOP_HANDBACK: handback ? "1" : "",
+        ...(process.platform === "linux"
+          ? {
+              WSLENV: [
+                ...(process.env.WSLENV ?? "")
+                  .split(":")
+                  .filter(
+                    (x) =>
+                      x &&
+                      !["PI_CU_SETTINGS_FILE", "NODE_OPTIONS"].includes(
+                        x.split("/")[0],
+                      ),
+                  ),
+                "PI_CU_SETTINGS_FILE/p",
+                "NODE_OPTIONS",
+              ].join(":"),
+            }
+          : {}),
         ...(trace
           ? {
               NODE_OPTIONS:
@@ -138,18 +175,27 @@ export function stopHostParticipants(hostPid, hostPin, observed) {
   const workerPid = health.processId;
   assert.equal(observed[0].pid, workerPid);
   // Birth-aware descent excludes unrelated processes whose parent PID was reused.
+  const wsl = process.platform === "linux";
+  if (wsl)
+    assert.deepEqual(
+      linuxOwner(hostPid),
+      hostPin,
+      "Linux Pi host identity changed",
+    );
   const identities = ps(
-    `$all=@(Get-CimInstance Win32_Process);$root=@($all|Where-Object ProcessId -eq ${hostPid});if($root.Count -ne 1){throw 'Pi absent'};$pending=@($root[0]);$out=@();for($i=0;$i -lt $pending.Count;$i++){$p=$pending[$i];$role=$null;if($p.Name -eq 'windows.exe'){$a=[Reflection.Assembly]::ReflectionOnlyLoadFrom($p.ExecutablePath);foreach($t in @('StopBridge','WindowsBridge','OwnershipBridge')){if($a.GetType($t)){$role=$t}}};$out+=@(@{pid=$p.ProcessId;parent=$p.ParentProcessId;creation=$p.CreationDate.ToUniversalTime().ToString('o');executable=$p.ExecutablePath;role=$role});foreach($c in @($all|Where-Object {$_.ParentProcessId -eq $p.ProcessId -and $_.CreationDate -ge $p.CreationDate})){$pending+=@($c)}};ConvertTo-Json -Depth 4 -Compress -InputObject @($out)`,
+    `$all=@(Get-CimInstance Win32_Process);$root=@($all|Where-Object ProcessId -eq ${wsl ? workerPid : hostPid});if($root.Count -ne 1){throw 'Pi/worker absent'};$pending=@($root[0]);$out=@();for($i=0;$i -lt $pending.Count;$i++){$p=$pending[$i];$role=$null;if($p.Name -eq 'windows.exe'){$a=[Reflection.Assembly]::ReflectionOnlyLoadFrom($p.ExecutablePath);foreach($t in @('StopBridge','WindowsBridge','OwnershipBridge')){if($a.GetType($t)){$role=$t}}};$out+=@(@{pid=$p.ProcessId;parent=$p.ParentProcessId;creation=$p.CreationDate.ToUniversalTime().ToString('o');executable=$p.ExecutablePath;role=$role});foreach($c in @($all|Where-Object {$_.ParentProcessId -eq $p.ProcessId -and $_.CreationDate -ge $p.CreationDate})){$pending+=@($c)}};ConvertTo-Json -Depth 4 -Compress -InputObject @($out)`,
   );
   const pinnedHost = identities.find((p) => p.pid === hostPid);
-  assert.equal(pinnedHost?.creation, hostPin.creation);
-  assert.equal(pinnedHost?.parent, process.pid);
-  assert.equal(
-    pinnedHost?.executable.toLowerCase(),
-    hostPin.executable.toLowerCase(),
-  );
+  if (!wsl) {
+    assert.equal(pinnedHost?.creation, hostPin.creation);
+    assert.equal(pinnedHost?.parent, process.pid);
+    assert.equal(
+      pinnedHost?.executable.toLowerCase(),
+      hostPin.executable.toLowerCase(),
+    );
+  } else assert.equal(hostPin.parent, process.pid);
   const worker = identities.find((p) => p.pid === workerPid);
-  assert.equal(worker?.parent, hostPid);
+  if (!wsl) assert.equal(worker?.parent, hostPid);
   assert.equal(
     worker?.executable.toLowerCase(),
     observed[0].executable.toLowerCase(),
@@ -171,10 +217,12 @@ export function stopHostParticipants(hostPid, hostPin, observed) {
     identities.find((p) => p.role === "StopBridge").pid,
     health.control.listenerProcessId,
   );
-  return identities;
+  return wsl ? [...linuxDescendants(hostPin), ...identities] : identities;
 }
 export function stopHostActorsAbsent(identities) {
-  const ids = identities.map((p) => p.pid);
+  const linux = identities.filter((p) => p.domain === "linux");
+  if (linux.some((p) => !linuxOwnerAbsent(p))) return false;
+  const ids = identities.filter((p) => p.domain !== "linux").map((p) => p.pid);
   assert.ok(
     ids.length > 0 && ids.every((id) => Number.isSafeInteger(id) && id > 0),
   );
@@ -235,7 +283,7 @@ export async function runStopHostPreflight(mode = "command") {
   );
   const { keepVisualOwnership } = await import("./pi-visual-host.mjs");
   assert.ok(["command", "host-exit"].includes(mode));
-  assert.equal(process.platform, "win32");
+  assert.ok(["win32", "linux"].includes(process.platform));
   const source = await stopHostSource();
   const folder = await mkdtemp(join(tmpdir(), "pi-cu-stop-preflight-"));
   const agent = join(folder, "agent"),
@@ -292,7 +340,7 @@ export async function runStopHostPreflight(mode = "command") {
     host,
     async (active) => {
       try {
-        const hostPin = commandWorkerIdentity(process.execPath, host.pid);
+        const hostPin = stopHostIdentity(host.pid);
         assert.ok(hostPin);
         const events = [];
         const lines = createInterface({ input: host.stdout });
@@ -387,7 +435,10 @@ export async function runStopHostPreflight(mode = "command") {
         } else {
           // The only pointer request already failed before dispatch with cleanup.
           // Terminate the Pi host, never a native input/stop/ownership helper.
-          assert.equal(host.kill("SIGTERM"), true);
+          assert.equal(
+            host.kill(process.platform === "linux" ? "SIGKILL" : "SIGTERM"),
+            true,
+          );
         }
         const exit = await Promise.race([
           closed,
@@ -419,8 +470,8 @@ export async function runStopHostPreflight(mode = "command") {
           mode,
           scope:
             mode === "command"
-              ? "native Windows Pi RPC, no physical input; orderly cleanup only"
-              : "native Windows Pi host exit, no physical input; recorded participant cleanup only",
+              ? `${process.platform} Pi RPC, no physical input; orderly cleanup only`
+              : `${process.platform} Pi host exit, no physical input; recorded participant cleanup only`,
           hostExit: exit,
           remaining,
           workerPid,

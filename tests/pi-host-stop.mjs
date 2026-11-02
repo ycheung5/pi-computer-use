@@ -13,8 +13,10 @@ import {
   requireHostContainment,
   runStopHostPreflight,
   stopHostActorsAbsent,
+  stopHostIdentity,
   stopHostParticipants,
   stopHostSource,
+  stopHostWindowsPath,
 } from "./pi-host-stop-containment.mjs";
 import { assessHostStop, canDiscardHost } from "./pi-host-stop-outcome.mjs";
 import { observeReleased, waitForStart } from "./stop-busy-coordination.mjs";
@@ -42,14 +44,14 @@ if (selectedMode === "preflight") {
     );
   else await runPassiveCommandStop(options.commandHost);
 } else {
-  assert.equal(process.platform, "win32");
+  assert.ok(["win32", "linux"].includes(process.platform));
   assert.equal(
     process.env.PI_CU_DEDICATED_INPUT_DESKTOP,
     "1",
     "Dedicated Windows desktop required",
   );
   const mode = process.argv[2] ?? "esc";
-  assert.ok(["esc", "shortcut"].includes(mode));
+  assert.ok(["esc", "shortcut", "handback"].includes(mode));
   const source = await stopHostSource();
   const prerequisites = [
     await runStopHostPreflight(),
@@ -72,7 +74,15 @@ if (selectedMode === "preflight") {
         JSON.stringify({ phase, mode, coordinatorPid: process.pid, ...extra }),
       );
   };
-  const folder = await mkdtemp(join(tmpdir(), "pi-cu-host-stop-"));
+  const { nativeWorkerLaunch, windowsHostEnvironment } = await import(
+    "../dist/launcher.js"
+  );
+  const native = await nativeWorkerLaunch();
+  const fixtureParent =
+    process.platform === "win32"
+      ? tmpdir()
+      : join((await windowsHostEnvironment()).localData, "Temp");
+  const folder = await mkdtemp(join(fixtureParent, "pi-cu-host-stop-"));
   await status("setup", { folder });
   const agent = join(folder, "agent");
   await mkdir(agent);
@@ -86,22 +96,19 @@ if (selectedMode === "preflight") {
     }),
   );
   const executable = join(folder, "fixture.exe");
-  const compiler = join(
-    process.env.WINDIR,
-    "Microsoft.NET",
-    "Framework64",
-    "v4.0.30319",
-    "csc.exe",
-  );
   const built = spawnSync(
-    compiler,
+    native.executable,
     [
+      "-e",
+      "const p=require('node:path'),c=require('node:child_process');c.execFileSync(p.join(process.env.WINDIR,'Microsoft.NET','Framework64','v4.0.30319','csc.exe'),process.argv.slice(1),{stdio:'inherit'});",
       "/nologo",
       "/target:exe",
-      `/out:${executable}`,
+      `/out:${stopHostWindowsPath(executable)}`,
       "/r:System.Windows.Forms.dll",
       "/r:System.Drawing.dll",
-      fileURLToPath(new URL("./pi-host-stop-fixture.cs", import.meta.url)),
+      stopHostWindowsPath(
+        fileURLToPath(new URL("./pi-host-stop-fixture.cs", import.meta.url)),
+      ),
     ],
     { encoding: "utf8", cwd: folder, windowsHide: true },
   );
@@ -175,11 +182,11 @@ if (selectedMode === "preflight") {
     };
   };
   try {
-    const match = (await line(/^ready:/)).match(/^ready:(\d+)$/);
+    const match = (await line(/^ready:/)).match(/^ready:(\d+):(\d+)$/);
     assert.ok(match && fixture.pid > 0);
     const target = {
       nativeWindowHandle: Number(match[1]),
-      processId: fixture.pid,
+      processId: Number(match[2]),
     };
     assert.deepEqual(await observe(), {
       count: 0,
@@ -191,9 +198,17 @@ if (selectedMode === "preflight") {
     await waitForStart(process.stdin, 120000);
     const trace = join(folder, "worker.jsonl"),
       gate = join(folder, "input-authorized");
-    host = launchStopHost({ folder, agent, settings, target, trace, gate });
+    host = launchStopHost({
+      folder,
+      agent,
+      settings,
+      target,
+      trace,
+      gate,
+      handback: mode === "handback",
+    });
     const hostClosed = once(host, "close");
-    const hostPin = commandWorkerIdentity(process.execPath, host.pid);
+    const hostPin = stopHostIdentity(host.pid);
     assert.ok(hostPin);
     const until = async (check, label, timeoutMs = 15000) => {
       const deadline = Date.now() + timeoutMs;
@@ -291,112 +306,258 @@ if (selectedMode === "preflight") {
     const notification = line(/^started$/, 20000).then(async () => {
       await status("started");
       console.log(
-        `Input started. Press ${mode === "esc" ? "Esc" : "Ctrl+Alt+F9"} physically now.`,
+        mode === "handback"
+          ? "Initial owned text sent; checking control release."
+          : `Input started. Press ${mode === "esc" ? "Esc" : "Ctrl+Alt+F9"} physically now.`,
       );
     });
     await notification;
-    try {
-      await bounded(
-        settlement,
-        40000,
-        "Physical stop was not observed before deadline",
-      );
-    } catch (error) {
-      // Request orderly abort only; do not kill Pi or any possible input owner.
-      if (host.exitCode === null)
-        host.stdin.write(
-          `${JSON.stringify({ id: "fixture-abort", type: "abort" })}\n`,
+    if (mode === "handback") {
+      const assertReleasedInputs = () => {
+        const current = rows();
+        assert.equal(extensionErrors, 0);
+        assert.ok(
+          current.length > 0 &&
+            current.every(
+              (r, i) => r.sequence === i + 1 && !r.fault && r.pid === workerPid,
+            ),
         );
-      abortRequested = true;
+        for (const input of current.filter(
+          (r) =>
+            r.kind === "input" && ["type_text", "keypress"].includes(r.action),
+        )) {
+          const replies = current.filter(
+            (r) => r.kind === "output" && r.id === input.id,
+          );
+          assert.equal(replies.length, 1);
+          assert.equal(replies[0].result.ok, true);
+          assert.equal(replies[0].result.cleanupConfirmed, true);
+          const ends = current.filter(
+            (r) =>
+              r.kind === "input" &&
+              r.action === "operation_end" &&
+              r.operationId === input.operationId,
+          );
+          assert.equal(ends.length, 1);
+          const release = current.filter(
+            (r) => r.kind === "output" && r.id === ends[0].id,
+          );
+          assert.equal(release.length, 1);
+          assert.equal(release[0].result.released, true);
+          assert.equal(release[0].result.ok, true);
+          assert.ok(release[0].sequence > replies[0].sequence);
+        }
+      };
       await bounded(
         settlement,
         15000,
-        "Pi input settlement unconfirmed after abort",
+        "Initial handback settlement unconfirmed",
       );
-      throw error;
+      const request = async (id, message, count) => {
+        host.stdin.write(
+          `${JSON.stringify({ id, type: "prompt", message })}\n`,
+        );
+        await until(
+          () => settlementCount === count,
+          "handback user-turn settlement",
+        );
+      };
+      await request(
+        "handback-health",
+        "Confirm control has returned without input.",
+        2,
+      );
+      const health = rows()
+        .filter((r) => r.kind === "output" && r.result?.action === "health")
+        .at(-1)?.result.control;
+      assert.equal(health.exclusiveControl, false);
+      assert.equal(health.physicalKeysHeld, 0);
+      assert.equal(health.physicalButtonsHeld, 0);
+      assertReleasedInputs();
+      assert.deepEqual(await observe(), {
+        count: 1,
+        keysReleased: true,
+        unexpectedCharacters: 0,
+      });
+      await status("human-handback");
+      console.log(
+        "Control returned. In this disposable editor, go to the end and type abc once; then explicitly continue.",
+      );
+      await waitForStart(process.stdin, 120000);
+      const humanBefore = line(/^human:/);
+      fixture.stdin.write("human\n");
+      assert.equal(await humanBefore, "human:1:0");
+      await request(
+        "resume",
+        "The human step is complete. Observe the owned target freshly and append one x.",
+        3,
+      );
+      await request(
+        "final-health",
+        "Confirm control returned after continuation.",
+        4,
+      );
+      const finalHealth = rows()
+        .filter((r) => r.kind === "output" && r.result?.action === "health")
+        .at(-1)?.result.control;
+      assert.equal(finalHealth.exclusiveControl, false);
+      assert.equal(finalHealth.physicalKeysHeld, 0);
+      assert.equal(finalHealth.physicalButtonsHeld, 0);
+      assertReleasedInputs();
+      const humanAfter = line(/^human:/);
+      fixture.stdin.write("human\n");
+      assert.equal(await humanAfter, "human:0:1");
+      assert.deepEqual(await observe(), {
+        count: 5,
+        keysReleased: true,
+        unexpectedCharacters: 3,
+      });
+      const current = rows(),
+        texts = current.filter(
+          (r) => r.kind === "input" && r.action === "type_text",
+        ),
+        snapshots = current.filter(
+          (r) => r.kind === "input" && r.action === "snapshot",
+        );
+      assert.equal(texts.length, 2);
+      assert.equal(snapshots.length, 1);
+      assert.notEqual(texts[0].operationId, texts[1].operationId);
+      assert.ok(snapshots[0].sequence < texts[1].sequence);
+      assert.equal(snapshots[0].operationId, texts[1].operationId);
+      const fresh = current.filter(
+        (r) => r.kind === "output" && r.id === snapshots[0].id,
+      );
+      assert.equal(fresh.length, 1);
+      assert.equal(fresh[0].result.ok, true);
+      assert.ok(fresh[0].sequence < texts[1].sequence);
+      for (const text of texts) {
+        const response = current.find(
+          (r) => r.kind === "output" && r.id === text.id,
+        );
+        assert.equal(response.result.ok, true);
+        assert.equal(response.result.cleanupConfirmed, true);
+      }
+      settled = true;
+      host.stdin.end();
+      assert.deepEqual(
+        await bounded(hostClosed, 15000, "Handback Pi exit unconfirmed"),
+        [0, null],
+      );
+      await until(
+        () => stopHostActorsAbsent(identities),
+        "handback actors absent",
+      );
+      hostClean = true;
+      console.log(
+        JSON.stringify({
+          ok: true,
+          mode,
+          humanInputPreserved: true,
+          explicitUserResume: true,
+          freshObservation: true,
+          separateOperations: true,
+          controlReleased: true,
+          actorsAbsent: true,
+        }),
+      );
+    } else {
+      try {
+        await bounded(
+          settlement,
+          40000,
+          "Physical stop was not observed before deadline",
+        );
+      } catch (error) {
+        // Request orderly abort only; do not kill Pi or any possible input owner.
+        if (host.exitCode === null)
+          host.stdin.write(
+            `${JSON.stringify({ id: "fixture-abort", type: "abort" })}\n`,
+          );
+        abortRequested = true;
+        await bounded(
+          settlement,
+          15000,
+          "Pi input settlement unconfirmed after abort",
+        );
+        throw error;
+      }
+      settled = true;
+      await until(
+        () => assessHostStop({ workerTrace: rows() }).cleanupConfirmed,
+        "actual input cleanup and operation release",
+      );
+      const before = await observeReleased(
+        observe,
+        (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const after = await observe();
+      host.stdin.write(
+        `${JSON.stringify({ id: "released-health", type: "prompt", message: "Observe health after human handback." })}\n`,
+      );
+      await bounded(
+        recovered,
+        15000,
+        "Post-release health settlement unconfirmed",
+      );
+      const evidence = {
+        toolStarted,
+        toolEnded,
+        settled,
+        aborted,
+        extensionErrors,
+        stopKeyObserved: stoppedKey,
+        before: before.count,
+        after: after.count,
+        total: 2000,
+        keysReleased: before.keysReleased && after.keysReleased,
+        unexpectedCharacters: Math.max(
+          before.unexpectedCharacters,
+          after.unexpectedCharacters,
+        ),
+        workerTrace: rows(),
+        abortRequested,
+      };
+      const assessment = assessHostStop(evidence);
+      assert.ok(
+        Number.isSafeInteger(workerPid) && workerPid > 0,
+        "Worker identity unavailable",
+      );
+      assert.equal(
+        assessment.releaseConfirmed,
+        true,
+        "INPUT_OR_CONTROL_RELEASE_UNCONFIRMED: retain owners",
+      );
+      host.stdin.end();
+      const hostExit = await bounded(
+        hostClosed,
+        15000,
+        "Pi orderly exit unconfirmed",
+      );
+      assert.deepEqual(hostExit, [0, null]);
+      await until(
+        () => stopHostActorsAbsent(identities),
+        "recorded participant exit",
+      );
+      const workerExited =
+        commandWorkerIdentity(native.executable, workerPid) === undefined;
+      assert.equal(
+        canDiscardHost({ workerExited, exitCode: host.exitCode }),
+        true,
+        "Pi or worker shutdown not confirmed",
+      );
+      hostClean = true;
+      console.log(
+        JSON.stringify({
+          ...assessment,
+          mode,
+          evidence,
+          workerExited,
+          scope: `${process.platform} Pi CLI with scripted provider; physical stop integration, not a real model or held-modifier cancellation`,
+        }),
+      );
+      assert.equal(assessment.ok, true);
     }
-    settled = true;
-    await until(
-      () => assessHostStop({ workerTrace: rows() }).cleanupConfirmed,
-      "actual input cleanup and operation release",
-    );
-    const before = await observeReleased(
-      observe,
-      (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-    );
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    const after = await observe();
-    host.stdin.write(
-      `${JSON.stringify({ id: "released-health", type: "prompt", message: "Observe health after human handback." })}\n`,
-    );
-    await bounded(
-      recovered,
-      15000,
-      "Post-release health settlement unconfirmed",
-    );
-    const evidence = {
-      toolStarted,
-      toolEnded,
-      settled,
-      aborted,
-      extensionErrors,
-      stopKeyObserved: stoppedKey,
-      before: before.count,
-      after: after.count,
-      total: 2000,
-      keysReleased: before.keysReleased && after.keysReleased,
-      unexpectedCharacters: Math.max(
-        before.unexpectedCharacters,
-        after.unexpectedCharacters,
-      ),
-      workerTrace: rows(),
-      abortRequested,
-    };
-    const assessment = assessHostStop(evidence);
-    assert.ok(
-      Number.isSafeInteger(workerPid) && workerPid > 0,
-      "Worker identity unavailable",
-    );
-    assert.equal(
-      assessment.releaseConfirmed,
-      true,
-      "INPUT_OR_CONTROL_RELEASE_UNCONFIRMED: retain owners",
-    );
-    host.stdin.end();
-    const hostExit = await bounded(
-      hostClosed,
-      15000,
-      "Pi orderly exit unconfirmed",
-    );
-    assert.deepEqual(hostExit, [0, null]);
-    await until(
-      () => stopHostActorsAbsent(identities),
-      "recorded participant exit",
-    );
-    let workerExited = false;
-    try {
-      process.kill(workerPid, 0);
-    } catch (error) {
-      if (error.code === "ESRCH") workerExited = true;
-      else throw error;
-    }
-    assert.equal(
-      canDiscardHost({ workerExited, exitCode: host.exitCode }),
-      true,
-      "Pi or worker shutdown not confirmed",
-    );
-    hostClean = true;
-    console.log(
-      JSON.stringify({
-        ...assessment,
-        mode,
-        evidence,
-        workerExited,
-        scope:
-          "Native Windows Pi CLI with scripted provider; not WSL Pi, a real model, DSH, or held-modifier cancellation",
-      }),
-    );
-    assert.equal(assessment.ok, true);
   } finally {
     if (inputAttempted && (!settled || !hostClean)) {
       if (!abortRequested && host?.exitCode === null) {

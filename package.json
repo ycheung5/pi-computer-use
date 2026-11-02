@@ -46,6 +46,7 @@
     "test:native:ocr": "node tests/native-ocr.mjs",
     "test:stop": "node tests/stop-host.mjs",
     "test:stop:busy": "node tests/native-stop-busy.mjs",
+    "test:stop:held": "node tests/native-held-input.mjs",
     "test:stop:busy:check": "node tests/stop-busy-check.mjs",
     "test:stop:pi-host": "node tests/pi-host-stop.mjs",
     "test:stop:pi-host:check": "node tests/pi-host-stop-outcome-check.mjs",

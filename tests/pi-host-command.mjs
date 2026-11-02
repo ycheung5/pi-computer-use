@@ -259,7 +259,7 @@ export function linuxOwnerAbsent(identity) {
     throw error;
   }
 }
-function linuxDescendants(pin) {
+export function linuxDescendants(pin) {
   assert.deepEqual(linuxOwner(pin.pid), pin, "Linux host identity changed");
   const rows = [],
     pending = [pin.pid];

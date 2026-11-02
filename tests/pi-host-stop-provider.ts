@@ -150,18 +150,60 @@ export default async function provider(pi: ExtensionAPI): Promise<void> {
     throw new Error("PI_CU_HOST_STOP_TARGET_INVALID");
   const gate = process.env.PI_CU_HOST_STOP_GATE;
   if (!gate) throw new Error("PI_CU_HOST_STOP_GATE_REQUIRED");
+  const handback = process.env.PI_CU_HOST_STOP_HANDBACK === "1";
+  let observedForResume = false;
   let authorized = false,
     typed = false,
     initialized = false;
   const textArgs = {
     ...target,
-    text: "x".repeat(2000),
+    text: handback ? "x" : "x".repeat(2000),
     method: "sendinput",
     activate: true,
   };
+  pi.on("tool_result", (event) => {
+    if (!handback) return;
+    const d = event.details;
+    if (event.toolName === "windows_computer_use_snapshot")
+      observedForResume =
+        !event.isError &&
+        d !== null &&
+        typeof d === "object" &&
+        "ok" in d &&
+        d.ok === true;
+    if (
+      event.toolName === "windows_computer_use_keypress" &&
+      (event.isError ||
+        !d ||
+        typeof d !== "object" ||
+        !("ok" in d) ||
+        d.ok !== true ||
+        !("cleanupConfirmed" in d) ||
+        d.cleanupConfirmed !== true)
+    )
+      observedForResume = false;
+  });
   pi.on("tool_call", (event) => {
     const a = JSON.stringify(event.input);
     if (event.toolName === "windows_computer_use_health" && a === "{}") return;
+    if (
+      handback &&
+      typed &&
+      event.toolName === "windows_computer_use_snapshot" &&
+      a ===
+        JSON.stringify({ ...target, includeScreenshot: false, activate: false })
+    ) {
+      observedForResume = false;
+      return;
+    }
+    if (
+      handback &&
+      observedForResume &&
+      event.toolName === "windows_computer_use_keypress" &&
+      a ===
+        JSON.stringify({ ...target, keys: ["Ctrl", "End"], activate: false })
+    )
+      return;
     if (
       event.toolName === "windows_computer_use_click" &&
       !initialized &&
@@ -173,10 +215,11 @@ export default async function provider(pi: ExtensionAPI): Promise<void> {
     if (
       event.toolName === "windows_computer_use_type_text" &&
       authorized &&
-      !typed &&
+      (!typed || (handback && observedForResume)) &&
       a === JSON.stringify(textArgs)
     ) {
       typed = true;
+      observedForResume = false;
       return;
     }
     return { block: true, reason: "OWNED_STOP_FIXTURE_SCOPE" };
@@ -232,6 +275,37 @@ export default async function provider(pi: ExtensionAPI): Promise<void> {
     },
     health(),
     fauxAssistantMessage("Scripted host fixture finished."),
+    ...(handback
+      ? [
+          health(),
+          fauxAssistantMessage(
+            "Human control returned; waiting for explicit continuation.",
+          ),
+          fauxAssistantMessage(
+            fauxToolCall("windows_computer_use_snapshot", {
+              ...target,
+              includeScreenshot: false,
+              activate: false,
+            }),
+            { stopReason: "toolUse" },
+          ),
+          fauxAssistantMessage(
+            fauxToolCall("windows_computer_use_keypress", {
+              ...target,
+              keys: ["Ctrl", "End"],
+              activate: false,
+            }),
+            { stopReason: "toolUse" },
+          ),
+          fauxAssistantMessage(
+            fauxToolCall("windows_computer_use_type_text", textArgs),
+            { stopReason: "toolUse" },
+          ),
+          fauxAssistantMessage("Resumed after fresh target observation."),
+          health(),
+          fauxAssistantMessage("Final human control confirmed."),
+        ]
+      : []),
   ]);
   pi.registerProvider(faux.provider);
 }
