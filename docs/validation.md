@@ -2,6 +2,8 @@
 
 Release status: **not accepted**. Automated and passive fixture results are evidence for their stated paths, not proof that all applications, physical input, displays or user acceptance work. The [spec](spec.md) defines requirements; this page maps them to runnable checks and pending evidence.
 
+Current scope, 2026-11-02: [ADR 0004](adr/0004-pi-first-acceptance.md) makes Pi functionality the release criterion. DSH manual/host/model runs, credentials and parity benchmarks are removed. Dated DSH/paired reports and earlier “remaining comparison” statements below are historical evidence, not current instructions or blockers; the [Pi-first queue](tickets.md#execution-queue) owns unfinished work. Reference-backed scripts are optional historical developer utilities, not required checks. Do not run manual DSH comparisons unless the user explicitly restores that scope.
+
 The next validation cycle follows the [current implementation phases](implementation-plan.md#detailed-milestones). The [alignment scenario catalog](#alignment-scenario-catalog) below is planned coverage, not additional passing evidence.
 
 ## Design cleanup checkpoint
@@ -17,10 +19,9 @@ npm ci --ignore-scripts
 npm run check
 npm run build
 npm run test:package
-npm run test:parity -- /path/to/dsh-computer-use-win
 ```
 
-`test:package` packs/extracts the actual distribution and verifies its required assets plus every local Markdown link/heading. `test:parity` reads the reference's advertised schemas without desktop calls, comparing all 25 declarations and supported parameter types, defaults, enums, required fields, array/numeric/string bounds, patterns and additional-property restrictions. It does not compare prose or prove runtime behavior. Extra native signed-32-bit bounds on move_window X/Y are reported explicitly. The inspected reference baseline is 0.5.3 at commit `6fb642129595a6357588c70812974951db304662`.
+`test:package` packs/extracts the actual distribution and verifies its required assets plus every local Markdown link/heading. Optional historical utility: `npm run test:parity -- /path/to/dsh-computer-use-win` reads the reference's advertised schemas without desktop calls, comparing all 25 declarations and supported parameter types, defaults, enums, required fields, array/numeric/string bounds, patterns and additional-property restrictions. It does not compare prose or prove runtime behavior. Extra native signed-32-bit bounds on move_window X/Y are reported explicitly. The inspected reference baseline is 0.5.3 at commit `6fb642129595a6357588c70812974951db304662`.
 
 On WSL2, serialize all live checks:
 
@@ -226,31 +227,29 @@ The existing capability matrix and C00–C13/A01–A06 catalog map these entries
 
 ### Unicode mechanism investigation
 
-The reference Unicode sender (`scripts/windows-uia.ps1`, lines 192–225 in the pinned checkout) batches up to 64 events without per-character sleeps. Pi's [text helper](../assets/text.cs) sends key events separately and waits 50 ms per UTF-16 unit/key pair; it also maps line endings and tabs to functional keys. The reference checkout is an external test prerequisite, not a packaged documentation dependency.
+Pi's [text helper](../assets/text.cs) uses cancellable paced Unicode/key dispatch; existing exact-text and saved-byte cases support the working default. The minimum possible delay and the earlier DSH corruption cause are not release prerequisites. Keep the known working default unless a concrete Pi correctness or responsiveness issue justifies changing it.
 
-The existing Notepad regression (`tests/native-notepad-unicode.mjs` in the source checkout) and [text notes](text.md) provide useful success/failure evidence, but combined pacing and control-character changes do not isolate causation. The current delay assertion identifies an implementation, not the required outcome.
-
-Use the same Notepad version, seed text, keyboard/IME state and focus conditions for DSH and Pi. Include blank insertion, seeded append with a leading newline, ASCII, Chinese, accented characters, emoji, CR/LF/CRLF, tabs and a longer mixed string. Independently compare exact accessible text and disposable saved-file bytes where supported, normalizing only documented line endings. Record elapsed time and actual dispatch method. During later diagnosis, vary batching, pacing and control-character handling independently; do not remove the workaround solely because DSH lacks it. The acceptance assertion is correct text and cleanup, not `inputDelayMs === 50`.
+For a missing Pi case, use a disposable editor with known seed and focus, compare exact accessible/saved text where supported and record timing/method plus observable keyboard context. Unknown TSF/IME state must stay unknown, not trigger an instrumentation project or a claimed universal pass. Any pacing change needs affected Pi regressions; accepted Unicode cases need not be rerun solely because DSH differs.
 
 ## Alignment scenario catalog
 
-These IDs define the planned coverage groups. Expand each group into named cases in the existing test infrastructure; do not create a new test framework or a folder per scenario. Existing runner names below are starting points, not claims of completed paired coverage. The [release matrix](#capability-coverage) supplies tool-by-tool mapping.
+These IDs define the planned coverage groups. Expand each group into named cases in the existing test infrastructure; do not create a new test framework or a folder per scenario. Existing runner names below are starting points, not claims every Pi case has passed. DSH variants of these cases are no longer required. The [release matrix](#capability-coverage) supplies tool-by-tool mapping.
 
 | ID | Setup and cases | Independent expected outcome | Reuse |
 | --- | --- | --- | --- |
-| C00 | Enumerate all tools in matching presets; valid/invalid parameters, descriptions/defaults and disabled execution | Equivalent advertised capability and informative semantics; explicit denial for unavailable tools | `tests/parity-host.mjs`, extension/settings tests |
+| C00 | Enumerate all 25 Pi tools/presets; valid/invalid parameters, guidance and disabled execution | Supported Pi capability and informative semantics; explicit denial for unavailable tools | Extension/settings/worker tests |
 | C01 | Clean package, native Windows and WSL2 hosts; startup, reload, exit, missing assets | Tools load with default Pi; correct worker lifecycle and cleanup; useful startup errors | Package, Pi-host, runtime and WSL runners |
 | C02 | Native and Chromium accessibility fixtures; complete/sparse/truncated/provider-error reads, stale IDs, positive and negative waits | Accurate identities and observed values; partial evidence is not conclusive absence; no wrong-target fallback | Accessibility, nullable-UIA, Chromium and wait runners |
 | C03 | Owned windows, same-process distractor, moved/closed targets; launch, activate, move, close and veto dialog | Observe actual window identity, foreground and bounds independently; preserve distractor; accurate activation/refusal result | Window-management and activation runners |
 | C04 | Native controls supporting focus, invoke, value, selection, expansion and scroll; unsupported patterns and disabled/read-only controls | Intended state transition once; correct fallback where supported; restrictions remain respected | Controls fixture and native-controls runner |
-| C05 | Disposable Notepad documents and native Edit fixture, Unicode cases described above; chords and cancellation | Exact intended text and preserved prefix; released keys; no uncertain-input replay | Notepad-Unicode, native-text and text-physical runners |
-| C06 | Seeded disposable clipboard: plain text, supported rich/OLE formats, unsupported/locked content, external writes and copying after handback | Exact pasted text; pre-test clipboard restored where promised; newer clipboard writes preserved; physical copying suppressed during control and available after handback; truthful failure/cleanup | OLE fixture, native-clipboard and text-physical runners |
+| C05 | Disposable Notepad documents and native Edit fixture, Unicode cases described above; chords and cancellation | Exact intended text and preserved prefix; released keys; no uncertain-input replay | Notepad-Unicode, native-text and gated pi-host-stop runners |
+| C06 | Seeded disposable clipboard: plain text, supported rich/OLE formats, unsupported/locked content, external writes and copying after handback | Exact pasted text; pre-test clipboard restored where promised; newer clipboard writes preserved; physical copying suppressed during control and available after handback; truthful failure/cleanup | Preservation-aware OLE fixture and clipboard runners |
 | C07 | Pointer bench with visible counters, hover, drag/drop and inner scroll; occlusion, external focus changes, stale targets, physical suppression and handback | Exact counter changes, dropped state and released buttons; intended panel scroll; physical attempts have no effect during control; restoration preserves user state after handback | Pointer physical/guard fixtures and activation runner |
 | C08 | Capture/OCR fixture with known labels, cropped text, occlusion and mixed DPI/negative origins | Image-to-screen mapping correct; OCR limitations reported; capture fallback evidence accurate | Capture/OCR fixtures; manual display checks |
 | C09 | Busy input/UIA, wait, competing host, cancellation, timeout, owner/listener crash and handback | Stop prevents further operation input; bounded cleanup and suppression release; no replay; correct ownership recovery, paused handback and explicit-continuation/new-operation behavior | Stop, ownership and wait runners; physical Esc check |
 | C10 | Settings/presets, indicator options, Pi rendering, images and errors | Settings persist; tools denied correctly; presentation matches actual operation; no false verification claims | Settings, indicators and Pi-host runners; visual checks |
 | C11 | Local browser form: fields, checkbox/select, delayed results, disabled/read-only controls, screenshot | Exact submitted values and independently observed page state; restrictions intact | Browser-actions server/host |
-| C12 | Browser navigation, new/closed tabs, stale IDs, dialogs, uploads/downloads, disconnect and reconnect | Intended tab/document and files; no duplicate uncertain action; reference-supported recovery and truthful limitations | Browser actions/host and profile runners |
+| C12 | Browser navigation, new/closed tabs, stale IDs, dialogs, uploads/downloads, disconnect and reconnect | Intended tab/document and files; no duplicate uncertain action; supported Pi recovery and truthful limitations | Browser actions/host and profile runners |
 | C13 | Temporary and kept profiles, browser closure, external Firefox endpoint and native-dialog boundary | Isolation, ownership and cleanup preserved; no daily profile attachment; experimental scope retained | Browser profiles, Firefox endpoint and foreground runners |
 
 Physical cases run serially on a dedicated interactive desktop. Passive fixtures do not substitute for physical-input outcomes. Run ordinary success cases before their injected-failure variants. Both Windows and WSL2 launch paths remain required; do not multiply every desktop-only case across hosts unless host differences can affect it.
@@ -638,19 +637,16 @@ This path matches the tested runtime pin in this release; use the package's veri
 
 ## Manual release gates
 
-These gates remain pending until their environment, steps, expected/actual results and evidence are recorded. Use existing automated runners where they cover the case; this list does not make an automatable check depend on human participation. Human judgment or participation is needed for visual acceptance, real sign-in, physical stop/interference and environment changes that automation cannot safely provide. Respect each runner's isolation requirements and the user's scoped-session choice; clean-install testing is currently user-deferred.
+Only genuinely human/environment-dependent Pi checks belong here; automated failure cases stay with their capability owners. Reuse the accepted native Pi Esc and existing physical/interference evidence. A shared prepared session may satisfy several issues; no DSH side-by-side work is required.
 
-- [ ] Clean Windows Pi installation outside this WSL job, and clean WSL2 Ubuntu installation, with no dev dependency tree or separately installed Windows Node; record install/update/removal and missing/corrupt runtime/network diagnostics.
-- [ ] Dedicated interactive desktop: complete the remaining pointer and keyboard cancellation checks. The legacy `test:native:text:physical` runner is blocked because its fixture overwrote the original clipboard and could retire an unsettled input owner; a preservation-safe long-typing/cancellation runner remains needed.
-- [ ] Repeat input at 100%, 150%, 200% scaling, negative-origin monitors and changed primary/layout. Check screenshots/OCR coordinate accuracy and restoration.
-- [ ] Real Esc and extra shortcut while input/UIA is busy; release held keys/buttons, prevent same-operation retries, and recover only on new user input. Verify stop protection with optional indicators disabled while retaining the required local exclusive-control border.
-- [ ] Exclusive-control suppression and explicit handback per the [delivery cases](implementation-plan.md#exclusive-control-delivery); preserve user actions after handback and clipboard ownership changes. Retain same-process/menu/dialog, cross-application drag and target-replacement checks.
-- [ ] Rich clipboard formats, locked/delayed/unsupported clipboard content, history/cloud exclusion and password protection. Synthetic protocol tests cannot establish these physical effects.
-- [ ] Human visual indicator lifetime, large cursor, screenshot exclusion, monitor changes and remote/screen-sharing/recording visibility. Confirm actual Chromium border/page cues; API success is not visual acceptance.
-- [ ] Interactive sign-in in dedicated kept profiles and clear-profile workflow; daily profiles remain untouched. Cookie fixtures are not human login-flow proof.
-- [ ] Missing OCR languages, protected/elevated windows and unsupported provider behavior report limitations honestly.
-- [ ] Complete broader visible-browser foreground preservation acceptance, including native dialogs and user interference. The focused nonmodal check below passed; it does not establish every visible workflow.
-- [ ] Record representative user workflows and benchmark regressions, then user acceptance. No overall release/parity completion claim until unresolved gates are addressed or explicitly accepted.
+- [x] Actual native Windows Pi-host physical Esc: canonical input stop/cleanup, operation release, stable partial text, no leaked Esc, held state zero and clean exit. See [receipt](#exclusive-control-candidate).
+- [ ] #31/#26/#30/#20: one prepared session for the remaining configured WSL-host shortcut, human editing after handback/explicit continuation and lock/unlock behavior. Automate held-input failure cases first; the human session is not one test per ticket.
+- [ ] #6/#20 (shared with #30 mapping): grouped supported display-scaling/topology and visual/capture/remote-indicator checks, preserving the original display settings. Record unavailable configurations honestly.
+- [ ] #18: one private sign-in on a site that permits persistence, normal Pi restart and human status confirmation/removal. Bitwarden's expected logout is already recorded; do not repeat it for persistence.
+- [ ] #2: clean package installation outside the development tree in a disposable Windows/WSL-capable environment. This remains user-deferred; do not repeatedly request a guest or modify the user's host virtualization setup.
+- [ ] #21: final user acceptance of the supported Pi workflows and documented limitations after agent-owned gaps are resolved.
+
+Clipboard contention/privacy, OCR availability/language/cancellation and inaccessible/provider failures remain agent-owned cases under #27/#7/#28; they do not become manual DSH tasks. Closure/disposition is recorded by each owner and reconciled by #21.
 
 ## Review trace and evidence
 
@@ -792,7 +788,7 @@ On 2026-11-02 the first retry stopped in its no-input prerequisite before any ph
 
 The repair exempts tracked settlement requests from stop-triggered cancellation. Its deterministic actual-worker/fake-native test failed before the fix and passed afterward; all eight preparation/cleanup tests and the full suite (167 passed, one skipped) passed. Only initial test-harness startup waits were aligned with the existing 90-second worker budget; production deadlines and later cleanup gates were unchanged. The subsequent successful physical receipt is `/tmp/pi-cu31-host-esc-k3rFby/{result.json,source.json,foreground.json,absence.json}`. Its source fingerprint matches both fresh prerequisite receipts (`pi-cu-stop-preflight-GcjHYl` and `pi-cu-stop-preflight-2CBWa2`), and its input call was not retried or automatically replayed.
 
-**Still open:** actual Pi-host configured shortcut, WSL/DSH-host physical stopping, known-held-modifier acceptance, broader capture/idle/handback and lock/failure cases. The [delivery plan](implementation-plan.md#exclusive-control-delivery) retains these gates; #31 is not complete.
+**Current Pi-only gaps:** WSL-host physical stopping using the configured shortcut where useful, known-held-modifier acceptance, broader capture/idle/handback and lock/failure cases. Reuse native Pi Esc and worker shortcut evidence; DSH-host stopping is removed. The [delivery plan](implementation-plan.md#exclusive-control-delivery) retains these gates; #31 is not complete.
 
 ### Remaining cancellation and locked-clipboard test boundaries
 

@@ -1,14 +1,14 @@
 # Pi Windows Computer Use
 
-Status: agreed scope. Original product specification: [GitHub issue #1](https://github.com/ycheung5/pi-computer-use/issues/1). Current investigation, repair and acceptance specification: [GitHub issue #23](https://github.com/ycheung5/pi-computer-use/issues/23), labeled `ready-for-agent`. This document consolidates the current requirements; the issue records the repair-cycle scope.
+Status: agreed scope. Original product specification: [GitHub issue #1](https://github.com/ycheung5/pi-computer-use/issues/1). Current Pi-first acceptance is tracked by the existing product issues and release gate [#21](https://github.com/ycheung5/pi-computer-use/issues/21). [ADR 0004](adr/0004-pi-first-acceptance.md) supersedes mandatory DSH parity; historical alignment records are not current release gates.
 
 ## Problem Statement
 
-Pi users need to observe and operate Windows applications and browser pages without installing DSH or coordinating several Pi extensions. The reference project provides the desired behavior, but its host integration targets DSH and its Windows assumptions do not directly accommodate Pi running in WSL2. The new project also needs a simple source layout and indexed documentation so contributors can find relevant context without reading the whole repository.
+Pi users need to observe and operate Windows applications and browser pages without installing DSH or coordinating several Pi extensions. DSH supplied useful design context, but this project is judged on supported Pi outcomes and its Windows/WSL2 integration. The new project also needs a simple source layout and indexed documentation so contributors can find relevant context without reading the whole repository.
 
 ## Solution
 
-Deliver one installable Pi package with native computer-use tools, reference-equivalent desktop/browser behavior, machine-wide personal settings and package-managed Windows execution prerequisites. Support native Windows Pi and WSL2 Pi through one Windows-side automation worker. Preserve target safeguards, independent emergency stopping and honest verification while simplifying implementation where behavior stays intact.
+Deliver one installable Pi package with native computer-use tools, reliable supported desktop/browser behavior, machine-wide personal settings and package-managed Windows execution prerequisites. Support native Windows Pi and WSL2 Pi through one Windows-side automation worker. Preserve target safeguards, independent emergency stopping and honest verification while simplifying implementation where behavior stays intact.
 
 ## User Stories
 
@@ -41,9 +41,9 @@ Deliver one installable Pi package with native computer-use tools, reference-equ
 27. As a user, I want competing sessions to receive a busy result, so that they cannot interleave desktop actions.
 28. As an agent, I want calls within the owning session ordered, so that observations and actions retain their intended sequence.
 29. As a user, I want browser automation without moving my physical pointer, so that web work can remain in the background.
-30. As a user, I want installed Chrome and Edge support and experimental installed Firefox-family support, so that browser compatibility follows the reference.
+30. As a user, I want installed Chrome and Edge support and experimental installed Firefox-family support, so that I can use the installed supported browsers.
 31. As an agent, I want browser tabs, navigation, element actions and dialogs, so that I can complete supported web workflows.
-32. As an agent, I want page changes returned after browser actions, so that I can assess their effect as in the reference.
+32. As an agent, I want page changes returned after browser actions, so that I can assess their effect.
 33. As a user, I want isolated temporary browser profiles by default, so that automation does not use my daily browser profile.
 34. As a user, I want optional remembered sign-ins in a dedicated profile, so that I can repeat authenticated workflows.
 35. As a user, I want personal settings shared across projects and hosts, so that preferences stay consistent on my Windows machine.
@@ -54,19 +54,19 @@ Deliver one installable Pi package with native computer-use tools, reference-equ
 40. As a user, I want input never replayed automatically after an uncertain timeout, so that an action is not accidentally duplicated.
 41. As a maintainer, I want deterministic fixtures and failure coverage, so that regressions are reproducible.
 42. As a maintainer, I want integration tests through both hosts, so that worker-only success does not hide launch-path failures.
-43. As a user, I want benchmark comparisons and acceptance checks, so that improvements do not silently sacrifice reliability or responsiveness.
+43. As a user, I want Pi performance measurements and acceptance checks, so that improvements preserve reliability and useful responsiveness.
 44. As a contributor, I want a short documentation index and simple folders, so that I can find task-specific context with less searching.
 
-45. As a maintainer, I want existing fixes traced to reference mechanisms and evidence, so that symptom workarounds do not become permanent requirements.
-46. As a maintainer, I want material departures classified, so that required Pi adaptations are distinguishable from accidental gaps.
-47. As a user, I want text dispatch compared with DSH before retaining fixed delays, so that unnecessary latency does not conceal a mechanism defect.
-48. As a user, I want repeatable paired tests automated, so that I do not have to paste every diagnostic prompt manually.
+45. As a maintainer, I want fixes traced to observed Pi failures and evidence, so that symptom workarounds do not become permanent requirements.
+46. As a maintainer, I want supported Pi behavior and limitations explicit, so that design choices are distinguishable from defects.
+47. As a user, I want exact, responsive Pi text entry validated, so that pacing changes preserve correctness and focus without unnecessary delay.
+48. As a user, I want repeatable Pi tests automated, so that I do not have to paste diagnostic prompts manually.
 49. As an agent, I want detailed action guidance and useful failure evidence, so that I can choose supported recovery.
 50. As a user, I want ordinary tasks with controlled obstacles tested, so that tool success translates into useful task completion.
 51. As a user, I want offscreen controls, stale IDs and incomplete accessibility handled when supported, so that routine obstacles do not require unnecessary intervention.
 52. As a maintainer, I want direct-call reproduction of agent failures, so that tool, fixture, environment and reasoning problems are separated using evidence.
-53. As a user, I want my available Pi and DSH model configurations tested, so that unavailable shared-model access does not block acceptance.
-54. As a maintainer, I want shared reference failures recorded, so that they become improvement candidates rather than false passes.
+53. As a user, I want my available Pi model configuration tested, so that acceptance reflects how I use the extension.
+54. As a maintainer, I want Pi failures and limitations recorded, so that unavailable or inconclusive cases do not become false passes.
 55. As a maintainer, I want failures retained and affected regressions rerun, so that a final pass does not hide previous defects.
 56. As a user, I want three consecutive reset successes for required task/recovery scenarios, so that a single lucky run is not sufficient.
 57. As a contributor, I want stale documentation replaced during each fix, so that agents receive one current answer rather than conflicting notes.
@@ -77,7 +77,7 @@ Deliver one installable Pi package with native computer-use tools, reference-equ
 
 - Implement fresh TypeScript informed by reference version 0.5.3 at commit `6fb642129595a6357588c70812974951db304662`; neither copy its engine nor wrap its package. A small native Windows helper is permitted where necessary. Retain applicable notices if any third-party material is subsequently reused.
 - Register native Pi tools directly. The initial release requires neither a custom MCP server nor another Pi extension.
-- Preserve all 24 automation capabilities and the tool-management entry, including supported parameters and failure semantics inventoried from the reference. Preserve its safeguards and experimental status, except for explicitly approved departures recorded in ADRs; framework adaptation alone does not justify dropping behavior.
+- Retain the 24 implemented automation capabilities and tool-management entry. Define supported parameters, observations, failures and safeguards by this Pi specification; exact DSH behavior is not a release requirement. Preserve the declared browser/host support and experimental status.
 - Use an extension module for tools, lifecycle, commands and rendering; a launcher module for host differences; and a Windows worker with focused desktop, browser, settings and stop-control modules. Start with flat responsibility-named source files and introduce subdirectories only when implementation growth justifies them.
 - The worker exposes request execution with cancellation and disposal through an internal transport. Native Windows launches it directly; WSL2 uses a thin launcher. Keep browser discovery, profiles, filesystem paths and native process management on Windows.
 - Supply a private runtime or packaged worker. Start it on first use, reuse it, and clean up on session shutdown/reload. Packaging and native interop choices require early feasibility evidence.
@@ -85,7 +85,7 @@ Deliver one installable Pi package with native computer-use tools, reference-equ
 - Track a computer-use operation across model turns. Use final Pi settlement for completion and idempotent session shutdown for cleanup. Do not mistake an individual model turn or low-level run end for a new user operation.
 - Propagate cancellation, allow bounded key/button release cleanup, and keep emergency stopping independent of blocked automation. Never replay timed-out input automatically.
 - Prefer background control actions. Apply the [exclusive-control contract](#exclusive-control) when physical desktop control is needed. Preserve target, occlusion, lifetime, foreground and restoration safeguards across control and human handback.
-- Preserve reference observation behavior: desktop actions generally report dispatch; browser actions normally return page changes. Explicit waits/observations establish expected outcomes. Distinguish sent, observed, unconfirmed and inconclusive results.
+- Keep the Pi observation contract: desktop actions generally report dispatch; browser actions normally return page changes. Explicit waits/observations establish expected outcomes. Distinguish sent, observed, unconfirmed and inconclusive results.
 - Preserve Chrome/Edge and experimental installed Firefox-family compatibility. Libraries are allowed where they reduce code without altering the agreed contracts; managed Firefox is not an accepted compatibility substitute.
 - Default to isolated temporary profiles; remembered sign-ins are opt-in dedicated profiles. Personal settings live on the Windows side, apply across projects and are managed through a Pi command. Project overrides are excluded initially.
 - Show the accepted blue edge glow at approximately 1.5 times DSH thickness throughout exclusive control; its visibility follows the [control contract](#exclusive-control). Preserve non-activation, click-through, capture and per-monitor behavior.
@@ -93,10 +93,10 @@ Deliver one installable Pi package with native computer-use tools, reference-equ
 - Support a release-tested baseline of Windows 11, Windows PowerShell 5.1, WSL2 Ubuntu and pinned/documented Pi versions. Compatibility outside this baseline remains unverified until tested.
 - Provide a small documentation index with task-specific section links. Requirements, delivery sequence, terminology and rationale each have a distinct source of truth; load only the documentation needed for the current task.
 
-- Follow reference behavior except where an accepted ADR records a user-approved departure, evidence establishes a gap or a necessary Pi adaptation. Research source, history, tests and model-visible guidance before changing mechanisms; classify each material departure and record its evidence/disposition.
+- Prioritize working Pi outcomes, simple maintainable design and evidence-backed repairs. DSH source can inform a diagnosis, but installing/running DSH, matching its implementation or proving manual parity is not required. [ADR 0004](adr/0004-pi-first-acceptance.md) records this change.
 - The user approved stronger window-lifetime tracking beyond the reference's raw HWND/PID checks. Design and validate lifetime-bound window references under #28 before choosing the mechanism and caller interface. Explicitly distinguish compatibility selectors from stronger references; lost identity proof must not silently retarget a replacement or bypass Windows access restrictions.
-- Keep previous fixes provisional during the audit. In particular, isolate Unicode batching, event construction, pacing and newline handling before treating the 50 ms workaround as necessary. Audit clipboard, activation/restoration and generic tool descriptions similarly.
-- Extend existing fixtures and paired comparison infrastructure rather than introducing a new framework or public test-only API. Investigate supported host interfaces before promising unattended model-driven execution.
+- Change provisional workarounds only when Pi evidence justifies it. Exact text, useful responsiveness, preservation and cleanup are the criteria; finding DSH corruption causes or the minimum possible per-character delay is not a release prerequisite. Record uncertainty honestly.
+- Extend existing Pi fixtures and host test infrastructure rather than introducing a new framework or public test-only API. Investigate supported host interfaces before promising unattended model-driven execution.
 - Do not add a separate planner, elaborate recovery controller or fixed production retry/time budget. Runner watchdogs bound tests without altering production policy.
 - Reconcile documentation during each investigation/fix: replace stale instructions, remove duplicate authority, retain concise historical evidence, and update the index/links. Requirements, sequencing, results, topic guidance and decision rationale retain their existing distinct owners.
 
@@ -119,16 +119,16 @@ Accepted product decision, 2026-11-01; implementation is in progress and full ac
 - Test extension behavior through native Pi tool calls, including images, settings/tool denial and lifecycle. Test worker behavior through its normal request/cancellation interface, and prove both host launch paths end to end.
 - Test every capability for valid/invalid arguments, supported success, relevant failure conditions and cancellation. A successful mock response cannot prove actual UIA, OCR, capture or input behavior.
 - Use the reference's isolated regression suites, dedicated UIA fixtures, local browser pages, capture/input contracts, lifecycle tests and benchmarks as prior art. Reuse existing project fixtures and evidence through the [current implementation phases](implementation-plan.md#detailed-milestones) and [validation catalog](validation.md#alignment-scenario-catalog).
-- Audit behavioral departures before accepting previous workarounds as improvements. Use paired DSH/Pi tool tests and real-agent outcome/recovery tasks; record differing model configurations without attributing their combined results solely to the extension. Require three consecutive reset successes for required task/recovery scenarios, with failures retained and affected regressions rerun. Optimization follows demonstrated correctness.
+- Use Pi tool checks and real-agent outcome/recovery tasks. Record the effective Pi model and host, and separate product, model, environment and fixture failures using evidence. Retain three consecutive reset successes for required Pi task/recovery scenarios, preserve failures and rerun affected regressions. Optimization follows demonstrated correctness.
 - Separate portable deterministic tests, live Windows fixtures, and suites emitting physical input. The user selected scoped disposable tests in the current Windows session, with standing idle-test authorization. Keep input scoped to owned disposable targets, preserve unrelated applications/documents and profiles, and serialize desktop activity. Cases whose isolation or cleanup requirements cannot be met remain blocked.
 - Cover stale targets, incomplete observations, focus/occlusion, clipboard restoration, DPI/coordinate mapping, browser navigation/profiles, competing sessions, crash recovery, timeout non-replay and emergency-stop behavior. Exclusive-control acceptance follows the [bounded delivery plan](implementation-plan.md#exclusive-control-delivery); retain historical shared-input outcomes as historical evidence.
 - Require automated regression and integrated-host suites plus recorded manual checks for visual indicators, physical stop shortcuts, display changes and interactive sign-in. The user performs additional acceptance testing.
-- Measure cold startup, warm observations, input dispatch and complete workflows against the reference on the same machine. Explain and address regressions or obtain explicit acceptance; do not remove safeguards to improve timings.
-- Complete the detailed coverage matrix and capability-to-test mapping before declaring parity. Automated tests are necessary but do not establish every possible application/state combination.
+- Measure Pi cold startup, warm observations, input dispatch and representative workflows as needed to diagnose responsiveness or regressions. Do not require DSH timings or remove safeguards to improve speed.
+- Complete the Pi coverage matrix and capability-to-test mapping before declaring release readiness. Automated tests are necessary but do not establish every possible application/state combination.
 
-- Compare equivalent direct tool calls on reset fixtures separately from real-agent outcome tasks. Agent tasks permit supported recovery within intended disposable targets; method-specific diagnostic tests retain their constraints. Explicit stops, disabled controls and uncertain-input non-replay remain binding.
-- Test the user's GPT-6.1 Sol low-reasoning Pi setup and available OpenRouter DSH model, recording effective configurations. Treat these as host/model combinations, not isolated extension or reasoning benchmarks. Reproduce failed traces through direct calls where possible; leave unsupported cause attribution unknown.
-- Gather each scenario's runnable baseline, diagnose its observed failures and make targeted repairs with affected regressions. Whole-suite baseline completion is not required before diagnosing a known case; final reconciliation still accounts for every required outcome. Continue independent cases after confirmed cleanup/reset; block dependent cases after emergency stop or uncertain cleanup. A shared DSH failure remains an improvement candidate, not successful acceptance.
+- Separate direct Pi tool checks on reset fixtures from real-agent outcome tasks. Agent tasks permit supported recovery within intended disposable targets; method-specific diagnostics retain their constraints. Explicit stops, disabled controls and uncertain-input non-replay remain binding.
+- Test the user's GPT-6.1 Sol low-reasoning Pi setup and record its effective configuration. Reproduce failed traces through direct calls where possible; leave unsupported cause attribution unknown. DSH/OpenRouter credentials and DSH host/model/manual runs are not required.
+- Gather each scenario's runnable baseline, diagnose its observed failures and make targeted repairs with affected regressions. Whole-suite baseline completion is not required before diagnosing a known case; final reconciliation still accounts for every required outcome. Continue independent cases after confirmed cleanup/reset; block dependent cases after emergency stop or uncertain cleanup. A historical DSH result is optional context, not a current acceptance dependency.
 - Validate current documentation and remove contradictions before a phase closes. Three reset successes do not erase earlier failures or establish universal reliability; existing manual release gates still apply.
 
 ## Out of Scope
@@ -137,10 +137,10 @@ Accepted product decision, 2026-11-01; implementation is in progress and full ac
 - Copying the reference engine or substituting managed Firefox for installed-Firefox compatibility.
 - Project-specific settings overrides, non-Windows desktop automation and claims of universal application coverage.
 - Administrator/UAC bypass, bundled AI models or credentials, and automatic replay of uncertain input.
-- A reduced-feature initial release presented as full parity; milestones are incremental development checkpoints.
+- Claims of full DSH parity. Release claims concern the supported Pi capabilities and documented limits; milestones are incremental development checkpoints.
 
 ## Further Notes
 
-The initial implementation exists; acceptance remains incomplete. Follow the [current outcome map and queue](tickets.md#delivery-outcomes-and-ownership), [implementation plan](implementation-plan.md#detailed-milestones) and [validation catalog](validation.md#alignment-scenario-catalog). Each runnable scenario proceeds through baseline, diagnosis, targeted repair and affected regressions; final reconciliation and optimization follow the required outcomes. Framework adaptations preserve the original product contracts; a failed gate does not silently reduce scope.
+The initial implementation exists; acceptance remains incomplete. Follow the [current outcome map and queue](tickets.md#delivery-outcomes-and-ownership), [implementation plan](implementation-plan.md#detailed-milestones) and [validation catalog](validation.md#alignment-scenario-catalog). Each runnable scenario proceeds through baseline, diagnosis, targeted repair and affected regressions; final reconciliation and optimization follow the required outcomes. Pi functional and preservation requirements remain binding; removed DSH comparison gates must not be reintroduced through historical notes.
 
 Issue tracker: [ycheung5/pi-computer-use](https://github.com/ycheung5/pi-computer-use). See [tracker configuration](agents/issue-tracker.md) for operations and [triage labels](agents/triage-labels.md) for status vocabulary.

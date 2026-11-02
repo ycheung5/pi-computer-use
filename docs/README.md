@@ -8,11 +8,12 @@ Read the row matching the task; follow section links before reading whole docume
 | Implementation contracts | [Spec: implementation decisions](spec.md#implementation-decisions) |
 | Delivery, design review and feasibility | [Design revision](implementation-plan.md#design-revision), [plan: detailed milestones](implementation-plan.md#detailed-milestones), [feasibility gates](implementation-plan.md#feasibility-gates) |
 | Test design and release validation | [Spec: testing decisions](spec.md#testing-decisions), [plan: coverage matrix](implementation-plan.md#coverage-matrix) |
-| DSH alignment, phased testing and agent recovery acceptance | [Current phases](implementation-plan.md#detailed-milestones), [baseline audit](validation.md#baseline-identity-and-schema-evidence), [guidance inventory](validation.md#model-visible-guidance-inventory), [scenario catalog](validation.md#alignment-scenario-catalog) |
+| Pi acceptance, phased testing and agent recovery | [Current phases](implementation-plan.md#detailed-milestones), [baseline audit](validation.md#baseline-identity-and-schema-evidence), [guidance inventory](validation.md#model-visible-guidance-inventory), [scenario catalog](validation.md#alignment-scenario-catalog) |
 | Release checks, capability coverage and pending acceptance | [Validation](validation.md) |
 | Pi interfaces and sources | [Pi extension research](pi-extension-research.md) (research context; current spec takes precedence over earlier proposals) |
 | Domain terminology | [Glossary](../GLOSSARY.md) |
-| Why behavior parity was chosen | [ADR 0001](adr/0001-preserve-reference-behavior.md) |
+| Current Pi-first acceptance scope | [ADR 0004](adr/0004-pi-first-acceptance.md) |
+| Historical reference-parity decision | [Superseded ADR 0001](adr/0001-preserve-reference-behavior.md) |
 | Stronger native window identity design | [Lifetime plan](implementation-plan.md#window-lifetime-design), [ADR 0002](adr/0002-window-lifetime-references.md) |
 | Publish or read issues | [Issue tracker](agents/issue-tracker.md), [triage labels](agents/triage-labels.md) |
 | What works, remaining outcomes, next work and cleanup decisions | [Progress summary](tickets.md#current-progress), [delivery map](tickets.md#delivery-outcomes-and-ownership), [execution queue](tickets.md#execution-queue), [cleanup dispositions](tickets.md#cleanup-dispositions), [original obligations](tickets.md#original-issue-disposition) |

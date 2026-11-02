@@ -17,7 +17,10 @@ The period from a native window's creation until its destruction. A replacement 
 An observed identity bound to one window lifetime. A reference to an ended lifetime does not identify its replacement.
 
 **Feature parity**:
-Coverage of the agreed reference capabilities, including desktop and browser automation, settings, indicators and emergency stopping; experimental capabilities retain their experimental status.
+A comparison of the capabilities and observable behavior of two systems, as used in the historical DSH comparison records.
+
+**Capability coverage**:
+The set of agreed Pi desktop, browser, settings, indicator and stopping behaviors exercised by named checks, including supported cases and explicit limitations.
 
 **Desktop ownership**:
 Exclusive permission for one Pi session to operate a Windows desktop during a computer-use operation, shared across native Windows and WSL2 hosts.
