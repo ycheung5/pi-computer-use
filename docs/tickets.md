@@ -2,7 +2,24 @@
 
 ## Current investigation and acceptance work
 
-Current delivery view, reconciled against GitHub on 2026-11-01. Requirements remain in [spec](spec.md); results and retained failures live in [validation](validation.md). Product parent [#1](https://github.com/ycheung5/pi-computer-use/issues/1), repair parent [#23](https://github.com/ycheung5/pi-computer-use/issues/23), and release gate [#21](https://github.com/ycheung5/pi-computer-use/issues/21) remain open.
+Current delivery view, reconciled against GitHub on 2026-11-02. Requirements remain in [spec](spec.md); results and retained failures live in [validation](validation.md). Product parent [#1](https://github.com/ycheung5/pi-computer-use/issues/1), repair parent [#23](https://github.com/ycheung5/pi-computer-use/issues/23), and release gate [#21](https://github.com/ycheung5/pi-computer-use/issues/21) remain open.
+
+### Current progress
+
+| Measure | Verified status |
+| --- | --- |
+| Tool implementation | All 25 target tools have implementations and match the pinned DSH tool names. Full behavioral parity and release acceptance remain incomplete. |
+| Issues completed | 12: #3, #8, #14, #16, #17, #19, #24, #25, #29, #32, #33, #34. These are GitHub `completed` closures. |
+| Issues superseded | 8: #4, #5, #9, #10, #11, #12, #13, #15. Their remaining requirements were transferred; these are not completed deliveries. |
+| Issues open | 16: three product/repair/release parents (#1, #23, #21) and 13 deliverables with remaining criteria. An open umbrella does not invalidate its accepted parts. |
+| Latest accepted stop result | Actual native Windows Pi-host physical Esc, input/control release and clean exit passed. The queued-settlement cancellation defect was reproduced and fixed in `ec2035b`. [Evidence](validation.md#exclusive-control-candidate). |
+| Latest recorded checks | 167 portable tests passed, one skipped; build and 88-entry package/documentation checks passed. |
+
+Completed product slices include WSL launch, ownership, explicit waits, settings/tool selection, Chromium workflows and experimental installed Firefox. Six baseline/comparison issues are also complete. Additional accepted slices inside open issues include native Pi Esc, scoped native append/save and repeated browser/mixed-agent tasks; see the delivery map below. Recent stop work completed subcriteria, not another whole issue.
+
+The remaining work is acceptance and targeted repair, not implementing another set of 25 tools. #6/#7/#20 retain display/OCR/indicator cases; #26/#27/#28/#30/#31 retain input, targeting, restoration and control-failure cases; #35/#36 retain unfinished agent outcomes and the DSH leg; #37 retains aggregate diagnosis/reconciliation. #18 needs one persistent-sign-in manual result. #2's clean-Windows guest was explicitly deferred. Missing DSH credentials block that comparison leg, not independently runnable Pi work.
+
+There is no defensible overall completion percentage: the issues have different sizes, and superseded issues are not delivered features. Use the accepted scopes and remaining clauses, rather than open-issue count alone, to assess progress.
 
 The goal is one standalone Pi package that completes Windows tasks from native Windows and WSL2, follows pinned DSH behavior, preserves user work and supports recovery. A completed comparison establishes its stated evidence scope; it does not certify the product or close an original requirement.
 

@@ -115,6 +115,7 @@ Accepted product decision, 2026-11-01; implementation is in progress and full ac
 ## Testing Decisions
 
 - Reuse the agreed tool/worker execution seams and integrated Pi entry points. Test external behavior and observable guarantees, not private implementation shape. No additional public test-only interface is required by this spec.
+- Reuse accepted evidence across issues. An open issue is not a reason to repeat an accepted check; rerun an affected check when relevant behavior or its evidence collector changes, or a recorded result is invalidated. Group remaining human-only checks into prepared sessions and distinguish new host/mechanism coverage from repeated coverage.
 - Test extension behavior through native Pi tool calls, including images, settings/tool denial and lifecycle. Test worker behavior through its normal request/cancellation interface, and prove both host launch paths end to end.
 - Test every capability for valid/invalid arguments, supported success, relevant failure conditions and cancellation. A successful mock response cannot prove actual UIA, OCR, capture or input behavior.
 - Use the reference's isolated regression suites, dedicated UIA fixtures, local browser pages, capture/input contracts, lifecycle tests and benchmarks as prior art. Reuse existing project fixtures and evidence through the [current implementation phases](implementation-plan.md#detailed-milestones) and [validation catalog](validation.md#alignment-scenario-catalog).
