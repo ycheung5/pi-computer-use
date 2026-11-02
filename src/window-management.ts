@@ -29,6 +29,7 @@ const definitions: Record<
       arguments: { type: "string", maxLength: 32767, default: "" },
       workingDirectory: { type: "string", maxLength: 32767, default: "" },
       activate: { type: "boolean", default: false },
+      resolveOnly: { type: "boolean", default: false },
       waitMs: { type: "integer", minimum: 0, maximum: 10000, default: 1500 },
     },
     required: ["target"],
@@ -165,7 +166,7 @@ export async function manageWindow(
   signal?.throwIfAborted();
   try {
     const before =
-      action === "launch_app"
+      action === "launch_app" && !args.resolveOnly
         ? await nativeDesktop.execute(
             "list_windows",
             { maxWindows: 1000, includeInvisible: false, _metadataOnly: true },
@@ -176,7 +177,7 @@ export async function manageWindow(
     signal?.throwIfAborted();
     if (!result.ok && String(result.error).includes("LAUNCH_PENDING_TIMEOUT"))
       await retireDesktop();
-    if (action === "launch_app" && result.ok) {
+    if (action === "launch_app" && !args.resolveOnly && result.ok) {
       if (Number(args.waitMs) > 0)
         await delay(Number(args.waitMs), undefined, { signal });
       const after = await nativeDesktop.execute(

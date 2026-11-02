@@ -49,7 +49,13 @@ const call = async (action, args = {}) => {
   const tool = host.tools.get(`windows_computer_use_${action}`);
   assert.ok(tool, `Pi registers ${action}`);
   return (
-    await tool.execute(action, { ...target, ...args }, undefined, undefined, {})
+    await tool.execute(
+      action,
+      action === "list_windows" ? args : { ...target, ...args },
+      undefined,
+      undefined,
+      {},
+    )
   ).details;
 };
 const find = async (query, controlType) => {
@@ -116,9 +122,9 @@ try {
   });
   assert.equal(wrong.ok, false);
   assert.match(wrong.error, /identity|owner/i);
-  const previous = (await call("list_windows", {})).windows.find(
-    (window) => window.hasKeyboardFocus,
-  );
+  const windows = await call("list_windows", {});
+  assert.equal(windows.ok, true, JSON.stringify(windows));
+  const previous = windows.windows.find((window) => window.hasKeyboardFocus);
   const sibling = Number((await fixtureCommand("sibling")).split(":")[1]);
   const wrongWindow = await call("set_value", {
     nativeWindowHandle: sibling,

@@ -1,6 +1,6 @@
 # Browser read channel
 
-The accepted [default-app/workspace policy](spec.md#default-apps-workspaces-and-foreground) now requires ordinary Windows default-browser and existing-window reuse. That change is pending in #30. The dedicated channel described below is the current implementation and will remain an explicit alternative; its existing acceptance does not prove ordinary-browser reuse.
+Ordinary browsing follows the [default-app/workspace policy](spec.md#default-apps-workspaces-and-foreground): resolve the Windows default app and reuse its intended window through native UI with a separate task tab. Pi guidance and [handler/foreground support](windows.md#default-apps-and-workspaces) implement that route; scoped native Chrome reuse passed, while other browser/app and ordinary-agent workflow coverage remains. The dedicated protocol channel below is an explicit alternative, and its earlier acceptance does not prove ordinary-browser reuse.
 
 Pi's normal tools route to the Windows browser worker when given `browserTab` or a browser element ID. `set_value` with `elementId: new-tab` opens a URL in a dedicated browser context; `<tab>:address` navigates it. `list_windows` annotates connected browser/tab IDs. Snapshot, accessibility_tree, find, element_info and screenshot work in this channel. Snapshot emits its PNG as an image block, with base64 omitted from text metadata.
 
@@ -30,7 +30,7 @@ Historical optional form comparison (not a release prerequisite): `npm run test:
 
 ## Configuration and limits
 
-Use `/computer-settings` to select browserApp and browserVisible in personal settings. The current dedicated channel defaults to a visible browser using Chrome/Edge preference and installed-browser fallback; it does not honor every Windows default browser. This fallback and automatic dedicated routing must be reconciled with the accepted policy under #30. `PI_CU_BROWSER_EXECUTABLE` is an optional local executable-path override, not a model tool parameter. Fixtures use isolated settings files and never modify personal settings.
+Use `/computer-settings` to select browserApp and browserVisible in personal settings. These preferences apply to the explicitly selected dedicated channel, which uses Chrome/Edge preference and installed-browser fallback. Ordinary app/window reuse uses Windows association resolution and does not consult these dedicated-browser preferences or silently substitute its supported browser. `PI_CU_BROWSER_EXECUTABLE` is an optional local executable-path override, not a model tool parameter. Fixtures use isolated settings files and never modify personal settings.
 
 The Chromium outline comes from the accessibility tree. Traversal returns explicit truncation at budgets, but fetching an underlying AX tree or native browser protocol command can outlast the traversal budget; worker deadlines remain the outer safeguard. Page text is untrusted. An outline/page change proves neither user intent nor objective success. Browsers may activate for native dialogs; interaction behavior is validated in its own slice.
 

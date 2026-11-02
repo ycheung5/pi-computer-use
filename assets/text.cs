@@ -149,6 +149,7 @@ partial class WindowsBridge {
         if(!main.Current.IsEnabled)throw new InvalidOperationException("ELEMENT_DISABLED");
         object raw;if(main.TryGetCurrentPattern(ValuePattern.Pattern,out raw) && ((ValuePattern)raw).Current.IsReadOnly)throw new InvalidOperationException("READ_ONLY: fallback cannot bypass a read-only value");
       } else window=ResolveObservationWindow(quiet);
+      ApplyVisibleIntent(args,window);
       if(textFocus.Count>0 && !textFocus.ContainsKey(PointerOriginKey(window)))ForgetTextFocus();
       uint owner=WindowOwner(window);popups=ControlPopups(owner,window);
       string text=TextOption(args,"text",""),method=TextOption(args,"method","auto");

@@ -134,6 +134,7 @@ partial class WindowsBridge {
         window=GetAncestor(PointerWindowAt(first,NumberOption(args,"_stopProcessId",0)),2);
         if(window==IntPtr.Zero)throw new InvalidOperationException("TARGET_NOT_FOUND: no window at point");
       } else window=ResolveObservationWindow(quiet);
+      ApplyVisibleIntent(args,window);
       owner=WindowOwner(window);popups=ControlPopups(owner,window);
       string button=TextOption(args,"button","left"),dispatch=TextOption(args,"dispatch","auto");
       if(action=="click" || action=="double_click" || action=="drag")ForgetTextFocus();

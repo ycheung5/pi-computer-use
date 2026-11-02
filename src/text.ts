@@ -7,7 +7,7 @@ const target = {
   windowTitle: { type: "string" },
   processId: { type: "integer", minimum: 1 },
   nativeWindowHandle: { type: "integer", minimum: 1 },
-  activate: { type: "boolean", default: false },
+  activate: { type: "boolean" },
   browserTab: { type: "string", minLength: 1 },
 };
 export const textTools = [

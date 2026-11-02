@@ -13,7 +13,7 @@ Read the row matching the task; follow section links before reading whole docume
 | Pi interfaces and sources | [Pi extension research](pi-extension-research.md) (research context; current spec takes precedence over earlier proposals) |
 | Domain terminology | [Glossary](../GLOSSARY.md) |
 | Current Pi-first acceptance scope | [ADR 0004](adr/0004-pi-first-acceptance.md) |
-| Windows default apps, existing windows and foreground | [Accepted policy](spec.md#default-apps-workspaces-and-foreground), [ADR 0005](adr/0005-default-apps-and-workspace-reuse.md), [delivery cases](implementation-plan.md#default-app-and-workspace-delivery) |
+| Windows default apps, existing windows and foreground | [Accepted policy](spec.md#default-apps-workspaces-and-foreground), [ADR 0005](adr/0005-default-apps-and-workspace-reuse.md), [delivery cases](implementation-plan.md#default-app-and-workspace-delivery), [current support](windows.md#default-apps-and-workspaces) |
 | Historical reference-parity decision | [Superseded ADR 0001](adr/0001-preserve-reference-behavior.md) |
 | Stronger native window identity design | [Lifetime plan](implementation-plan.md#window-lifetime-design), [ADR 0002](adr/0002-window-lifetime-references.md) |
 | Publish or read issues | [Issue tracker](agents/issue-tracker.md), [triage labels](agents/triage-labels.md) |

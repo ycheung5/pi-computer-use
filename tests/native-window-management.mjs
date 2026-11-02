@@ -1,7 +1,8 @@
 // Launch/move/activate/close only dedicated fixtures, without mouse/keyboard input.
 import assert from "node:assert/strict";
 import { execFile, spawnSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -82,7 +83,228 @@ const until = async (predicate) => {
     await delay(60);
   }
 };
+async function verifyWorkspace() {
+  const token = randomUUID().replaceAll("-", "");
+  const extension = `.picu${token}`;
+  const progId = `PiCu.Workspace.${token}`;
+  const title = `Pi CU workspace ${token}`;
+  const document = join(folder, `original${extension}`);
+  const journal = join(folder, "workspace.log");
+  await writeFile(document, "original work");
+  const registry = async (action) => {
+    const data = Buffer.from(
+      JSON.stringify({ extension, progId, executable, title, journal, action }),
+    ).toString("base64");
+    const script = `
+$ErrorActionPreference='Stop'
+$d=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${data}'))|ConvertFrom-Json
+$root=[Microsoft.Win32.Registry]::CurrentUser
+$paths=@(('Software\\Classes\\'+$d.extension),('Software\\Classes\\'+$d.progId))
+if($d.action -eq 'remove') {foreach($path in $paths){$root.DeleteSubKeyTree($path,$false)};exit}
+foreach($path in $paths){$existing=$root.OpenSubKey($path);if($existing){$existing.Close();throw 'fixture association already exists'}}
+$created=@()
 try {
+  foreach($path in $paths){$key=$root.CreateSubKey($path);$created+=,$path;$key.Close()}
+  $key=$root.OpenSubKey($paths[0],$true);try{$key.SetValue('',$d.progId)}finally{$key.Close()}
+  $key=$root.CreateSubKey($paths[1]+'\\shell\\open\\command')
+  try{$key.SetValue('','"'+$d.executable+'" "'+$d.title+'" workspace "'+$d.journal+'" "%1"')}finally{$key.Close()}
+} catch {foreach($path in $created){$root.DeleteSubKeyTree($path,$false)};throw}
+`;
+    await run(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
+      ],
+      { cwd: folder, windowsHide: true },
+    );
+  };
+  let registered = false;
+  try {
+    await registry("create");
+    registered = true;
+    const defaultBrowser = await call("launch_app", {
+      target: "https://example.invalid/",
+      resolveOnly: true,
+    });
+    assert.equal(defaultBrowser.ok, true, JSON.stringify(defaultBrowser));
+    assert.equal(defaultBrowser.verification, "resolved");
+    assert.equal(defaultBrowser.launched, false);
+    assert.equal(defaultBrowser.handler.association, "https");
+    const blankBrowser = await call("launch_app", {
+      target: "browser",
+      resolveOnly: true,
+    });
+    assert.equal(blankBrowser.ok, true, JSON.stringify(blankBrowser));
+    assert.equal(blankBrowser.handler.progId, defaultBrowser.handler.progId);
+    assert.equal(blankBrowser.launched, false);
+    const resolved = await call("launch_app", {
+      target: document,
+      resolveOnly: true,
+    });
+    assert.equal(resolved.ok, true, JSON.stringify(resolved));
+    assert.equal(resolved.handler.progId, progId);
+    assert.equal(
+      resolved.handler.executable.toLowerCase(),
+      executable.toLowerCase(),
+    );
+    assert.equal(
+      await find(title),
+      undefined,
+      "resolution never launches the app",
+    );
+    const opened = await call("launch_app", { target: document, waitMs: 0 });
+    assert.equal(opened.ok, true, JSON.stringify(opened));
+    assert.equal(opened.targetKind, "document");
+    const target = await until(() => find(title));
+    owned.add(target.processId);
+    const identity = {
+      nativeWindowHandle: target.nativeWindowHandle,
+      processId: target.processId,
+    };
+    const callerForeground = async () => {
+      await writeFile(journal, "stage\n");
+      await writeFile(`${journal}.caller`, "");
+      await until(async () =>
+        (await readFile(journal, "utf8")).includes("caller-front:True"),
+      );
+    };
+    const activated = await call("activate_window", identity);
+    assert.equal(activated.activated, true, JSON.stringify(activated));
+    assert.equal(
+      typeof activated.windowRef,
+      "string",
+      "confirmed activation preserves its lifetime witness",
+    );
+    await callerForeground();
+    const implicit = await call("accessibility_tree", {
+      maxDepth: 0,
+      maxNodes: 1,
+    });
+    assert.equal(implicit.nativeWindowHandle, target.nativeWindowHandle);
+    assert.equal(implicit.windowRef, activated.windowRef);
+    const button = await call("find", {
+      ...identity,
+      query: "New task tab",
+      controlType: "Button",
+      ocrFallback: false,
+    });
+    assert.equal(button.matches.length, 1, JSON.stringify(button));
+    assert.equal(
+      (await find(title)).hasKeyboardFocus,
+      false,
+      "passive discovery does not steal foreground",
+    );
+    // No activate option: confirmed visible intent must persist at worker level.
+    const added = await call("invoke", {
+      elementId: button.matches[0].id,
+      fallbackClick: false,
+    });
+    assert.equal(added.ok, true, JSON.stringify(added));
+    await until(async () =>
+      (await readFile(journal, "utf8").catch(() => "")).includes(
+        "new-tab:2:True:original work",
+      ),
+    );
+    const editor = await call("find", {
+      ...identity,
+      query: "Task editor",
+      ocrFallback: false,
+    });
+    assert.equal(editor.matches.length, 1, JSON.stringify(editor));
+    const changed = await call("set_value", {
+      elementId: editor.matches[0].id,
+      value: "task work",
+      fallbackType: false,
+    });
+    assert.equal(changed.ok, true, JSON.stringify(changed));
+    const observed = await call("element_info", {
+      ...identity,
+      elementId: editor.matches[0].id,
+      detailLevel: "full",
+    });
+    assert.equal(observed.element.value, "task work");
+    assert.equal(
+      (await find(title)).hasKeyboardFocus,
+      true,
+      "visible workflow retains foreground after related steps",
+    );
+    assert.equal(await readFile(document, "utf8"), "original work");
+    await callerForeground();
+    const background = await call("set_value", {
+      ...identity,
+      elementId: editor.matches[0].id,
+      value: "background task work",
+      fallbackType: false,
+      activate: false,
+    });
+    assert.equal(background.ok, true, JSON.stringify(background));
+    assert.equal(
+      (await find(`${title} caller`)).hasKeyboardFocus,
+      true,
+      "explicit background action preserves caller foreground",
+    );
+    const separateTitle = `${title} separate`;
+    const separate = await call("launch_app", {
+      target: executable,
+      arguments: `"${separateTitle}" workspace "${journal}" "${document}"`,
+      waitMs: 0,
+    });
+    assert.equal(separate.ok, true, JSON.stringify(separate));
+    const separateWindow = await until(() => find(separateTitle));
+    owned.add(separateWindow.processId);
+    assert.notEqual(
+      separateWindow.nativeWindowHandle,
+      target.nativeWindowHandle,
+    );
+    await call("close_window", {
+      nativeWindowHandle: separateWindow.nativeWindowHandle,
+      processId: separateWindow.processId,
+    });
+    await until(async () => !(await find(separateTitle)));
+    owned.delete(separateWindow.processId);
+    // Passive observation and worker exit may not close this borrowed workspace.
+    for (const close of host.shutdown) await close();
+    host = create();
+    assert.equal((await find(title)).processId, target.processId);
+    await call("close_window", identity);
+    await until(async () => !(await find(title)));
+    owned.delete(target.processId);
+    const unknown = join(folder, `unknown.picuunknown${token}`);
+    await writeFile(unknown, "");
+    const refused = await call("launch_app", {
+      target: unknown,
+      resolveOnly: true,
+    });
+    assert.equal(refused.ok, false);
+    assert.match(refused.error, /DEFAULT_APP_UNAVAILABLE/);
+    return {
+      ok: true,
+      check: "Windows default handler and reused workspace",
+      defaultBrowserResolvedWithoutLaunch: true,
+      privateDocumentHandler: true,
+      newTaskTabOriginalUnchanged: true,
+      visibleIntentRetained: true,
+      borrowedWindowSurvivesWorker: true,
+      explicitSeparateWindow: true,
+      unknownAssociationRefused: true,
+      physicalInput: false,
+    };
+  } catch (error) {
+    console.error(error);
+    throw error;
+  } finally {
+    for (const line of (await readFile(journal, "utf8").catch(() => "")).split(
+      /\r?\n/,
+    )) {
+      if (/^started:\d+$/.test(line)) owned.add(Number(line.slice(8)));
+    }
+    if (registered) await registry("remove");
+  }
+}
+async function verifyDefault() {
   const title = `Pi CU managed ${Date.now()}`;
   const launched = await call("launch_app", {
     target: executable,
@@ -241,11 +463,39 @@ try {
       physicalInput: false,
     }),
   );
+}
+let workspaceReceipt;
+try {
+  if (process.argv.includes("--workspace"))
+    workspaceReceipt = await verifyWorkspace();
+  else await verifyDefault();
 } finally {
   for (const close of host.shutdown) await close();
-  for (const pid of owned)
-    await run("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
-      windowsHide: true,
-    }).catch(() => {});
-  await rm(folder, { recursive: true, force: true });
+  if (owned.size) {
+    const payload = Buffer.from(
+      JSON.stringify({ pids: [...owned], executable }),
+    ).toString("base64");
+    const cleanup = `$ErrorActionPreference='Stop';$d=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${payload}'))|ConvertFrom-Json;foreach($fixturePid in $d.pids){$p=Get-Process -Id $fixturePid -ErrorAction SilentlyContinue;if($p){try{$handle=$p.Handle;if($p.MainModule.FileName -ieq $d.executable){$p.Kill();if(!$p.WaitForExit(5000)){throw 'fixture exit unconfirmed'}}}finally{$p.Dispose()}}};exit 0`;
+    await run(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        Buffer.from(cleanup, "utf16le").toString("base64"),
+      ],
+      { windowsHide: true, cwd: folder },
+    );
+  }
+  await rm(folder, {
+    recursive: true,
+    force: true,
+    maxRetries: 20,
+    retryDelay: 100,
+  });
 }
+
+if (workspaceReceipt)
+  console.log(
+    JSON.stringify({ ...workspaceReceipt, fixtureCleanupConfirmed: true }),
+  );

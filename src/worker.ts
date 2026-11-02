@@ -115,14 +115,16 @@ function rememberTarget(
   operationId: string,
   result: import("./protocol.js").WorkerResult,
 ): void {
-  if (
-    result.ok &&
-    Number.isSafeInteger(result.inputTargetHandle) &&
-    Number.isSafeInteger(result.inputTargetProcessId)
-  )
+  const activated =
+    result.action === "activate_window" && result.activated === true;
+  const handle = activated
+    ? result.nativeWindowHandle
+    : result.inputTargetHandle;
+  const owner = activated ? result.processId : result.inputTargetProcessId;
+  if (result.ok && Number.isSafeInteger(handle) && Number.isSafeInteger(owner))
     lastTargets.set(operationId, {
-      nativeWindowHandle: Number(result.inputTargetHandle),
-      processId: Number(result.inputTargetProcessId),
+      nativeWindowHandle: Number(handle),
+      processId: Number(owner),
       ...(typeof result.windowRef === "string"
         ? { windowRef: result.windowRef }
         : {}),

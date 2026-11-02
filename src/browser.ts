@@ -1106,7 +1106,7 @@ export async function browserListing(): Promise<Record<string, unknown>> {
     return {
       browsers: [],
       ...(retirementError ? { cleanupError: retirementError } : {}),
-      hint: 'set_value elementId "new-tab" value "https://..." opens an isolated background tab',
+      hint: 'Explicit dedicated mode only: set_value elementId "new-tab" value "https://..." opens an isolated background tab; ordinary browsing reuses native Windows default-app windows',
     };
   return {
     browsers: [

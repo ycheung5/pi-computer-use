@@ -16,7 +16,7 @@ const target = {
   windowTitle: { type: "string" },
   processId: { type: "integer", minimum: 1 },
   nativeWindowHandle: { type: "integer", minimum: 1 },
-  activate: { type: "boolean", default: false },
+  activate: { type: "boolean" },
 } satisfies Record<string, Property>;
 const view = {
   viewMode: {

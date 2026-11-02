@@ -7,7 +7,7 @@ const target = {
   windowTitle: { type: "string" },
   processId: { ...integer, minimum: 1 },
   nativeWindowHandle: { ...integer, minimum: 1 },
-  activate: { type: "boolean", default: false },
+  activate: { type: "boolean" },
 };
 const point = {
   type: "object",

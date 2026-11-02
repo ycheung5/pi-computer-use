@@ -196,6 +196,8 @@ partial class WindowsBridge {
       interaction=new InteractionGuard();before=GetForegroundWindow();GetCursorPos(out pointer);
       PruneElements();element=ResolveObservedElement(TextOption(args,"elementId",""),args,out window);popups=ControlPopups(WindowOwner(window),window);
       if(!element.Current.IsEnabled)throw new InvalidOperationException("ELEMENT_DISABLED: control is disabled");
+      ApplyVisibleIntent(args,window);
+      if(Option(args,"activate",false) && !ManagementActivate(window,WindowOwner(window)))throw new InvalidOperationException("TARGET_ACTIVATION_REFUSED: Windows did not grant foreground access");
       object raw;check();
       if(action=="focus") {ForgetTextFocus();BeginWindowDispatch();element.SetFocus();RememberTextFocus(window,new IntPtr(element.Current.NativeWindowHandle));result["method"]="uia_focus";}
       else if(action=="set_value") {

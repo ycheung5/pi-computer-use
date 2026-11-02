@@ -218,6 +218,19 @@ test("Pi settings command and tool exposure preserve unrelated tools without eag
   try {
     for (const event of events.get("session_start") ?? []) await event({}, ctx);
     assert.equal(launches, 0);
+    for (const event of events.get("before_agent_start") ?? []) {
+      const started = (await event(
+        { messageType: "user", systemPrompt: "Base instructions" },
+        ctx,
+      )) as { systemPrompt: string };
+      assert.match(started.systemPrompt, /Windows default/);
+      assert.match(started.systemPrompt, /resolveOnly/);
+      assert.match(started.systemPrompt, /activate: true/);
+      assert.doesNotMatch(
+        started.systemPrompt,
+        /prefer the isolated browser channel|retain the dedicated-profile boundary/,
+      );
+    }
     assert.deepEqual(
       active.sort(),
       ["read", "bash", "windows_computer_use_tools"].sort(),

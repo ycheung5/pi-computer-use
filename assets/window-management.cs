@@ -53,6 +53,14 @@ partial class WindowsBridge {
     return ManagementOwner(foreground)==owner?"same_process":"other_process";
   }
   static bool ManagementActivate(IntPtr window,uint owner) {return ManagementActivate(window,owner,null);}
+  // One active operation per desktop; retain the existing lifetime witness,
+  // not another element cache. A helper restart forgets visible intent safely.
+  static string visibleOperation;
+  static WindowReference visibleTarget;
+  static void ApplyVisibleIntent(Dictionary<string,object> args,IntPtr window) {
+    if(args.ContainsKey("activate") || TextOption(args,"dispatch","")=="background" || TextOption(args,"method","")=="background")return;
+    if(visibleTarget!=null && visibleOperation==pointerOperation && visibleTarget.Window==window && visibleTarget.Owner==WindowOwner(window) && WindowMarker.Matches(window,visibleTarget.Owner,visibleTarget.Marker))args["activate"]=true;
+  }
   static bool ManagementActivate(IntPtr window,uint owner,Dictionary<string,object> diagnostics) {
     ManagementAssert(window,owner);ManagementEnsureUnlockedSession();
     if(IsIconic(window)){BeginWindowDispatch();ManagementShow(window,9);}
@@ -93,12 +101,28 @@ partial class WindowsBridge {
       if(!args.ContainsKey("activate")||!Convert.ToBoolean(args["activate"]))return result;
     }
     bool activated=responsive==true&&ManagementActivate(window,owner);result["activated"]=activated;
+    if(activated){visibleOperation=pointerOperation;visibleTarget=ObserveWindowReference(window,result);if(visibleTarget!=null){currentReference=visibleTarget;result["windowRef"]=visibleTarget.Id;}}
     if(!activated){result["verification"]="unconfirmed";result["warning"]=responsive==true?"Windows foreground rules refused activation; no keyboard or mouse workaround was sent.":"The target is unresponsive or inaccessible; activation was not attempted.";}
     else if(action=="activate_window")result["verification"]="sent";
     return result;
   }
 
   static readonly HashSet<string> ManagementCommandHosts=new HashSet<string>(StringComparer.OrdinalIgnoreCase){"cmd","powershell","pwsh","wt","wsl","bash","conhost","wscript","cscript","mshta","rundll32","regsvr32","msiexec","forfiles","schtasks"};
+  [DllImport("shlwapi.dll",CharSet=CharSet.Unicode,EntryPoint="AssocQueryStringW")]static extern int ManagementAssociation(uint flags,int kind,string association,string verb,StringBuilder output,ref uint length);
+  static string AssociationString(string association,bool protocol,int kind) {
+    // ASSOCF_INIT_IGNOREUNKNOWN refuses the generic Open-With fallback;
+    // ASSOCF_IS_PROTOCOL honors current-user HTTP(S) associations.
+    uint length=0;uint flags=0x400u|(protocol?0x1000u:0u);
+    ManagementAssociation(flags,kind,association,"open",null,ref length);
+    if(length==0 || length>32768)return "";
+    StringBuilder output=new StringBuilder((int)length);
+    return ManagementAssociation(flags,kind,association,"open",output,ref length)==0?output.ToString():"";
+  }
+  static Dictionary<string,object> DefaultLaunchHandler(string association,bool protocol) {
+    string executable=AssociationString(association,protocol,2),name=AssociationString(association,protocol,4),progId=AssociationString(association,protocol,20);
+    if(executable.Length==0 && name.Length==0 && progId.Length==0)throw new InvalidOperationException("DEFAULT_APP_UNAVAILABLE: Windows did not resolve an open handler for "+association);
+    return new Dictionary<string,object>{{"association",association},{"executable",executable},{"name",name},{"progId",progId},{"source","windows-association"}};
+  }
   static void ReleaseLaunchCom(object value) {try{if(value!=null&&Marshal.IsComObject(value))Marshal.ReleaseComObject(value);}catch(InvalidComObjectException){}}
   static bool FullyQualifiedLaunchPath(string value) {return value.Length>=3&&Char.IsLetter(value[0])&&value[1]==':'&&(value[2]=='\\'||value[2]=='/')||value.StartsWith("\\\\",StringComparison.Ordinal)&&value.TrimStart('\\').Split('\\').Length>=2;}
   static string ResolveLaunchFile(string target) {
@@ -147,12 +171,32 @@ partial class WindowsBridge {
     Dictionary<string,object> result=null;Exception failure=null;
     Thread thread=new Thread(delegate(){
       try{
-        string target=Environment.ExpandEnvironmentVariables(Convert.ToString(args["target"]).Trim()),arguments=Convert.ToString(args["arguments"]),directory=Convert.ToString(args["workingDirectory"]);
-        string file=ResolveLaunchFile(target),kind=file==null?"installed-app":"file";
-        if(file!=null){string extension=Path.GetExtension(file);if(!String.Equals(extension,".exe",StringComparison.OrdinalIgnoreCase)&&!String.Equals(extension,".com",StringComparison.OrdinalIgnoreCase)&&!String.Equals(extension,".lnk",StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("LAUNCH_INVALID_TARGET: only exe/com/lnk files are supported");CheckLaunchProgram(file,arguments);target=file;}
+        string target=Convert.ToString(args["target"]).Trim(),arguments=Convert.ToString(args["arguments"]),directory=Convert.ToString(args["workingDirectory"]);
+        Uri uri;bool protocol=Uri.TryCreate(target,UriKind.Absolute,out uri)&&(uri.Scheme=="http"||uri.Scheme=="https");
+        if(!protocol)target=Environment.ExpandEnvironmentVariables(target);
+        if(protocol && String.IsNullOrEmpty(uri.Host))throw new InvalidOperationException("LAUNCH_INVALID_TARGET: HTTP(S) URL requires a host");
+        bool browser=String.Equals(target,"browser",StringComparison.OrdinalIgnoreCase);
+        string file=protocol||browser?null:ResolveLaunchFile(target),kind=browser?"default-browser":protocol?"url":file==null?"installed-app":"file";
+        Dictionary<string,object> handler=null;
+        if(file!=null){string extension=Path.GetExtension(file);if(String.Equals(extension,".exe",StringComparison.OrdinalIgnoreCase)||String.Equals(extension,".com",StringComparison.OrdinalIgnoreCase)||String.Equals(extension,".lnk",StringComparison.OrdinalIgnoreCase))CheckLaunchProgram(file,arguments);else {
+          if(new HashSet<string>(StringComparer.OrdinalIgnoreCase){".bat",".cmd",".ps1",".vbs",".vbe",".js",".jse",".wsf",".wsh",".hta",".reg",".msi",".msp",".scr",".cpl"}.Contains(extension))throw new InvalidOperationException("LAUNCH_COMMAND_REFUSED: use Pi's shell tool for scripts/installers");
+          kind="document";handler=DefaultLaunchHandler(Path.GetExtension(file),false);
+        }target=file;}
+        else if(browser)handler=DefaultLaunchHandler("https",true);
+        else if(protocol)handler=DefaultLaunchHandler(uri.Scheme,true);
         else target=ResolveInstalledLaunch(target);
+        if(handler!=null) {
+          if(arguments.Length>0||directory.Length>0)throw new InvalidOperationException("LAUNCH_INVALID_ARGUMENTS: default-handler URLs/documents do not accept arguments or workingDirectory");
+          string handlerExecutable=Convert.ToString(handler["executable"]);
+          if(ManagementCommandHosts.Contains(Path.GetFileNameWithoutExtension(handlerExecutable)))throw new InvalidOperationException("LAUNCH_COMMAND_REFUSED: default handler is a command/script host; use Pi's shell tool");
+        }
         if(directory.Length>0){directory=Environment.ExpandEnvironmentVariables(directory);if(!FullyQualifiedLaunchPath(directory)||!Directory.Exists(directory))throw new InvalidOperationException("LAUNCH_INVALID_DIRECTORY: use an existing fully qualified directory");directory=Path.GetFullPath(directory);}
         if(kind=="installed-app"&&(arguments.Length>0||directory.Length>0))throw new InvalidOperationException("LAUNCH_INVALID_ARGUMENTS: installed AppUserModelID launches do not accept arguments or workingDirectory");
+        if(Option(args,"resolveOnly",false)) {
+          result=Result(true,"launch_app");result["target"]=target;result["targetKind"]=kind;result["handler"]=handler;result["verification"]="resolved";result["launched"]=false;
+          result["note"]="Resolution only; no app was opened. Select and observe the intended existing window before creating a task tab/document. Handler metadata is not a window identity.";return;
+        }
+        if(browser){target=Convert.ToString(handler["executable"]);if(target.Length==0)throw new InvalidOperationException("DEFAULT_APP_UNAVAILABLE: Windows resolved the browser but did not provide a blank-window launch executable; reuse its observed window or open a requested HTTP(S) URL");}
         object windows=null,desktop=null,document=null,application=null;
         try{
           windows=Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("9BA05972-F6A8-11CF-A442-00A0C90A8F39")));
@@ -162,7 +206,7 @@ partial class WindowsBridge {
           ((dynamic)application).ShellExecute(target,arguments,directory,"open",Convert.ToBoolean(args["activate"])?1:4);
         }catch(Exception error){throw new InvalidOperationException("LAUNCH_SHELL_FAILED: "+error.Message+"; no child-process fallback or replay was attempted",error);}
         finally{ReleaseLaunchCom(application);ReleaseLaunchCom(document);ReleaseLaunchCom(desktop);ReleaseLaunchCom(windows);}
-        result=Result(true,"launch_app");result["target"]=target;result["targetKind"]=kind;result["launchMethod"]="explorer-shell";result["verification"]="dispatched";result["note"]="Explorer accepted the launch. New windows are observations, not confirmed matches. The app can reuse a window or activate itself; use list_windows/wait_for to verify. No elevation was requested.";
+        result=Result(true,"launch_app");result["target"]=target;result["targetKind"]=kind;if(handler!=null)result["handler"]=handler;result["launchMethod"]="explorer-shell";result["verification"]="dispatched";result["note"]="Explorer accepted the launch. New windows are observations, not confirmed matches. The app can reuse a window or activate itself; use list_windows/wait_for to verify. No elevation was requested.";
       }catch(Exception error){failure=error;}
     });
     thread.IsBackground=true;thread.SetApartmentState(ApartmentState.STA);thread.Start();

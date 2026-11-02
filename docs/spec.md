@@ -102,7 +102,7 @@ Deliver one installable Pi package with native computer-use tools, reliable supp
 
 ## Default apps, workspaces and foreground
 
-This is the accepted target behavior under [ADR 0005](adr/0005-default-apps-and-workspace-reuse.md); implementation and acceptance are pending in #30, with editor focus in #26. Earlier dedicated-profile acceptance does not establish this new workflow.
+This is the accepted target behavior under [ADR 0005](adr/0005-default-apps-and-workspace-reuse.md); delivery and remaining acceptance are tracked in #30, with editor focus in #26. Earlier dedicated-profile acceptance does not establish this new workflow.
 
 - Resolve the Windows default handler for the requested URL/file type when no app is explicitly named. An explicit user choice takes precedence. Do not silently substitute another app because its automation channel is easier; report unavailable control and use supported native UI where feasible. Opening the default app and supporting its browser protocol are separate capabilities.
 - Discover the intended existing app window first. Create and verify a new task tab or document through its supported interface, preserving existing tabs, documents and unsaved contents. Reuse that task workspace for subsequent steps. Open a new window when the user requests one or no suitable window exists. Ambiguous targets or an app lacking a safe separate workspace require an explicit limitation or clarification rather than overwriting current work.
