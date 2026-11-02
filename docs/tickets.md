@@ -9,11 +9,11 @@ Requirements live in [spec](spec.md), delivery/coverage in [implementation-plan]
 | Measure | Status after scope reconciliation |
 | --- | --- |
 | Tool implementation | All 25 target tools have implementations. Release acceptance concerns Pi correctness, preservation and usability. |
-| Completed issues | 14: #3, #8, #14, #16, #17, #18, #19, #24, #25, #29, #32, #33, #34, #36. Historical comparison completions retain their original evidence scope. |
+| Completed issues | 15: #3, #8, #14, #16, #17, #18, #19, #24, #25, #29, #31, #32, #33, #34, #36. Historical comparison completions retain their original evidence scope. |
 | Superseded issues | 10: #4, #5, #9, #10, #11, #12, #13, #15, #23, #37. Superseded is not a completed product delivery. |
-| Open issues | 12: product #1, release #21 and 10 bounded Pi deliverables below. |
-| Accepted Pi outcomes | Windows/WSL2 packaged launch, ownership, waits, settings/tool selection, Chromium and experimental Firefox workflows; six browser/mixed agent scenarios each passed three reset runs. Scoped native append/save, actual native Pi-host Esc and human-confirmed GitHub sign-in persistence/removal also passed. |
-| Latest recorded checks | 167 passed, one skipped; build and package/documentation checks passed. No desktop or model tests are rerun by this scope/accounting update. |
+| Open issues | 11: product #1, release #21 and 9 bounded Pi deliverables below. |
+| Accepted Pi outcomes | Windows/WSL2 packaged launch, ownership, waits, settings/tool selection, Chromium and experimental Firefox workflows; six browser/mixed agent scenarios each passed three reset runs. Scoped native append/save, #31 control interruption/cleanup and human-confirmed GitHub sign-in persistence/removal also passed. |
+| Latest recorded checks | 167 passed, one skipped; build, native availability-loss and package/documentation checks passed at their recorded scopes. No additional human or paid-model check was needed. |
 
 The package is implemented; remaining work is targeted Pi acceptance and repair. An open issue does not reopen its accepted cases. No overall completion percentage is asserted, and no release is declared. The earlier development baseline and historical comparison receipts remain available through commits/archive tags.
 
@@ -30,7 +30,7 @@ The package is implemented; remaining work is targeted Pi acceptance and repair.
 | #27 — clipboard preservation | Rich/OLE preservation, unsupported virtual-file refusal and newer-copy preservation passed. | Actual Pi locked/delayed-backend behavior, supported Windows history/cloud exclusion and shared handback copying. |
 | #28 — targeting/UIA | Lifetime binding, destruction/marker/restart/expiry and scoped native/Chromium/scroll/provider evidence passed. | Missing actual inaccessible/reused-target and provider/host cases; report unavailable conditions rather than invent a pass. |
 | #30 — pointer/restoration | Window management, hover/click/double-click, same-app drop and inner scroll passed. | Actual foreground/refusal, menus/dialogs, cross-app drop, occlusion and promised restoration; reuse mapping/control cases. |
-| #31 — stop/control | Native Pi Esc, worker shortcut/suppression, native/WSL command stop, rejection/recovery and no-input host-exit cleanup passed; queued-settlement bug fixed. Four known-held Ctrl/button cancellation/target-error cases and actual WSL Pi Ctrl+Alt+F9 and human handback/resume also passed. | Audit only lock interruption during active control: stop dispatch and confirm cleanup/release or retained uncertainty. Reuse locked-input refusal and ordinary handback evidence; no seamless unlock recovery gate. |
+| #31 — stop/control | Native Pi Esc, worker shortcut/suppression, native/WSL command stop, rejection/recovery and no-input host-exit cleanup passed; queued-settlement bug fixed. Four known-held Ctrl/button cancellation/target-error cases and actual WSL Pi Ctrl+Alt+F9 and human handback/resume also passed. | Completed: native availability-loss response and existing worker/held-input/host/handback results satisfy the narrowed scope; [acceptance](validation.md#control-interruption-acceptance). |
 | #35 — native agent goals | Three preopened-document append/save tasks passed with exact independent editor/file checks. | Document creation, unrelated-document preservation and controlled recovery/handback with required Pi task resets. |
 | #36 — browser/mixed agent goals | Six named Pi scenarios passed three resets: form/delay; navigation/dialog/transfer; stale recovery; quiet mixed task; partial-observation recovery; held-navigation cancellation. | Completed for this scope. Shared physical control stays #31/#20; native creation/recovery stays #35. No DSH leg remains. |
 | #21 under #1 — release | Capability mapping, existing checks and accepted scopes retained. | Reconcile the Pi owners above, known failures/limits, useful responsiveness, package/docs/version and final user acceptance; then publish. |
@@ -41,10 +41,9 @@ Work on one bounded missing outcome at a time. Reuse accepted evidence across is
 
 | Order / owner | Next action | User involvement |
 | --- | --- | --- |
-| 1 — #31, shared #26/#30/#20 | Reuse the four passed known-held cancellation/error cases; reuse actual WSL Pi shortcut and handback acceptance. Reconcile existing lock-interruption/cleanup evidence and prepare only a demonstrably missing safety check. Reuse accepted locked-input refusals; do not schedule a seamless unlock-recovery gate. Reuse native Esc and worker shortcut evidence; do not test every key/host combination. | No user action now. A human step is needed only if the evidence audit identifies a missing active-control interruption/cleanup check. |
-| 2 — #26/#27/#28/#30/#7 | Close only missing chord/focus, clipboard contention/privacy, targeting/provider, foreground/restoration and OCR failure clauses using existing fixtures. | Mostly agent-owned. Clipboard sentinel only if original data cannot be safely preserved; physical restoration cases share the control session. |
-| 3 — #35 | Finish the ordinary native create/preserve/recover task with independent outcomes and required reset successes. | Only the explicit human-handback variant; scope remains owned test targets. |
-| 4 — #6/#20 | Prepare one grouped display/visual session, preserving original settings; share mapping/overlay evidence with pointer and capture owners. | Actual scaling/topology and visual/recording judgment where required. |
+| 1 — #26/#27/#28/#30/#7 | Close only missing chord/focus, clipboard contention/privacy, targeting/provider, foreground/restoration and OCR failure clauses using existing fixtures. | Mostly agent-owned. Clipboard sentinel only if original data cannot be safely preserved; physical restoration cases share the control session. |
+| 2 — #35 | Finish the ordinary native create/preserve/recover task with independent outcomes and required reset successes. | Only the explicit human-handback variant; scope remains owned test targets. |
+| 3 — #6/#20 | Prepare one grouped display/visual session, preserving original settings; share mapping/overlay evidence with pointer and capture owners. | Actual scaling/topology and visual/recording judgment where required. |
 | Deferred — #2 | Validate clean installation once a resettable disposable guest exists. | User explicitly deferred the environment. Do not repeatedly ask or change host virtualization. |
 | Final — #21/#1 | Reconcile all Pi outcomes and accepted limitations, perform final required checks and prepare release. | Final supported-workflow acceptance after agent-owned work is ready. |
 
