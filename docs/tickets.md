@@ -9,10 +9,10 @@ Requirements live in [spec](spec.md), delivery/coverage in [implementation-plan]
 | Measure | Status after scope reconciliation |
 | --- | --- |
 | Tool implementation | All 25 target tools have implementations. Release acceptance concerns Pi correctness, preservation and usability. |
-| Completed issues | 13: #3, #8, #14, #16, #17, #19, #24, #25, #29, #32, #33, #34, #36. Historical comparison completions retain their original evidence scope. |
+| Completed issues | 14: #3, #8, #14, #16, #17, #18, #19, #24, #25, #29, #32, #33, #34, #36. Historical comparison completions retain their original evidence scope. |
 | Superseded issues | 10: #4, #5, #9, #10, #11, #12, #13, #15, #23, #37. Superseded is not a completed product delivery. |
-| Open issues | 13: product #1, release #21 and 11 bounded Pi deliverables below. |
-| Accepted Pi outcomes | Windows/WSL2 packaged launch, ownership, waits, settings/tool selection, Chromium and experimental Firefox workflows; six browser/mixed agent scenarios each passed three reset runs. Scoped native append/save and actual native Pi-host Esc also passed. |
+| Open issues | 12: product #1, release #21 and 10 bounded Pi deliverables below. |
+| Accepted Pi outcomes | Windows/WSL2 packaged launch, ownership, waits, settings/tool selection, Chromium and experimental Firefox workflows; six browser/mixed agent scenarios each passed three reset runs. Scoped native append/save, actual native Pi-host Esc and human-confirmed GitHub sign-in persistence/removal also passed. |
 | Latest recorded checks | 167 passed, one skipped; build and package/documentation checks passed. No desktop or model tests are rerun by this scope/accounting update. |
 
 The package is implemented; remaining work is targeted Pi acceptance and repair. An open issue does not reopen its accepted cases. No overall completion percentage is asserted, and no release is declared. The earlier development baseline and historical comparison receipts remain available through commits/archive tags.
@@ -24,7 +24,7 @@ The package is implemented; remaining work is targeted Pi acceptance and repair.
 | #2 — clean installation | Runtime/package provisioning and both current-machine Pi host paths passed; #3/#34 complete. | Clean disposable Windows/WSL installation and prerequisite failure diagnostics; user-deferred. |
 | #6 — screenshot mapping | Capture/fallback and scoped 100%-scale two-monitor/negative-origin mapping passed. | Actual 150%/200%, mixed-DPI and topology/size-change mapping; share display evidence with #20/#30. |
 | #7 — OCR failures | Literal/CJK text, bounds and partial-result semantics passed in named cases. | Availability/language/capture failure and cancellation outcomes. |
-| #18 — remembered sign-in | Profile isolation, cookie/reconnect/ownership/recovery/cleanup and human Bitwarden login passed. | One real account stays authenticated across Pi restart on a policy-compatible site; do not repeat Bitwarden's expected logout. |
+| #18 — remembered sign-in | Profile lifecycle evidence plus human-confirmed GitHub authentication across actual Pi restart and verified test-profile removal passed. | Completed; [scoped receipt](validation.md#manual-github-remembered-sign-in). |
 | #20 — visible control | Appearance accepted; basic required-border acquire/release, disabled optional settings and scoped click-through passed. | Hold through gaps/thinking/settings, capture omission, handback and supported display/recording behavior. |
 | #26 — chords/focus | Six exact-text UIA/saved-byte cases and verified append passed; keep the working delay unless a Pi issue justifies a change. | Current physical chord/focus and human editing after handback; no DSH batching/minimum-delay/complete-TSF instrumentation gate. |
 | #27 — clipboard preservation | Rich/OLE preservation, unsupported virtual-file refusal and newer-copy preservation passed. | Actual Pi locked/delayed-backend behavior, supported Windows history/cloud exclusion and shared handback copying. |
@@ -45,7 +45,6 @@ Work on one bounded missing outcome at a time. Reuse accepted evidence across is
 | 2 — #26/#27/#28/#30/#7 | Close only missing chord/focus, clipboard contention/privacy, targeting/provider, foreground/restoration and OCR failure clauses using existing fixtures. | Mostly agent-owned. Clipboard sentinel only if original data cannot be safely preserved; physical restoration cases share the control session. |
 | 3 — #35 | Finish the ordinary native create/preserve/recover task with independent outcomes and required reset successes. | Only the explicit human-handback variant; scope remains owned test targets. |
 | 4 — #6/#20 | Prepare one grouped display/visual session, preserving original settings; share mapping/overlay evidence with pointer and capture owners. | Actual scaling/topology and visual/recording judgment where required. |
-| Separate — #18 | Prepare dedicated profile, human sign-in, normal restart/status confirmation and safe removal. | User chooses a persistence-capable site and signs in privately; credentials never enter chat. |
 | Deferred — #2 | Validate clean installation once a resettable disposable guest exists. | User explicitly deferred the environment. Do not repeatedly ask or change host virtualization. |
 | Final — #21/#1 | Reconcile all Pi outcomes and accepted limitations, perform final required checks and prepare release. | Final supported-workflow acceptance after agent-owned work is ready. |
 
@@ -84,7 +83,7 @@ The 2026-10-31 consolidation transferred source obligations rather than claiming
 | #11 | #30/#31 | Pointer geometry/restoration versus held-button release/cancellation/non-replay. |
 | #12 | #26/#27/#31 | Text/chords/focus; clipboard/privacy/restoration; input cancellation/held-key release/non-replay. |
 | #13 | #30 | Application/window management, targeting, lifecycle and failure behavior. |
-| #15 | Completed #16 | Supported Chromium tool workflows; broader profile/sign-in remains #18. |
+| #15 | Completed #16 | Supported Chromium tool workflows; broader profile/sign-in completed in #18. |
 | #23/#37 | #1/#21 and existing capability owners | Current Pi failure diagnosis/targeted repairs with the owning issue; aggregate capability/agent evidence, model/host identity, failure disposition and readiness with #21. |
 
 Closed historical issues retain their original results with a scope-supersession notice. Do not reopen them to demand DSH comparisons. Close a Pi deliverable as completed only when its Pi criteria have evidence; use `not_planned` for superseded scope, preserving explicit ownership. No new umbrella, test framework or replacement ticket set is introduced.

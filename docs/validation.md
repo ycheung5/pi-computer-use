@@ -526,6 +526,14 @@ Both Pi sessions used the installed RPC host's registered graceful SIGTERM shutd
 
 [Bitwarden documents](https://bitwarden.com/help/vault-timeout/) logout when the web-vault tab or browser closes. The human observations therefore support real interactive login and expected site logout, while the profile/process receipts support same-path reuse and removal. They do **not** establish a real account remaining authenticated across restart; existing synthetic-cookie persistence evidence retains its separate scope. Private metadata and failure records are in `/tmp/pi-cu-signin18/result.json` and its referenced receipts. No production code or new checked-in test runner was added.
 
+### Manual GitHub remembered sign-in
+
+On 2026-11-02, production source `d0dfe04` and a fresh build passed #18's remaining real-account check using actual Pi 1.4.0 RPC hosts from WSL2, Windows Node 22.23.4 and installed visible Edge. Isolated settings enabled `browserSignIn`; both sessions used the exact same dedicated kept profile, with different observed Pi/worker/browser identities. A local scripted provider called only health and initial navigation; no network model, daily profile, credential, authenticated DOM, cookie value or screenshot was used.
+
+The user reported successful manual GitHub login. After Pi's registered graceful SIGTERM shutdown, independent checks found the first Pi process and its recorded worker/browser absent, the profile preserved and its lock absent. The restarted Pi host opened `about:blank` successfully through the extension. The user manually visited GitHub and confirmed **“Still signed in”**, without reauthentication. The final graceful shutdown returned Pi's expected SIGTERM exit code 143; all four recorded worker/browser roots and both Pi processes were absent, no process command line matched the dedicated storage root, and its lock was absent before removing that exact disposable root and verifying removal.
+
+The reused temporary coordinator initially expected exit code zero, although Pi's graceful SIGTERM handler exits 143; it conservatively retained the first receipt. Independent absence/lock checks cleared restart, and the coordinator's expectation was corrected for final shutdown. The first Pi exit code was not serialized and is not claimed. This was a coordinator assertion issue; no production change or extra login run was needed. Private metadata-only receipts are in `/tmp/pi-cu-github18/`, including human confirmations, both session identities, the initial independent shutdown check and `result.json`. This completes the agreed real-site persistence/removal gate; it does not claim every site's policy or visible Firefox sign-in is supported.
+
 ### Headless Firefox temporary-profile disposal
 
 One focused recheck on `0c5b988` (base `6f36d11`) passed through the real WorkerClient using the existing profile fixture, temporary storage and official Firefox 144.0 executable. Windows Node was 22.23.4. Health, one local-page open and an owned-tab read succeeded before normal disposal. No production source, browser visibility policy, cookie workflow, global native discovery or desktop input changed.
@@ -642,7 +650,7 @@ Only genuinely human/environment-dependent Pi checks belong here; automated fail
 - [x] Actual native Windows Pi-host physical Esc: canonical input stop/cleanup, operation release, stable partial text, no leaked Esc, held state zero and clean exit. See [receipt](#exclusive-control-candidate).
 - [ ] #31/#26/#30/#20: one prepared session for the remaining configured WSL-host shortcut, human editing after handback/explicit continuation and lock/unlock behavior. Automate held-input failure cases first; the human session is not one test per ticket.
 - [ ] #6/#20 (shared with #30 mapping): grouped supported display-scaling/topology and visual/capture/remote-indicator checks, preserving the original display settings. Record unavailable configurations honestly.
-- [ ] #18: one private sign-in on a site that permits persistence, normal Pi restart and human status confirmation/removal. Bitwarden's expected logout is already recorded; do not repeat it for persistence.
+- [x] #18: [GitHub sign-in persisted across Pi restart](#manual-github-remembered-sign-in), confirmed privately by the user; owned processes/locks retired and test storage removed.
 - [ ] #2: clean package installation outside the development tree in a disposable Windows/WSL-capable environment. This remains user-deferred; do not repeatedly request a guest or modify the user's host virtualization setup.
 - [ ] #21: final user acceptance of the supported Pi workflows and documented limitations after agent-owned gaps are resolved.
 
