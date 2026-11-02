@@ -1,5 +1,8 @@
 # Guarded pointer actions
 
+The [accepted workspace/foreground policy](spec.md#default-apps-workspaces-and-foreground) is pending in #30. Per-action restoration below describes current implementation; it must not be mistaken for the desired visible-workflow behavior.
+
+
 The candidate acquires [exclusive control](spec.md#exclusive-control) before physical pointer dispatch. Foreign injected or unconsumed interference still aborts; physical suppression acceptance remains pending.
 
 `click`, `double_click`, `move`, `drag` and coordinate `scroll` use screen coordinates in physical desktop pixels. Convert image coordinates using the screenshot's `origin`, `imageScale` and `imageScaleY`; do not treat a resized PNG's pixels as desktop coordinates. Negative monitor coordinates are supported. Observed HWND/PID origins are scoped to the operation; source-window movement shifts coordinate points/the whole drag path by the observed delta. A remembered title resolving to a replacement window fails closed until fresh observation.

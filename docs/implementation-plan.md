@@ -27,6 +27,12 @@ The first cleanup removes duplicate test setup, process wrappers around pure ver
 
 Continue with one responsibility at a time: identify the concrete duplication or coupling, show the smaller interface or deletion, and run the affected existing checks. A file split that merely relocates the same complexity is not a simplification. Full runtime restructuring and remaining live acceptance are not represented as complete by this cleanup.
 
+## Default-app and workspace delivery
+
+#30 first reproduces the reported wrong-browser, unnecessary-new-window and focus-loss workflow through the existing tool/worker interfaces. Implement the [accepted policy](spec.md#default-apps-workspaces-and-foreground) using Windows handler resolution and observed app interfaces, retaining dedicated browser mode explicitly. Use native UI for ordinary running browsers where protocol attachment is unavailable; do not broaden browser-protocol compatibility claims.
+
+Acceptance uses owned fixtures and disposable browser profiles/windows as stand-ins for an existing user workspace: verify the resolved app identity, original tab/document contents unchanged, exactly one new task workspace, reuse on subsequent steps, explicit new-window request, no-existing-window launch, and unsupported/ambiguous outcomes. Independently observe foreground after opening and between related actions, explicit background preservation, result-visible completion and human handback without delayed focus restoration. Share editor checks with #26 and restoration checks with #30; reuse accepted stop/control evidence. Tests must not change the user's actual Windows default associations or operate personal documents. Current Chrome/Edge isolated-channel passes remain scoped evidence, not acceptance of this policy.
+
 ## Feasibility gates
 
 These original feasibility gates remain regression obligations. Reuse recorded evidence; repeat checks when changes or missing evidence warrant it:
@@ -50,7 +56,7 @@ Every supported tool gets argument validation, success, failure, cancellation wh
 | Capture and OCR | Screen/window capture paths and fallback metadata; occlusion/minimized windows; blank capture; image scaling; multi-monitor/DPI coordinates; literal OCR queries; inconclusive absence; [scoped availability/language/cancellation evidence](validation.md#pi-ocr-failure-acceptance), with clean-machine availability owned by #2 |
 | Physical and background input | Click/double click/move/drag/scroll/type/key chords; background dispatch and escalation; covered points; focus changes; exclusive-control suppression and human handback; Unicode; clipboard preservation; key/button release |
 | Browser control | Chrome/Edge and experimental installed Firefox; tab discovery, navigation, element IDs, reading, input, dialogs, new/closed tabs; navigation invalidation; disconnect/reconnect; cancellation; supported download/upload paths |
-| Browser profiles | Temporary isolation, opt-in persistence, profile ownership, crash recovery, cleanup and no connection to daily profiles; interactive sign-in checked manually |
+| Browser profiles | Temporary isolation, opt-in persistence, profile ownership, crash recovery and owned-resource cleanup for explicit dedicated mode; ordinary browser-window reuse under the [workspace policy](spec.md#default-apps-workspaces-and-foreground); interactive sign-in checked manually |
 | Operation lifecycle | Multi-turn ownership; parallel calls; busy competitors across hosts; queued cancellation; emergency stop during input; blocked same-operation retries; new user operation; worker timeout and recovery |
 | Settings and tool management | Defaults, persistence, invalid settings, full/lite/lazy/custom modes, execution denial, settings changes while active, stop shortcut and indicator configuration |
 | Presentation | Pi tool rendering, image results, evidence/error distinctions; real indicators, stop shortcuts, remote/recording visibility and display changes checked manually |

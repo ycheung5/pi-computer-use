@@ -7,7 +7,7 @@ Native Pi tools for Windows desktop and browser automation from Windows or WSL2 
 - Default Pi; tested SDK/CLI **1.4.0**. No DSH or other Pi extension is needed.
 - Windows 11 with an interactive desktop; WSL2 Ubuntu is the tested Linux host. WSL requires Windows executable interop, `cmd.exe` and `wslpath`.
 - Windows PowerShell 5.1 and the built-in .NET Framework compiler/desktop assemblies for native helpers. No .NET SDK or separately installed Windows Node is required.
-- Installed Chrome/Edge for browser tasks, or an explicitly selected installed Firefox-family browser (experimental). Dedicated automation profiles are used, not daily profiles.
+- Installed Chrome/Edge for browser tasks, or an explicitly selected installed Firefox-family browser (experimental). The current browser channel uses dedicated automation profiles. Windows default-app/existing-window reuse is the [accepted next behavior](docs/spec.md#default-apps-workspaces-and-foreground), pending implementation in #30.
 - Available Windows OCR language support for OCR. A vision-capable Pi model is needed to interpret screenshots; no model or credentials are bundled.
 
 Only Windows x64 has live evidence here; runtime digests exist for arm64 but that architecture remains unverified.

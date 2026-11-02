@@ -27,7 +27,7 @@ Deliver one installable Pi package with native computer-use tools, reliable supp
 13. As an agent, I want click, double-click, move, drag and scroll actions, so that I can operate visual interfaces.
 14. As an agent, I want text entry and key chords, so that I can interact with applications accurately.
 15. As an agent, I want focus, invoke and value-setting actions, so that supported controls can be operated with less physical input.
-16. As an agent, I want application launch and window activation, movement and closure, so that I can manage a complete desktop workflow. Prefer reusing the intended existing app window and creating a needed tab/document through its observed UI, preserving existing work. Launch when no suitable window exists or the user explicitly requests a new instance; retain dedicated browser-profile isolation.
+16. As an agent, I want application launch and window activation, movement and closure, so that I can manage a complete desktop workflow. Follow the [default-app and workspace policy](#default-apps-workspaces-and-foreground), preserving existing work.
 17. As an agent, I want explicit waits and observable conditions, so that I can verify outcomes without guessing.
 18. As a user, I want background actions preferred, so that automation interferes less with my work.
 19. As a user, I want input refused when another window covers the target, so that actions do not reach the wrong application.
@@ -44,8 +44,8 @@ Deliver one installable Pi package with native computer-use tools, reliable supp
 30. As a user, I want installed Chrome and Edge support and experimental installed Firefox-family support, so that I can use the installed supported browsers.
 31. As an agent, I want browser tabs, navigation, element actions and dialogs, so that I can complete supported web workflows.
 32. As an agent, I want page changes returned after browser actions, so that I can assess their effect.
-33. As a user, I want isolated temporary browser profiles by default, so that automation does not use my daily browser profile.
-34. As a user, I want optional remembered sign-ins in a dedicated profile, so that I can repeat authenticated workflows.
+33. As a user, I want my Windows default browser and existing browser window reused with a new task tab, so that opening or using the browser fits my normal workspace and preserves existing tabs.
+34. As a user, I want an optional dedicated browser profile, including remembered sign-ins, when I explicitly choose a separate automation workspace.
 35. As a user, I want personal settings shared across projects and hosts, so that preferences stay consistent on my Windows machine.
 36. As a user, I want full, lite, lazy and custom tool selection, so that I can control available capabilities and model context.
 37. As a user, I want disabled tools rejected during execution, so that hiding tools is not the only enforcement.
@@ -84,10 +84,10 @@ Deliver one installable Pi package with native computer-use tools, reliable supp
 - Enforce desktop ownership across native Windows and WSL2 sessions. Queue calls within the owner; reject competitors rather than retaining their stale requests. Recover ownership after proven owner failure without stealing it from a slow live owner.
 - Track a computer-use operation across model turns. Use final Pi settlement for completion and idempotent session shutdown for cleanup. Do not mistake an individual model turn or low-level run end for a new user operation.
 - Propagate cancellation, allow bounded key/button release cleanup, and keep emergency stopping independent of blocked automation. Never replay timed-out input automatically.
-- Prefer background control actions. Apply the [exclusive-control contract](#exclusive-control) when physical desktop control is needed. Preserve target, occlusion, lifetime, foreground and restoration safeguards across control and human handback.
+- Prefer supported background dispatch while preserving the requested [workspace and foreground](#default-apps-workspaces-and-foreground). A visible open/use request still brings its result forward. Apply the [exclusive-control contract](#exclusive-control) when physical desktop control is needed; preserve target, occlusion, lifetime and handback safeguards.
 - Keep the Pi observation contract: desktop actions generally report dispatch; browser actions normally return page changes. Explicit waits/observations establish expected outcomes. Distinguish sent, observed, unconfirmed and inconclusive results.
 - Preserve Chrome/Edge and experimental installed Firefox-family compatibility. Libraries are allowed where they reduce code without altering the agreed contracts; managed Firefox is not an accepted compatibility substitute.
-- Default to isolated temporary profiles; remembered sign-ins are opt-in dedicated profiles. Personal settings live on the Windows side, apply across projects and are managed through a Pi command. Project overrides are excluded initially.
+- Follow the [default-app and workspace policy](#default-apps-workspaces-and-foreground). Keep dedicated browser profiles as an explicit alternative. Personal settings live on Windows and apply across projects through a Pi command; project overrides remain excluded initially.
 - Show the accepted blue edge glow at approximately 1.5 times DSH thickness throughout exclusive control; its visibility follows the [control contract](#exclusive-control). Preserve non-activation, click-through, capture and per-monitor behavior.
 - Preserve full/lite/lazy/custom tool selection and execution-time denial. Use Pi's own registration, exposure, rendering and lifecycle facilities where appropriate.
 - Support a release-tested baseline of Windows 11, Windows PowerShell 5.1, WSL2 Ubuntu and pinned/documented Pi versions. Compatibility outside this baseline remains unverified until tested.
@@ -99,6 +99,16 @@ Deliver one installable Pi package with native computer-use tools, reliable supp
 - Extend existing Pi fixtures and host test infrastructure rather than introducing a new framework or public test-only API. Investigate supported host interfaces before promising unattended model-driven execution.
 - Do not add a separate planner, elaborate recovery controller or fixed production retry/time budget. Runner watchdogs bound tests without altering production policy.
 - Reconcile documentation during each investigation/fix: replace stale instructions, remove duplicate authority, retain concise historical evidence, and update the index/links. Requirements, sequencing, results, topic guidance and decision rationale retain their existing distinct owners.
+
+## Default apps, workspaces and foreground
+
+This is the accepted target behavior under [ADR 0005](adr/0005-default-apps-and-workspace-reuse.md); implementation and acceptance are pending in #30, with editor focus in #26. Earlier dedicated-profile acceptance does not establish this new workflow.
+
+- Resolve the Windows default handler for the requested URL/file type when no app is explicitly named. An explicit user choice takes precedence. Do not silently substitute another app because its automation channel is easier; report unavailable control and use supported native UI where feasible. Opening the default app and supporting its browser protocol are separate capabilities.
+- Discover the intended existing app window first. Create and verify a new task tab or document through its supported interface, preserving existing tabs, documents and unsaved contents. Reuse that task workspace for subsequent steps. Open a new window when the user requests one or no suitable window exists. Ambiguous targets or an app lacking a safe separate workspace require an explicit limitation or clarification rather than overwriting current work.
+- Browsers follow the same policy, including the user's existing ordinary browser window. Dedicated temporary/kept automation profiles remain an explicit alternative, not an automatic replacement for reuse. Native UI operation of an existing browser does not imply CDP/BiDi attachment to its running profile. Do not change personal browser launch flags or copy, delete or take ownership of its profile to obtain protocol access.
+- For a visible open/use request, activate and independently verify the intended window/tab, then keep the task target foreground across related steps. Intentional app/dialog transitions follow the task. Do not bounce to the caller after every tool call or apply delayed restoration after human handback. Explicit background work preserves the user's foreground; completion/handback leaves the requested result visible unless the user asked to restore another window. Windows activation refusal remains an explicit outcome; unconfirmed focus must not authorize input.
+- Preserve target/lifetime, stop, exclusive-control and uncertain-input safeguards. Extension shutdown/idle/profile cleanup may close only resources it owns; reusing a user's window does not grant permission to close that window or unrelated tabs/documents.
 
 ## Exclusive control
 
