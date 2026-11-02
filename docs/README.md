@@ -21,7 +21,7 @@ Read the row matching the task; follow section links before reading whole docume
 | Exclusive control, human handback and emergency stopping | [Control contract](spec.md#exclusive-control), [delivery/test slices](implementation-plan.md#exclusive-control-delivery), [ADR 0003](adr/0003-exclusive-desktop-control.md), [current stopping implementation](stopping.md), [control acceptance](validation.md#control-interruption-acceptance) |
 | Control indicators, preview and manual acceptance | [Indicators](indicators.md) |
 | Desktop ownership and operation lifecycle | [Ownership](ownership.md) |
-| Native window discovery and validation | [Windows discovery](windows.md), [accessibility observations](windows.md#accessibility-observations), [locked sessions](windows.md#locked-session-refusals) |
+| Native window discovery and validation | [Windows discovery](windows.md), [accessibility observations](windows.md#accessibility-observations), [OCR failures](validation.md#pi-ocr-failure-acceptance), [locked sessions](windows.md#locked-session-refusals) |
 | Scoped browser/mixed agent acceptance | [Held-navigation cancellation](validation.md#scoped-held-navigation-cancellation), [Partial-observation recovery](validation.md#scoped-partial-observation-recovery), [mixed outcome evidence](validation.md#scoped-mixed-browsernative-outcome), [runner prerequisites](validation.md#reproduce-automated-checks) |
 | Scoped native visual agent acceptance | [Opt-in runner](windows.md#scoped-visual-agent-check), [A04 evidence](validation.md#visual-ocr-association-preflight) |
 | Lifetime-bound native targeting and stale-reference behavior | [Window references](windows.md#window-lifetime-references), [accepted design](implementation-plan.md#window-lifetime-design) |

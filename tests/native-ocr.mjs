@@ -2,17 +2,19 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { WorkerClient } from "../dist/client.js";
 import computerUse from "../dist/extension.js";
 import { computerUseHost } from "./native-host.mjs";
 
 assert.equal(process.platform, "win32");
 const serverMode = process.argv[2] === "--visual-server";
 const codeAssociation = process.argv.includes("--code-association");
+const failures = process.argv.includes("--failures");
 const visualAssociation =
   serverMode ||
   codeAssociation ||
@@ -399,8 +401,142 @@ async function verifyDefault() {
     }),
   );
 }
+// Faults are confined to a disposable package copy. No production test switches,
+// installed language changes or personal-window captures are involved.
+async function verifyFailures() {
+  const staged = await mkdtemp(
+    fileURLToPath(new URL("./.ocr-failures-", import.meta.url)),
+  );
+  const languageFlag = join(staged, "no-language");
+  const holdFlag = join(staged, "hold-recognition");
+  const entered = join(staged, "recognition-entered");
+  const sourcePath = join(staged, "assets", "ocr.cs");
+  let worker;
+  let receipt;
+  const waitUntil = async (observe, description) => {
+    const deadline = Date.now() + 15000;
+    while (!(await observe())) {
+      assert.ok(Date.now() < deadline, description);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  };
+  const exists = async (path) =>
+    readFile(path).then(
+      () => true,
+      (error) => {
+        if (error.code === "ENOENT") return false;
+        throw error;
+      },
+    );
+  const unavailable = (result, pattern) => {
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.match(String(result.error), pattern);
+    assert.equal(result.conclusive, false);
+    for (const key of ["text", "lines", "matched"])
+      assert.equal(key in result, false, `failure must not invent ${key}`);
+  };
+  try {
+    for (const directory of ["dist", "assets"])
+      await cp(
+        fileURLToPath(new URL(`../${directory}`, import.meta.url)),
+        join(staged, directory),
+        { recursive: true },
+      );
+    await writeFile(join(staged, "package.json"), '{"type":"module"}');
+    const source = await readFile(sourcePath, "utf8");
+    const selection = "OcrEngine.TryCreateFromUserProfileLanguages()";
+    const recognition = "var operation=engine.RecognizeAsync(image);";
+    assert.equal(source.split(selection).length, 2);
+    assert.equal(source.split(recognition).length, 2);
+    // Force the existing null-engine branch; a second seam holds an actual
+    // dispatched WinRT operation before results are consumed, for bounded cancel.
+    const literal = (path) => `@"${path.replaceAll('"', '""')}"`;
+    const injected = source
+      .replace(
+        selection,
+        `(File.Exists(${literal(languageFlag)}) ? null : ${selection})`,
+      )
+      .replace(
+        recognition,
+        `${recognition}\nif(File.Exists(${literal(holdFlag)})) { File.WriteAllText(${literal(entered)},System.Diagnostics.Process.GetCurrentProcess().Id.ToString()); while(File.Exists(${literal(holdFlag)})) Thread.Sleep(10); }`,
+      );
+    await writeFile(sourcePath, injected);
+    // Genuine missing OCR resource exercises lazy engine-start failure while
+    // native capture remains available. Restore it before the language case.
+    await rename(sourcePath, `${sourcePath}.missing`);
+    const boot = `process.env.LOCALAPPDATA=${JSON.stringify(folder)};process.env.PI_CU_SETTINGS_FILE=${JSON.stringify(join(folder, "settings.json"))};await import(${JSON.stringify(pathToFileURL(join(staged, "dist", "worker.js")).href)});`;
+    worker = new WorkerClient({
+      launch: async () => ({
+        executable: process.execPath,
+        args: ["--input-type=module", "-e", boot],
+        cwd: staged,
+      }),
+      timeoutMs: 60000,
+    });
+    const target = {
+      nativeWindowHandle: handle,
+      processId: fixture.pid,
+      activate: false,
+      maxWidth: 480,
+      query: "HELLO 123",
+    };
+    const call = (signal, operation = "ocr-failures") =>
+      worker.execute("ocr", target, signal, operation);
+    unavailable(await call(), /OCR_UNAVAILABLE.*NATIVE_RESOURCE_MISSING/);
+    await rename(`${sourcePath}.missing`, sourcePath);
+    await writeFile(languageFlag, "");
+    unavailable(await call(), /OCR_LANGUAGE_UNAVAILABLE/);
+    await rm(languageFlag);
+    const selected = await call();
+    assert.equal(selected.ok, true, JSON.stringify(selected));
+    assert.ok(selected.availableLanguages.includes(selected.language));
+    assert.ok(selected.matched.length > 0);
+    await writeFile(holdFlag, "");
+    const controller = new AbortController();
+    const pending = call(controller.signal);
+    const cancelled = assert.rejects(pending, /COMPUTER_USE_CANCELLED/);
+    await waitUntil(() => exists(entered), "recognition did not dispatch");
+    const helperPid = Number(await readFile(entered, "utf8"));
+    assert.ok(helperPid > 0);
+    controller.abort(new Error("COMPUTER_USE_CANCELLED"));
+    await cancelled;
+    await waitUntil(async () => {
+      try {
+        process.kill(helperPid, 0);
+        return false;
+      } catch (error) {
+        if (error.code === "ESRCH") return true;
+        throw error;
+      }
+    }, "cancelled OCR helper did not exit");
+    await rm(holdFlag);
+    await worker.execute("operation_end", {}, undefined, "ocr-failures");
+    const recovered = await call(undefined, "ocr-fresh-operation");
+    assert.equal(recovered.ok, true, JSON.stringify(recovered));
+    assert.ok(recovered.matched.length > 0);
+    await worker.execute("operation_end", {}, undefined, "ocr-fresh-operation");
+    receipt = {
+      ok: true,
+      check: "OCR failure paths",
+      missingResourceRefused: true,
+      injectedNullEngineRefused: true,
+      selectedLanguage: selected.language,
+      availableLanguages: selected.availableLanguages,
+      cancellationAfterDispatch: true,
+      cancelledHelperExited: true,
+      freshOperationRecognized: true,
+      physicalInput: false,
+    };
+  } finally {
+    if (worker) await worker.dispose();
+    await rm(staged, { recursive: true, force: true });
+  }
+  return receipt;
+}
+let failureReceipt;
 try {
-  if (visualAssociation) await verifyVisualAssociation();
+  if (failures) failureReceipt = await verifyFailures();
+  else if (visualAssociation) await verifyVisualAssociation();
   else await verifyDefault();
 } finally {
   fixture.stdin.end("stop\n");
@@ -409,3 +545,7 @@ try {
   fixtureLines.close();
   await rm(folder, { recursive: true, force: true });
 }
+if (failureReceipt)
+  console.log(
+    JSON.stringify({ ...failureReceipt, fixtureCleanupConfirmed: true }),
+  );

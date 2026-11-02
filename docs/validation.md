@@ -109,6 +109,22 @@ Queue and host-lifecycle comparison is source-based; the separate provider subse
 
 **At that passive checkpoint, still open in #31:** busy physical input, actual held-key/button release and bounded cleanup during input, real Esc/custom shortcut while busy, and user-interference/restoration checks. Physical input had then been deferred; the later [dedicated session](#dedicated-physical-comparison-evidence) added scoped drag-button evidence. Earlier manual reports remain historical observations; the current automated results do not close the broader criteria. Continue the short dedicated session when available rather than repeating passive checks or marking all stopping/ownership acceptance complete. No production repair or new mechanism is justified by this passive run alone; newly diagnosed product gaps belong to #37.
 
+### Pi OCR failure acceptance
+
+On 2026-11-02, `npm run test:native:ocr -- --failures` passed using Windows Node 22.23.4 from the WSL2 checkout (production baseline `9cbaebd`). Windows resolved the checkout's real `puppeteer-core` dependency before the run. The existing painted HELLO fixture and the public worker protocol were used; no physical input, clipboard changes, installed-language changes or personal-application captures occurred.
+
+| Case | Observed result |
+| --- | --- |
+| OCR helper unavailable | Removing only `assets/ocr.cs` from a disposable package copy produced `OCR_UNAVAILABLE` with `NATIVE_RESOURCE_MISSING`. Capture remained available. No text/lines/matches or conclusive absence were returned. Restoring the source allowed another request without restarting the worker. |
+| No profile-language engine | A copied-source injection substituted null for the engine only while a private flag existed. The actual helper's existing null-engine branch returned `OCR_LANGUAGE_UNAVAILABLE`; the public worker preserved the failure, `conclusive: false` and absence of invented text. This proves the error path, not an installation with languages removed. |
+| Actual language selection | Removing that flag used the unchanged `TryCreateFromUserProfileLanguages()` call. Real WinRT OCR recognized the fixture and reported `zh-Hant-HK`, present in its 15 available recognizers. The tool intentionally has no language-selection parameter. |
+| Active cancellation and recovery | A second copied-source barrier acknowledged actual `RecognizeAsync` dispatch before holding result consumption. Aborting the public request settled cancellation, and OS process probing confirmed that OCR helper exited while the hold flag still existed. A fresh operation then recognized the label. This proves cancellation after dispatch, not that WinRT remained computationally busy at the instant of cancellation. |
+| Capture refusal and pre-cancellation | Reused the existing native runner's accepted minimized-target refusal and pre-aborted request evidence; neither was repeated. A desktop fallback is not treated as target OCR success. |
+
+The two injections exist only in a temporary copy; the production TypeScript/C# sources and public interfaces are unchanged. The runner verifies each replacement occurs once, uses a bounded readiness/process-exit poll, and removes its worker, fixture and temporary package/cache before printing the final passing receipt. An initial run passed the behavior assertions but failed removal of executable caches on the WSL UNC filesystem; no matching helper process remained. Moving only the private test cache to the fixture's Windows temporary directory resolved this test cleanup failure. The successful rerun confirmed cleanup.
+
+This completes #7's scoped failure/cancellation acceptance. Actual clean-machine WinRT/metadata availability remains #2; protected-image compatibility is not claimed. Multi-monitor/DPI mapping remains #6, with [existing localization evidence](#paired-capture-and-ocr-comparison) retained. No additional OCR feature or recovery retry was introduced. Standards and spec reviews found no unresolved findings. Final configured checks passed: 169 portable tests, one skipped; TypeScript, lint, build and the 89-entry package/documentation-link check passed.
+
 ## Capability coverage
 
 All tool rows share schema comparison above and portable public tool/worker tests. Live runners use disposable windows/profiles and must finish cleanup before another starts. Paths below are commands or fixture names, not claims that a manual case passed.
@@ -122,7 +138,7 @@ All tool rows share schema comparison above and portable public tool/worker test
 | find | accessibility, ocr, browser | `test:native:accessibility`, `test:native:ocr`, `test:browser`; sparse OCR fallback and stale identity |
 | element_info | accessibility, browser | `test:native:accessibility`, `test:browser`; IDs/coordinates, owner and password protection |
 | screenshot | capture, browser | `test:native:capture`, `test:browser`; WGC/blank/minimized/occlusion; display changes pending |
-| ocr | ocr | `test:native:ocr`; literal/CJK query and bounds; missing languages/protected content pending |
+| ocr | ocr | `test:native:ocr`; literal/CJK query and bounds; [failure/cancellation acceptance](#pi-ocr-failure-acceptance); clean-machine availability #2 and display mapping #6 remain separate |
 | click | pointer, browser-actions | `test:native:pointer:guards`, `test:browser:actions`; physical runner/manual checklist pending |
 | double_click | pointer, browser-actions | Same pointer/browser runners; physical effect pending |
 | move | pointer, browser-actions | Same pointer/browser runners; physical hover/restoration pending |
