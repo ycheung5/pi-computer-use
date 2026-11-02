@@ -13,6 +13,8 @@ class OleClipboardFixture {
  [DllImport("user32.dll")]static extern bool OpenClipboard(IntPtr owner);
  [DllImport("user32.dll")]static extern bool CloseClipboard();
  [DllImport("user32.dll")]static extern IntPtr GetOpenClipboardWindow();
+ [DllImport("user32.dll")]static extern IntPtr GetClipboardData(uint format);
+ [DllImport("user32.dll")]static extern bool IsClipboardFormatAvailable(uint format);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)]static extern uint RegisterClipboardFormat(string name);
  [DllImport("ole32.dll")]static extern int OleSetClipboard(OleDataObject data);
  [DllImport("ole32.dll")]static extern int OleGetClipboard(out OleDataObject data);
@@ -28,6 +30,21 @@ class OleClipboardFixture {
  static readonly byte[] seedBinary=new byte[]{0,255,4,8,0,128};
  static DataObject original;static object retained;static bool seeded;static uint seedSequence;
  static bool probeLockHeld;static uint probeLockSequence;static System.Windows.Forms.Timer probeLockTimer;
+ static string privacy="not-observed";
+ static string ReadPrivacy(Form form) {
+  if(!OpenClipboard(form.Handle))return "unavailable";
+  try {
+   if(!IsClipboardFormatAvailable(RegisterClipboardFormat("PiComputerUseClipboardTransaction")))return "not-transaction";
+   foreach(string name in new string[]{"ExcludeClipboardContentFromMonitorProcessing","CanIncludeInClipboardHistory","CanUploadToCloudClipboard"}) {
+    uint format=RegisterClipboardFormat(name);if(!IsClipboardFormatAvailable(format))return "missing-marker";
+    IntPtr data=GetClipboardData(format);if(data==IntPtr.Zero || GlobalSize(data).ToUInt64()<4)return "invalid-marker";
+    IntPtr memory=GlobalLock(data);if(memory==IntPtr.Zero)return "unreadable-marker";
+    try{if(Marshal.ReadInt32(memory)!=0)return "not-excluded";}finally{GlobalUnlock(data);}
+   }
+   return "history-cloud-excluded";
+  }finally{CloseClipboard();}
+ }
+ static void CopyNewer() {var data=new DataObject();data.SetData(DataFormats.UnicodeText,false,"Fixture newer copy 中文");data.SetData("PiCUOleFixtureOwner",false,new MemoryStream(markerBytes));Clipboard.SetDataObject(data,false);retained=data;seeded=true;seedSequence=GetClipboardSequenceNumber();}
  static void Reply(string text){Console.WriteLine(text);Console.Out.Flush();}
  static void ReleaseProbeLock(){if(probeLockHeld){CloseClipboard();probeLockHeld=false;}if(probeLockTimer!=null)probeLockTimer.Stop();}
  static void ProbeLock(Form form) {
@@ -158,6 +175,7 @@ class OleClipboardFixture {
    bool opened=OpenClipboard(IntPtr.Zero);if(opened)CloseClipboard();Reply(opened?"available":"busy");return;
   }
   bool lockProbe=args.Length==1 && args[0]=="--lock-probe";
+  bool backendLock=args.Length==1 && args[0]=="--backend-lock";
   try{if(!lockProbe)original=PreserveOriginal();}
   catch(Exception error){
    string reason=error.Message=="unsupported original clipboard format; fixture did not replace it"?"unsupported-original-format":error.Message=="fixture requires text/stream clipboard data; original unchanged"?"unsupported-original-value":error.Message=="clipboard changed before fixture setup"?"clipboard-changed-during-setup":"clipboard-unavailable";
@@ -165,12 +183,12 @@ class OleClipboardFixture {
   }
   var form=new OleFixtureForm {Text="Pi OLE clipboard disposable fixture",Width=500,Height=220};
   var editor=new TextBox {AccessibleName="OLE clipboard editor",Left=10,Top=10,Width=400};form.Controls.Add(editor);
-  bool copyOnPaste=false;
-  editor.TextChanged+=delegate{if(copyOnPaste){copyOnPaste=false;var data=new DataObject();data.SetData(DataFormats.UnicodeText,false,"Fixture newer copy 中文");data.SetData("PiCUOleFixtureOwner",false,new MemoryStream(markerBytes));Clipboard.SetDataObject(data,false);retained=data;seedSequence=GetClipboardSequenceNumber();}};
+  bool copyOnPaste=false,privacyOnPaste=false;
+  editor.TextChanged+=delegate{if(privacyOnPaste){privacyOnPaste=false;privacy=ReadPrivacy(form);}if(copyOnPaste){copyOnPaste=false;CopyNewer();}};
   form.Shown+=delegate{Reply(form.Handle.ToInt64().ToString());};
   ThreadPool.QueueUserWorkItem(delegate{string command;while((command=Console.ReadLine())!=null){string next=command;form.BeginInvoke((Action)delegate{
-    if(next=="probe-lock" && lockProbe)ProbeLock(form);
-    else if(next=="probe-unlock" && lockProbe)ProbeUnlock();
+    if(next=="probe-lock" && (lockProbe || backendLock))ProbeLock(form);
+    else if(next=="probe-unlock" && (lockProbe || backendLock))ProbeUnlock();
     else if(next=="seed-ole")Seed(false);
     else if(next=="seed-indexed")Seed(true);
     else if(next=="seed-virtual-file")SeedVirtualFile();
@@ -181,6 +199,9 @@ class OleClipboardFixture {
     else if(next=="editor-base64")Reply(Convert.ToBase64String(Encoding.UTF8.GetBytes(editor.Text)));
     else if(next=="check-seed")Reply(CheckSeed()?"seed-preserved":"seed-mismatch");
     else if(next=="copy-on-paste"){copyOnPaste=true;Reply("copy-armed");}
+    else if(next=="privacy-on-paste"){privacy="not-observed";privacyOnPaste=true;Reply("privacy-armed");}
+    else if(next=="check-privacy")Reply(privacy);
+    else if(next=="handback-copy"){CopyNewer();Reply("handback-copied");}
     else if(next=="check-newer")Reply(Equals(Clipboard.GetDataObject().GetData(DataFormats.UnicodeText,false),"Fixture newer copy 中文")?"newer-preserved":"newer-mismatch");
     else if(next=="check-indexed")Reply(CheckIndexed());
     else if(next=="restore-close") {if(OwnsClipboard()){Clipboard.SetDataObject(original,true);Reply("original-restored");}else Reply(seeded?"newer-copy-preserved":"original-unchanged");seeded=false;form.Close();}

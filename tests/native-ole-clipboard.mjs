@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -18,6 +18,7 @@ for (let at = 0; at < args.length; at++) {
       "--probe-indexed",
       "--probe-virtual-file",
       "--probe-locked",
+      "--probe-locked-backend",
     ].includes(flag)
   )
     continue;
@@ -65,18 +66,35 @@ const allCases = [
     id: "newer-copy",
     oracle: "Exact appended text and fixture newer copy preserved",
   },
+  {
+    id: "privacy-handback",
+    oracle:
+      "Observe exclusion markers during real paste; released-control application copy survives explicit continuation",
+  },
 ];
 const selected = option("--case");
 assert.ok(
   !selected || allCases.some((item) => item.id === selected),
   "Unknown clipboard case",
 );
+assert.ok(
+  selected !== "privacy-handback" || engine === "pi",
+  "Privacy/handback case requires Pi",
+);
 const cases = selected
   ? allCases.filter((item) => item.id === selected)
-  : allCases;
+  : allCases.filter(
+      (item) => engine === "pi" || item.id !== "privacy-handback",
+    );
 const indexedProbe = args.includes("--probe-indexed");
 const virtualProbe = args.includes("--probe-virtual-file");
-const lockedProbe = args.includes("--probe-locked");
+const lockedBackend = args.includes("--probe-locked-backend");
+assert.ok(
+  !(lockedBackend && args.includes("--probe-locked")),
+  "Choose only one fixture probe",
+);
+assert.ok(!lockedBackend || engine === "pi", "Backend lock case requires Pi");
+const lockedProbe = args.includes("--probe-locked") || lockedBackend;
 assert.ok(
   [indexedProbe, virtualProbe, lockedProbe].filter(Boolean).length <= 1,
   "Choose only one fixture probe",
@@ -95,7 +113,9 @@ if (args.includes("--plan") || args.includes("--list-cases")) {
         : virtualProbe
           ? "virtual-file-fixture"
           : lockedProbe
-            ? "locked-clipboard-fixture"
+            ? lockedBackend
+              ? "locked-clipboard-backend"
+              : "locked-clipboard-fixture"
             : undefined,
       observations: virtualProbe
         ? [
@@ -107,16 +127,19 @@ if (args.includes("--plan") || args.includes("--list-cases")) {
         : undefined,
       deferred: [
         "plain-only clipboard",
-        "locked clipboard",
-        "history/cloud exclusion",
+        "history-database/cross-device observations",
         "delayed rendering",
         "additional rich formats",
       ],
       prerequisites: [
         "dedicated interactive Windows desktop",
         "Windows Node",
-        "built Pi worker or pinned DSH checkout",
-        ...(lockedProbe ? [] : ["safely preservable original clipboard"]),
+        engine === "pi"
+          ? "built Pi worker"
+          : "historical optional reference checkout",
+        ...(lockedProbe && !lockedBackend
+          ? []
+          : ["safely preservable original clipboard"]),
       ],
     }),
   );
@@ -147,6 +170,8 @@ const {
 } = await import("./clipboard-editor-observation.mjs");
 const { createComparisonClient } = await import("./comparison-client.mjs");
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-ole-clipboard-"));
+process.env.PI_CU_SETTINGS_FILE = join(folder, "settings.json");
+await writeFile(process.env.PI_CU_SETTINGS_FILE, "{}");
 const executable = join(folder, "fixture.exe");
 const compile = spawnSync(
   join(
@@ -165,11 +190,15 @@ const compile = spawnSync(
   { encoding: "utf8", windowsHide: true },
 );
 assert.equal(compile.status, 0, compile.stdout + compile.stderr);
-const fixture = spawn(executable, lockedProbe ? ["--lock-probe"] : [], {
-  stdio: ["pipe", "pipe", "pipe"],
-  windowsHide: true,
-  cwd: folder,
-});
+const fixture = spawn(
+  executable,
+  lockedBackend ? ["--backend-lock"] : lockedProbe ? ["--lock-probe"] : [],
+  {
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+    cwd: folder,
+  },
+);
 let fixtureStderr = "";
 fixture.stderr.on("data", (chunk) => {
   // Fixture emits fixed diagnostic categories, never original clipboard content.
@@ -236,13 +265,14 @@ let failure;
 let client;
 let inputCleanupUnconfirmed = false;
 const observations = [];
+let operation = "clipboard-fixture";
 const execute = async (action, args) => {
   try {
     const maySendInput =
       action === "type_text" ||
       (engine === "reference" && action === "activate_window");
     if (maySendInput) inputCleanupUnconfirmed = true;
-    const result = await client.execute(action, args);
+    const result = await client.execute(action, args, undefined, operation);
     observations.push({ action, result });
     if (action === "type_text") {
       inputCleanupUnconfirmed = !inputCleanupConfirmed(result);
@@ -283,6 +313,40 @@ const readEditor = async (id, target) => {
   );
   return observed.fixtureValue;
 };
+async function prepareEditor(target) {
+  client = await createComparisonClient({
+    engine,
+    referencePath,
+    cwd: folder,
+  });
+  let found;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    found = await execute("find", {
+      ...target,
+      query: "OLE clipboard editor",
+      ocrFallback: false,
+    });
+    assert.equal(found.ok, true, JSON.stringify(found));
+    if ((found.matches ?? found.results)?.length) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  const matches = found.matches ?? found.results;
+  assert.equal(matches.length, 1, JSON.stringify(found));
+  const id = matches[0].id;
+  assert.equal((await execute("activate_window", target)).activated, true);
+  assert.equal(
+    (
+      await execute("focus", {
+        ...target,
+        elementId: id,
+        activate: true,
+      })
+    ).ok,
+    true,
+  );
+
+  return id;
+}
 try {
   const handle = Number(await next());
   assert.ok(
@@ -304,6 +368,24 @@ try {
       assert.equal(result.status, 0, result.stderr || String(result.error));
       return result.stdout.trim().replace(/^\uFEFF/, "");
     };
+    let editorId;
+    if (lockedBackend) {
+      editorId = await prepareEditor(target);
+      const { compileNative } = await import("../dist/native.js");
+      await compileNative(["clipboard.cs"]);
+      const warm = await execute("click", {
+        nativeWindowHandle: 1,
+        processId: 1,
+        x: 0,
+        y: 0,
+      });
+      assert.equal(warm.ok, false);
+      assert.match(warm.error, /^TARGET_IDENTITY_CHANGED/);
+      assert.equal(warm.cleanupConfirmed, true);
+      assert.equal(await readEditor(editorId, target), "");
+      assert.equal(await command("seed-ole"), "ole-seeded");
+      assert.equal(await command("check-seed"), "seed-preserved");
+    }
     const before = contender();
     assert.equal(
       before,
@@ -317,7 +399,7 @@ try {
       "fixture must acquire the clipboard lock",
     );
     let unlocked;
-    let whileLocked;
+    let whileLocked, backend;
     try {
       assert.equal(
         locked.ownerMatches,
@@ -330,18 +412,59 @@ try {
         "busy",
         "a separate process must be unable to acquire the lock",
       );
+      if (lockedBackend) {
+        const started = performance.now();
+        const result = await execute("type_text", {
+          ...target,
+          text: "Must not be pasted 中文",
+          method: "clipboard",
+          restoreClipboard: true,
+          activate: false,
+        });
+        const durationMs = performance.now() - started;
+        assert.equal(result.ok, false, JSON.stringify(result));
+        assert.match(result.error, /^CLIPBOARD_BUSY(?::|$)/);
+        assert.equal(result.cleanupConfirmed, true);
+        assert.equal(result.clipboardCleanupConfirmed, true);
+        assert.equal(result.clipboardRestoreOutcome, "unchanged");
+        backend = {
+          durationMs,
+          error: result.error,
+          cleanupConfirmed: true,
+          clipboardUnchanged: true,
+        };
+        console.log(JSON.stringify({ backendLockObservation: backend }));
+        assert.ok(
+          durationMs < 5000,
+          "Busy refusal must complete within the fixture's five-second lock bound",
+        );
+        assert.equal(
+          contender(),
+          "busy",
+          "Backend refusal must precede lock release",
+        );
+      }
     } finally {
       unlocked = JSON.parse(await command("probe-unlock"));
       console.log(
         JSON.stringify({
-          probe: "locked-clipboard-fixture",
+          probe: lockedBackend
+            ? "locked-clipboard-backend"
+            : "locked-clipboard-fixture",
           before,
           locked,
           whileLocked,
           unlocked,
-          clipboardRead: false,
-          clipboardReplaced: false,
-          physicalInput: false,
+          backend,
+          clipboardRead: lockedBackend
+            ? "private fixture preservation and owned data only"
+            : false,
+          clipboardReplaced: lockedBackend,
+          backendReplacedClipboard:
+            lockedBackend && !backend ? "unproven" : false,
+          physicalInput: lockedBackend
+            ? "backend attempt; see cleanup and editor observations"
+            : false,
         }),
       );
       assert.equal(
@@ -362,6 +485,14 @@ try {
       "available",
       "clipboard must be available after release",
     );
+    if (lockedBackend) {
+      assert.equal(await command("check-seed"), "seed-preserved");
+      assert.equal(
+        await readEditor(editorId, target),
+        "",
+        "Busy refusal must leave owned editor blank",
+      );
+    }
   } else if (probe) {
     assert.equal(
       await command(virtualProbe ? "seed-virtual-file" : "seed-indexed"),
@@ -388,36 +519,7 @@ try {
       "indexed payload must cross OleGetClipboard before tool dispatch",
     );
   } else {
-    client = await createComparisonClient({
-      engine,
-      referencePath,
-      cwd: folder,
-    });
-    let found;
-    for (let attempt = 0; attempt < 30; attempt++) {
-      found = await execute("find", {
-        ...target,
-        query: "OLE clipboard editor",
-        ocrFallback: false,
-      });
-      assert.equal(found.ok, true, JSON.stringify(found));
-      if ((found.matches ?? found.results)?.length) break;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    const matches = found.matches ?? found.results;
-    assert.equal(matches.length, 1, JSON.stringify(found));
-    const id = matches[0].id;
-    assert.equal((await execute("activate_window", target)).activated, true);
-    assert.equal(
-      (
-        await execute("focus", {
-          ...target,
-          elementId: id,
-          activate: true,
-        })
-      ).ok,
-      true,
-    );
+    const id = await prepareEditor(target);
     const outcomes = [];
     const text = "Clipboard test 中文 café 😀";
     for (const item of cases) {
@@ -488,6 +590,8 @@ try {
         );
         if (item.id === "newer-copy")
           assert.equal(await command("copy-on-paste"), "copy-armed");
+        if (item.id === "privacy-handback")
+          assert.equal(await command("privacy-on-paste"), "privacy-armed");
         const result = await execute("type_text", {
           ...target,
           text,
@@ -509,6 +613,47 @@ try {
           ),
           item.id === "newer-copy" ? "newer-preserved" : "seed-preserved",
         );
+        if (item.id === "privacy-handback") {
+          assert.equal(
+            await command("check-privacy"),
+            "history-cloud-excluded",
+          );
+          const end = await execute("operation_end", {});
+          assert.equal(end.ok, true);
+          assert.equal(end.released, true);
+          const health = await execute("health", {});
+          assert.equal(health.control.exclusiveControl, false);
+          assert.equal(health.control.physicalKeysHeld, 0);
+          assert.equal(health.control.physicalButtonsHeld, 0);
+          assert.equal(await command("handback-copy"), "handback-copied");
+          await new Promise((resolve) => setTimeout(resolve, 350));
+          assert.equal(await command("check-newer"), "newer-preserved");
+          operation = "clipboard-explicit-continuation";
+          const fresh = await execute("find", {
+            ...target,
+            query: "OLE clipboard editor",
+            controlType: "Edit",
+            ocrFallback: false,
+            activate: false,
+          });
+          assert.equal(fresh.ok, true);
+          assert.equal(fresh.matches.length, 1);
+          assert.equal(await readEditor(fresh.matches[0].id, target), text);
+          const suffix = " after handback";
+          const resumed = await execute("type_text", {
+            ...target,
+            text: suffix,
+            method: "clipboard",
+            restoreClipboard: true,
+            activate: false,
+          });
+          assert.equal(resumed.ok, true, JSON.stringify(resumed));
+          assert.equal(
+            await readEditor(fresh.matches[0].id, target),
+            text + suffix,
+          );
+          assert.equal(await command("check-newer"), "newer-preserved");
+        }
         outcomes.push({ id: item.id, ok: true });
       }
     }

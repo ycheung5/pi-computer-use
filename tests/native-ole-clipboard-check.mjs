@@ -26,6 +26,16 @@ assert.deepEqual(
   ["ole-preservation", "indexed-refusal", "virtual-file", "newer-copy"],
 );
 assert.equal(plan.optIn, "PI_CU_CLIPBOARD_INPUT_TEST=1");
+const backendLock = spawnSync(
+  process.execPath,
+  [runner, "--plan", "--probe-locked-backend"],
+  {
+    encoding: "utf8",
+    env: { ...process.env, PI_CU_CLIPBOARD_INPUT_TEST: undefined },
+  },
+);
+assert.equal(backendLock.status, 0, backendLock.stderr);
+assert.equal(JSON.parse(backendLock.stdout).probe, "locked-clipboard-backend");
 const typo = spawnSync(
   process.execPath,
   [runner, "--plan", "--engin", "reference"],

@@ -88,3 +88,41 @@ test("clipboard lock fixture probe is separately planned and opt-in gated", () =
     assert.notEqual(run(...args).status, 0);
   }
 });
+
+test("Pi backend clipboard lock probe is planned and gated before native access", () => {
+  const planned = run("--plan", "--probe-locked-backend");
+  assert.equal(planned.status, 0, planned.stderr);
+  const p = JSON.parse(planned.stdout);
+  assert.equal(p.probe, "locked-clipboard-backend");
+  assert.ok(p.prerequisites.includes("safely preservable original clipboard"));
+  const blocked = run("--probe-locked-backend");
+  assert.notEqual(blocked.status, 0);
+  assert.match(blocked.stderr, /PI_CU_CLIPBOARD_INPUT_TEST=1/);
+  assert.doesNotMatch(
+    blocked.stderr,
+    /MODULE_NOT_FOUND|ENOENT|requires Windows Node/,
+  );
+  assert.notEqual(
+    run("--plan", "--probe-locked", "--probe-locked-backend").status,
+    0,
+  );
+  assert.notEqual(
+    run("--plan", "--probe-locked-backend", "--engine", "reference").status,
+    0,
+  );
+});
+
+test("Pi clipboard privacy case is selectable without native access", () => {
+  for (const id of ["privacy-handback"]) {
+    const plan = run("--plan", "--case", id);
+    assert.equal(plan.status, 0, plan.stderr);
+    assert.deepEqual(
+      JSON.parse(plan.stdout).cases.map((x: { id: string }) => x.id),
+      [id],
+    );
+    assert.notEqual(
+      run("--plan", "--case", id, "--engine", "reference").status,
+      0,
+    );
+  }
+});
