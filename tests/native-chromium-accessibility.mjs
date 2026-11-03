@@ -1,30 +1,36 @@
 // Native UIA against a disposable Chromium fixture. No daily profile/input.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { WorkerClient } from "../dist/client.js";
 
 assert.equal(process.platform, "win32", "Run with Windows Node after build");
 const workspace = process.argv.includes("--workspace");
+const agentServer = process.argv.includes("--agent-server");
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-chromium-uia-"));
-const worker = new WorkerClient({
-  launch: async () => ({
-    executable: process.execPath,
-    args: [
-      "--input-type=module",
-      "-e",
-      `process.env.PI_CU_SETTINGS_FILE=${JSON.stringify(join(folder, "settings.json"))};await import(${JSON.stringify(pathToFileURL(fileURLToPath(new URL("../dist/worker.js", import.meta.url))).href)});`,
-    ],
-    cwd: folder,
-  }),
-});
+const createWorker = () =>
+  new WorkerClient({
+    launch: async () => ({
+      executable: process.execPath,
+      args: [
+        "--input-type=module",
+        "-e",
+        `process.env.PI_CU_SETTINGS_FILE=${JSON.stringify(join(folder, "settings.json"))};await import(${JSON.stringify(pathToFileURL(fileURLToPath(new URL("../dist/worker.js", import.meta.url))).href)});`,
+      ],
+      cwd: folder,
+    }),
+  });
+let worker = createWorker();
 const title = `Pi Chromium fixture ${Date.now()}`;
 const html = join(folder, "page.html");
 let browser;
+let stopped = false;
 try {
   await writeFile(
     html,
@@ -129,9 +135,11 @@ try {
   assert.equal(info.ok, true, JSON.stringify(info));
   assert.equal(info.element.controlType, "Button");
   if (workspace) {
-    const identity = { windowRef: result.windowRef };
-    const activated = await worker.execute("activate_window", identity);
-    assert.equal(activated.activated, true, JSON.stringify(activated));
+    let identity = { windowRef: result.windowRef };
+    if (!agentServer) {
+      const activated = await worker.execute("activate_window", identity);
+      assert.equal(activated.activated, true, JSON.stringify(activated));
+    }
     const flatten = (node) =>
       node ? [node, ...(node.children ?? []).flatMap(flatten)] : [];
     const tree = async () => {
@@ -150,20 +158,54 @@ try {
       tabs.some((node) => node.name.includes(title)),
       "original task page has an observed tab",
     );
-    const add = before.filter(
-      (node) =>
-        node.controlType === "Button" &&
-        (/new.?tab/i.test(node.automationId ?? "") ||
-          /new tab|新增分頁|新增索引標籤|新增标签页|新分頁|新标签页/i.test(
-            node.name,
-          )),
-    );
-    assert.equal(add.length, 1, JSON.stringify(add));
-    const opened = await worker.execute("invoke", {
-      elementId: add[0].id,
-      fallbackClick: false,
-    });
-    assert.equal(opened.ok, true, JSON.stringify(opened));
+    if (agentServer) {
+      await worker.dispose();
+      const commands = createInterface({ input: process.stdin });
+      console.log(
+        JSON.stringify({
+          ready: true,
+          target: {
+            nativeWindowHandle: target.nativeWindowHandle,
+            processId: target.processId,
+            title,
+          },
+          settings: join(folder, "settings.json"),
+          browser: defaultBrowser.handler,
+          profile: join(folder, "profile"),
+        }),
+      );
+      const [command] = await Promise.race([
+        once(commands, "line"),
+        once(commands, "close").then(() => ["stop"]),
+      ]);
+      commands.close();
+      if (command === "stop") {
+        stopped = true;
+        throw Error("Fixture stopped before verification");
+      }
+      if (command !== "verify")
+        throw Error("agent run did not authorize verification");
+      worker = createWorker();
+      identity = {
+        nativeWindowHandle: target.nativeWindowHandle,
+        processId: target.processId,
+      };
+    } else {
+      const add = before.filter(
+        (node) =>
+          node.controlType === "Button" &&
+          (/new.?tab/i.test(node.automationId ?? "") ||
+            /new tab|新增分頁|新增索引標籤|新增标签页|新分頁|新标签页/i.test(
+              node.name,
+            )),
+      );
+      assert.equal(add.length, 1, JSON.stringify(add));
+      const opened = await worker.execute("invoke", {
+        elementId: add[0].id,
+        fallbackClick: false,
+      });
+      assert.equal(opened.ok, true, JSON.stringify(opened));
+    }
     let after;
     const tabDeadline = Date.now() + 10000;
     do {
@@ -184,6 +226,37 @@ try {
       (node) => node.controlType === "TabItem" && node.name.includes(title),
     );
     assert.ok(original, "original tab remains");
+    const completed = await worker.execute("accessibility_tree", {
+      ...identity,
+      maxDepth: 0,
+      maxNodes: 1,
+    });
+    assert.equal(
+      completed.tree.hasKeyboardFocus,
+      true,
+      "agent leaves requested window foreground before independent verification",
+    );
+    if (agentServer) {
+      const windows = await worker.execute("list_windows", { maxWindows: 200 });
+      assert.equal(windows.ok, true, JSON.stringify(windows));
+      assert.equal(
+        windows.windows.filter(
+          (w) =>
+            w.processId === target.processId &&
+            w.className === target.className &&
+            w.boundingBox.width > 100 &&
+            w.boundingBox.height > 100,
+        ).length,
+        1,
+        "no extra browser window was created",
+      );
+    }
+    if (agentServer)
+      assert.equal(
+        completed.tree.name.includes(title),
+        false,
+        "new task tab remains selected before verification",
+      );
     assert.equal(
       (
         await worker.execute("invoke", {
@@ -228,6 +301,8 @@ try {
       physicalInput: false,
     }),
   );
+} catch (error) {
+  if (!stopped) throw error;
 } finally {
   await worker.dispose();
   if (browser?.pid)
@@ -243,3 +318,5 @@ try {
     retryDelay: 200,
   });
 }
+if (stopped)
+  console.log(JSON.stringify({ stopped: true, fixtureCleanupConfirmed: true }));
