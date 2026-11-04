@@ -85,9 +85,12 @@ partial class WindowsBridge {
       int left=GetSystemMetrics(76),top=GetSystemMetrics(77),width=GetSystemMetrics(78),height=GetSystemMetrics(79);
       if(width<=0 || height<=0 || x<left || x>=left+width || y<top || y>=top+height)return false;
       PointerInput input=new PointerInput {Type=0,Data=new InputUnion {Mouse=new MouseInput {
-        X=(int)(((long)(x-left)*65536+32768)/width),Y=(int)(((long)(y-top)*65536+32768)/height),
+        // Choose the first normalized coordinate for the pixel, not its midpoint:
+        // Windows can round the midpoint into the next physical pixel.
+        X=Math.Max(1,(int)(((long)(x-left)*65536+width-1)/width)),Y=Math.Max(1,(int)(((long)(y-top)*65536+height-1)/height)),
         Flags=0xC001,Extra=OwnedInputMarker}}};
-      return SendInput(1,new PointerInput[]{input},Marshal.SizeOf(typeof(PointerInput)))==1;
+      ControlPoint observed;
+      return SendInput(1,new PointerInput[]{input},Marshal.SizeOf(typeof(PointerInput)))==1 && GetCursorPos(out observed) && observed.X==x && observed.Y==y;
     }
   }
 

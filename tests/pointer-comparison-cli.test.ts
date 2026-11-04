@@ -28,6 +28,19 @@ test("Pointer comparison plans without resources and refuses unapproved input", 
       assert.deepEqual(JSON.parse(dragPlan.stdout).cases, [
         "successful-drag-drop",
       ]);
+      for (const caseName of [
+        "cross-app-drop",
+        "cross-app-discovery",
+        "owned-popup",
+        "native-menu",
+      ]) {
+        const cross = run("--list", `--engine=${engine}`, `--case=${caseName}`);
+        assert.equal(cross.status, 0, cross.stderr);
+        assert.deepEqual(JSON.parse(cross.stdout).cases, [caseName]);
+        const denied = run(`--engine=${engine}`, `--case=${caseName}`);
+        assert.notEqual(denied.status, 0);
+        assert.match(denied.stderr, /PI_CU_DEDICATED_INPUT_DESKTOP=1/);
+      }
       const discovery = run(
         "--list",
         `--engine=${engine}`,

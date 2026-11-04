@@ -63,7 +63,15 @@ if (option("report-drop")) {
 const engine = option("engine") ?? "pi";
 const selectedCase = option("case");
 assert.ok(
-  !selectedCase || ["drag-drop", "drop-discovery"].includes(selectedCase),
+  !selectedCase ||
+    [
+      "drag-drop",
+      "drop-discovery",
+      "cross-app-drop",
+      "cross-app-discovery",
+      "owned-popup",
+      "native-menu",
+    ].includes(selectedCase),
   "unknown case",
 );
 assert.ok(
@@ -77,9 +85,13 @@ if (options.includes("--list")) {
       executed: false,
       cases: selectedCase
         ? [
-            selectedCase === "drag-drop"
-              ? "successful-drag-drop"
-              : "passive-drop-discovery",
+            selectedCase.startsWith("cross-app-") ||
+            selectedCase === "owned-popup" ||
+            selectedCase === "native-menu"
+              ? selectedCase
+              : selectedCase === "drag-drop"
+                ? "successful-drag-drop"
+                : "passive-drop-discovery",
           ]
         : [
             "scaled-click",
@@ -109,12 +121,20 @@ assert.equal(
   "Opt in with PI_CU_DEDICATED_INPUT_DESKTOP=1 only on a dedicated interactive test desktop; physical runs are deferred.",
 );
 assert.equal(process.platform, "win32", "Run with Windows Node after building");
-if (selectedCase === "drag-drop" || selectedCase === "drop-discovery") {
+if (
+  [
+    "drag-drop",
+    "drop-discovery",
+    "cross-app-drop",
+    "cross-app-discovery",
+  ].includes(selectedCase)
+) {
   const { runDragDrop } = await import("./native-pointer-drop.mjs");
   await runDragDrop({
     engine,
     referencePath: option("reference"),
-    discoveryOnly: selectedCase === "drop-discovery",
+    discoveryOnly: selectedCase.endsWith("discovery"),
+    crossApp: selectedCase.startsWith("cross-app-"),
   });
   process.exit(0);
 }
@@ -143,7 +163,13 @@ const built = spawnSync(
 assert.equal(built.status, 0, built.stdout + built.stderr);
 const fixture = spawn(
   executable,
-  [`Pi CU Controls ${Date.now()}`, "--no-expiry"],
+  [
+    `Pi CU Controls ${Date.now()}`,
+    "--no-expiry",
+    ...(selectedCase === "native-menu"
+      ? ["--native-menu", "--outside-menu"]
+      : []),
+  ],
   {
     stdio: ["pipe", "pipe", "pipe"],
     cwd: folder,
@@ -162,7 +188,7 @@ let watchdog;
 const { actionMaySendInput, runPointerInput, retainPointerOwner } =
   await import("./pointer-input-safety.mjs");
 const pointerState = { unconfirmed: false };
-try {
+async function runCase() {
   if (engine === "pi") {
     const [{ default: computerUse }, { computerUseHost }] = await Promise.all([
       import("../dist/extension.js"),
@@ -207,43 +233,76 @@ try {
     }
   };
   // Fixture-owned state is independent of both engines' targeting/remembered foreground.
-  const observePointer = () =>
+  const fixtureReply = (command, prefix) =>
     new Promise((resolve, reject) => {
       let buffered = "";
+      const fail = (error) => finish(error);
+      const exited = (code) =>
+        finish(Error(`fixture exited during ${command}: ${code}`));
       const timeout = setTimeout(
-        () => finish(new Error("pointer oracle timed out")),
+        () => finish(Error(`${command} oracle timed out`)),
         5000,
       );
       const receive = (chunk) => {
         buffered += chunk.toString();
         const lines = buffered.split(/\r?\n/);
         buffered = lines.pop();
-        for (const line of lines) {
-          if (line.startsWith("pointer-state:")) {
-            const [clicks, doubles, hover, scroll, held, releases, foreground] =
-              line.slice(14).split(":").map(Number);
-            finish(null, {
-              clicks,
-              doubles,
-              hover,
-              scroll,
-              held,
-              releases,
-              foreground,
-            });
+        for (const line of lines)
+          if (line.startsWith(prefix)) {
+            finish(null, line);
             return;
           }
-        }
       };
-      function finish(error, state) {
+      function finish(error, value) {
         clearTimeout(timeout);
         fixture.stdout.off("data", receive);
-        if (error) reject(error);
-        else resolve(state);
+        fixture.stdin.off("error", fail);
+        fixture.off("exit", exited);
+        error ? reject(error) : resolve(value);
       }
       fixture.stdout.on("data", receive);
-      fixture.stdin.write("observe-pointer\n");
+      fixture.stdin.on("error", fail);
+      fixture.on("exit", exited);
+      fixture.stdin.write(`${command}\n`);
     });
+  const observePointer = async () => {
+    const line = await fixtureReply("observe-pointer", "pointer-state:");
+    const [
+      clicks,
+      doubles,
+      hover,
+      scroll,
+      held,
+      releases,
+      foreground,
+      pointerX,
+      pointerY,
+    ] = line.slice(14).split(":").map(Number);
+    assert.ok(
+      [
+        clicks,
+        doubles,
+        hover,
+        scroll,
+        held,
+        releases,
+        foreground,
+        pointerX,
+        pointerY,
+      ].every(Number.isFinite),
+      "complete independent pointer observation required",
+    );
+    return {
+      clicks,
+      doubles,
+      hover,
+      scroll,
+      held,
+      releases,
+      foreground,
+      pointer: { x: pointerX, y: pointerY },
+    };
+  };
   const find = async (query, controlType) => {
     const result = await call("find", {
       query,
@@ -255,6 +314,131 @@ try {
   };
   const initial = await observePointer();
   assert.equal(initial.clicks, 0);
+  if (selectedCase === "owned-popup" || selectedCase === "native-menu") {
+    const activated = await call("activate_window", { activate: true });
+    assert.equal(activated.activated, true, JSON.stringify(activated));
+    assert.equal(
+      (await observePointer()).foreground,
+      target.nativeWindowHandle,
+    );
+    const root = await call("accessibility_tree", {
+      maxDepth: 0,
+      maxNodes: 1,
+      activate: false,
+    });
+    assert.equal(root.ok, true);
+    let point;
+    if (selectedCase === "native-menu") {
+      await fixtureReply("menu-open", "menu-opening:");
+      const state = (await fixtureReply("menu-state", "menu-state:")).split(
+        ":",
+      );
+      assert.ok(Number(state[1]) > 0, "one native menu window required");
+      assert.equal(Number(state[2]), target.nativeWindowHandle);
+      assert.equal(Number(state[3]), target.processId);
+      assert.equal(state[4], "True");
+      assert.equal(state[6], "True", "native GUI menu mode required");
+      const menuTarget = {
+        nativeWindowHandle: Number(state[1]),
+        processId: target.processId,
+      };
+      const ready = await call("wait_for", {
+        ...menuTarget,
+        condition: "element",
+        query: "Owned menu item",
+        controlType: "MenuItem",
+        timeoutMs: 2000,
+        intervalMs: 100,
+        activate: false,
+      });
+      assert.equal(
+        ready.found,
+        true,
+        "native menu item must be positively observed",
+      );
+      const found = await call("find", {
+        ...menuTarget,
+        query: "Owned menu item",
+        controlType: "MenuItem",
+        ocrFallback: false,
+        activate: false,
+      });
+      assert.equal(found.ok, true);
+      assert.equal(found.matches.length, 1);
+      point = {
+        x: Math.round(found.matches[0].boundingBox.centerX),
+        y: Math.round(found.matches[0].boundingBox.centerY),
+      };
+    } else {
+      const [kind, x, y] = (await fixtureReply("popup", "popup:")).split(":");
+      assert.equal(kind, "popup");
+      point = { x: Number(x), y: Number(y) };
+    }
+    assert.ok(Number.isFinite(point.x) && Number.isFinite(point.y));
+    const frame = root.tree.boundingBox;
+    assert.ok(
+      point.x < frame.x ||
+        point.y < frame.y ||
+        point.x >= frame.x + frame.width ||
+        point.y >= frame.y + frame.height,
+      "popup selection must be outside source frame",
+    );
+    const before = await observePointer();
+    const clicked = await call("click", {
+      ...point,
+      dispatch: "foreground",
+      activate: true,
+    });
+    pointerState.unconfirmed = true;
+    const after = await observePointer();
+    if (after.held === 0) pointerState.unconfirmed = false;
+    assert.equal(clicked.ok, true, JSON.stringify(clicked));
+    const effect = await call("wait_for", {
+      condition: "element",
+      query: selectedCase === "native-menu" ? "Menu selected" : "Popup clicked",
+      controlType: "Text",
+      timeoutMs: 2000,
+      intervalMs: 100,
+      activate: false,
+    });
+    assert.equal(effect.found, true, "popup/menu selection must be observed");
+    if (selectedCase === "native-menu") {
+      const state = (await fixtureReply("menu-state", "menu-state:")).split(
+        ":",
+      );
+      assert.equal(Number(state[1]), 0, "native menu window closed");
+      assert.equal(state[6], "False", "native menu mode ended");
+    }
+    console.log(
+      JSON.stringify({ check: "owned-popup-observation", before, after }),
+    );
+    assert.equal(after.held, 0);
+    assert.deepEqual(
+      after.pointer,
+      before.pointer,
+      "independent OS pointer restoration",
+    );
+    assert.equal(
+      after.foreground,
+      target.nativeWindowHandle,
+      "completion retains intended source window",
+    );
+    console.log(
+      JSON.stringify({
+        ok: true,
+        check:
+          selectedCase === "native-menu"
+            ? "native-menu-outside-frame"
+            : "owned-popup-outside-frame",
+        point,
+        before,
+        after,
+        cleanupConfirmed: clicked.cleanupConfirmed,
+        physicalInput: true,
+      }),
+    );
+    return;
+  }
   const button = (await find("Background action", "Button"))[0];
   const screenPoint = {
     x: Math.round(button.boundingBox.centerX),
@@ -277,8 +461,17 @@ try {
   };
   const clicked = await call("click", { ...mapped, dispatch: "foreground" });
   assert.equal(clicked.ok, true, JSON.stringify(clicked));
-  assert.ok(
-    (await find("Clicked 1", "Text")).length,
+  const observed = await call("wait_for", {
+    condition: "element",
+    query: "Clicked 1",
+    controlType: "Text",
+    timeoutMs: 2000,
+    intervalMs: 100,
+    activate: false,
+  });
+  assert.equal(
+    observed.found,
+    true,
     "physical click reached the intended scaled point",
   );
   assert.equal((await observePointer()).clicks, 1);
@@ -405,6 +598,9 @@ try {
         "inspect returned pointer/foreground reports and validate user interference manually",
     }),
   );
+}
+try {
+  await runCase();
 } finally {
   clearTimeout(watchdog);
   if (pointerState.unconfirmed) {
