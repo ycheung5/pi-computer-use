@@ -11,6 +11,42 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { traceWithoutImages } from "./pi-visual-fixture.mjs";
 
+// Exclude page content: a DOM textbox cannot impersonate browser chrome.
+export function blankWorkspaceEvidence(before, after) {
+  const chromeEdits = (node) =>
+    !node || node.controlType === "Document"
+      ? []
+      : [
+          ...(node.controlType === "Edit" ? [node] : []),
+          ...(node.children ?? []).flatMap(chromeEdits),
+        ];
+  const original = chromeEdits(before),
+    current = chromeEdits(after);
+  if (original.length !== 1 || current.length !== 1) return false;
+  const [oldBar] = original,
+    [bar] = current;
+  return Boolean(
+    typeof oldBar.automationId === "string" &&
+      oldBar.automationId.length > 0 &&
+      oldBar.automationId === bar.automationId &&
+      oldBar.isPassword === false &&
+      bar.isPassword === false &&
+      oldBar.patterns?.includes("Value") &&
+      bar.patterns?.includes("Value") &&
+      /page\.html/i.test(oldBar.value ?? "") &&
+      [
+        undefined,
+        "",
+        "about:blank",
+        "chrome://newtab",
+        "chrome://newtab/",
+        "chrome://new-tab-page/",
+        "edge://newtab",
+        "edge://newtab/",
+      ].includes(bar.value),
+  );
+}
+
 // Verification selects the original tab, so stop/uncertainty must fence it too.
 export function workspaceVerification({
   settled,
@@ -76,12 +112,16 @@ export function workspaceScope(owned) {
       if (a.elementId !== undefined && !elements.has(a.elementId))
         return deny("unobserved native element");
       if (
-        a.nativeWindowHandle === undefined &&
+        !(
+          a.nativeWindowHandle === owned.nativeWindowHandle &&
+          a.processId === owned.processId
+        ) &&
         !refs.has(a.windowRef) &&
-        !elements.has(a.elementId) &&
-        !titles.has(a.windowTitle)
+        !elements.has(a.elementId)
       )
-        return deny("owned window or observed element required");
+        return deny(
+          "owned HWND, issued window reference or observed element required; titles alone do not bind a window",
+        );
       if (n === "find" && a.ocrFallback !== false)
         return deny("disable image-derived OCR for this UIA-only check");
       if (n === "snapshot" && a.includeScreenshot !== false)
@@ -99,13 +139,15 @@ export function workspaceScope(owned) {
       )
         halted = true;
       if (n === "list_windows") {
-        for (const w of d.windows ?? [])
+        for (const w of d.ok === true ? (d.windows ?? []) : [])
           if (
             w.nativeWindowHandle === owned.nativeWindowHandle &&
-            w.processId === owned.processId &&
-            typeof w.name === "string"
-          )
-            titles.add(w.name);
+            w.processId === owned.processId
+          ) {
+            if (typeof w.name === "string") titles.add(w.name);
+            if (typeof w.windowRef === "string") refs.add(w.windowRef);
+            if (typeof w.id === "string") elements.add(w.id);
+          }
         return;
       }
       if (n === "launch_app" || n === "wait") return;
@@ -337,6 +379,12 @@ async function run(runs, preflight = false) {
       ]);
       ready = JSON.parse(line);
       assert.equal(ready.ready, true);
+      if (!preflight)
+        assert.equal(
+          ready.visibleForDiscovery,
+          true,
+          "visible owned window required before model startup",
+        );
     } catch (error) {
       fixture.stdin.end("stop\n");
       const [fixtureExit] = await fixtureClosed;
@@ -361,8 +409,15 @@ async function run(runs, preflight = false) {
           ready: true,
           cleanupConfirmed: true,
           paidModel: false,
+          visibleForDiscovery: ready.visibleForDiscovery,
+          initialVisibility: ready.initialVisibility,
           dir,
         }),
+      );
+      assert.equal(
+        ready.visibleForDiscovery,
+        true,
+        "fixture must be discoverable through ordinary visible-window listing",
       );
       continue;
     }
@@ -496,6 +551,7 @@ async function run(runs, preflight = false) {
           fixtureExit === 0 &&
           settled &&
           verification?.newTaskTabOriginalPreserved === true &&
+          verification.selectedBlankTabVerified === true &&
           effective.length > 0 &&
           effective.every(
             (e) =>

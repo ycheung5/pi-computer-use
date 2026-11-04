@@ -17,3 +17,7 @@ export function workspaceVerification(facts: {
   toolStarts: number;
   auditRows: Record<string, unknown>[];
 }): "verify" | "stop" | "retain";
+export function blankWorkspaceEvidence(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): boolean;

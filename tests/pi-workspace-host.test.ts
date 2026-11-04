@@ -43,7 +43,12 @@ test("workspace scope follows owned observed IDs and refuses unsafe routes", asy
   );
   assert.equal(
     scope.before(
-      event("find", { windowTitle: "Original tab", ocrFallback: false }),
+      event("find", {
+        nativeWindowHandle: 100,
+        processId: 200,
+        windowTitle: "Original tab",
+        ocrFallback: false,
+      }),
     ),
     undefined,
   );
@@ -84,7 +89,11 @@ test("workspace scope follows owned observed IDs and refuses unsafe routes", asy
   });
   assert.equal(
     scope.before(
-      event("accessibility_tree", { windowTitle: "Observed task tab title" }),
+      event("accessibility_tree", {
+        nativeWindowHandle: 100,
+        processId: 200,
+        windowTitle: "Observed task tab title",
+      }),
     ),
     undefined,
   );
@@ -123,7 +132,11 @@ test("workspace scope follows owned observed IDs and refuses unsafe routes", asy
   });
   assert.equal(
     scope.before(
-      event("accessibility_tree", { windowTitle: "New tab - Browser" }),
+      event("accessibility_tree", {
+        nativeWindowHandle: 100,
+        processId: 200,
+        windowTitle: "New tab - Browser",
+      }),
     ),
     undefined,
   );
@@ -166,5 +179,139 @@ test("workspace verification never drives UI after stop or uncertain audit", asy
       auditRows: [],
     }),
     "stop",
+  );
+});
+
+test("workspace discovery forwards only the owned window's issued references", async () => {
+  const { workspaceScope } = await import("./pi-workspace-host.mjs");
+  const owned = {
+    nativeWindowHandle: 100,
+    processId: 200,
+    title: "Original tab",
+  };
+  const scope = workspaceScope(owned);
+  scope.after({
+    toolName: "windows_computer_use_list_windows",
+    details: {
+      ok: true,
+      windows: [
+        {
+          ...owned,
+          name: "Original tab - Browser",
+          windowRef: "w:listed",
+          id: "uia:hwnd:100:pid:200",
+        },
+        {
+          nativeWindowHandle: 101,
+          processId: 201,
+          name: "Other window",
+          windowRef: "w:other",
+          id: "u:other",
+        },
+      ],
+    },
+  });
+  assert.equal(
+    scope.before({
+      toolName: "windows_computer_use_accessibility_tree",
+      input: { windowRef: "w:listed" },
+    }),
+    undefined,
+  );
+  assert.equal(
+    scope.before({
+      toolName: "windows_computer_use_element_info",
+      input: { elementId: "uia:hwnd:100:pid:200" },
+    }),
+    undefined,
+  );
+  assert.equal(
+    scope.before({
+      toolName: "windows_computer_use_accessibility_tree",
+      input: { windowRef: "w:other" },
+    })?.block,
+    true,
+  );
+  assert.equal(
+    scope.before({
+      toolName: "windows_computer_use_element_info",
+      input: { elementId: "u:other" },
+    })?.block,
+    true,
+  );
+  assert.equal(
+    scope.before({
+      toolName: "windows_computer_use_activate_window",
+      input: { windowTitle: "Original tab - Browser" },
+    })?.block,
+    true,
+  );
+  assert.equal(
+    scope.before({
+      toolName: "windows_computer_use_activate_window",
+      input: { nativeWindowHandle: 100 },
+    })?.block,
+    true,
+  );
+});
+
+test("blank workspace proof uses browser chrome and refuses website or unproven values", async () => {
+  const { blankWorkspaceEvidence } = await import("./pi-workspace-host.mjs");
+  const address = {
+    controlType: "Edit",
+    automationId: "native-address",
+    isPassword: false,
+    patterns: ["Value"],
+    value: "file:///C:/owned/page.html",
+  };
+  const tree = (bar: Record<string, unknown>) => ({
+    controlType: "Window",
+    name: "New Tab - Browser",
+    children: [
+      { controlType: "ToolBar", children: [bar] },
+      { controlType: "Document", children: [{ ...address, value: "" }] },
+    ],
+  });
+  const before = tree(address);
+  assert.equal(
+    blankWorkspaceEvidence(before, tree({ ...address, value: "" })),
+    true,
+  );
+  assert.equal(
+    blankWorkspaceEvidence(
+      before,
+      tree({ ...address, value: "chrome://newtab/" }),
+    ),
+    true,
+  );
+  assert.equal(
+    blankWorkspaceEvidence(
+      before,
+      tree({ ...address, value: "https://example.invalid/" }),
+    ),
+    false,
+  );
+  assert.equal(
+    blankWorkspaceEvidence(
+      before,
+      tree({ ...address, automationId: "other", value: "" }),
+    ),
+    false,
+  );
+  assert.equal(
+    blankWorkspaceEvidence(
+      before,
+      tree({ ...address, patterns: undefined, value: "" }),
+    ),
+    false,
+  );
+  assert.equal(
+    blankWorkspaceEvidence(before, {
+      controlType: "Window",
+      children: [
+        { controlType: "Document", children: [{ ...address, value: "" }] },
+      ],
+    }),
+    false,
   );
 });

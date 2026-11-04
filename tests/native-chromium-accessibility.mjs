@@ -9,6 +9,7 @@ import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { WorkerClient } from "../dist/client.js";
+import { blankWorkspaceEvidence } from "./pi-workspace-host.mjs";
 
 assert.equal(process.platform, "win32", "Run with Windows Node after build");
 const workspace = process.argv.includes("--workspace");
@@ -93,7 +94,11 @@ try {
         ? pathToFileURL(html).href
         : `--app=${pathToFileURL(html).href}`,
     ],
-    { stdio: ["ignore", "ignore", "pipe"], windowsHide: true, cwd: folder },
+    {
+      stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: !workspace,
+      cwd: folder,
+    },
   );
   let target;
   const deadline = Date.now() + 20000;
@@ -142,6 +147,7 @@ try {
     }
     const flatten = (node) =>
       node ? [node, ...(node.children ?? []).flatMap(flatten)] : [];
+    let rawTree;
     const tree = async () => {
       const observed = await worker.execute("accessibility_tree", {
         ...identity,
@@ -150,20 +156,34 @@ try {
         detailLevel: "full",
       });
       assert.equal(observed.ok, true, JSON.stringify(observed));
+      rawTree = observed.tree;
       return flatten(observed.tree);
     };
     const before = await tree();
+    const originalTree = rawTree;
     const tabs = before.filter((node) => node.controlType === "TabItem");
     assert.ok(
       tabs.some((node) => node.name.includes(title)),
       "original task page has an observed tab",
     );
     if (agentServer) {
+      const visibleListing = await worker.execute("list_windows", {
+        maxWindows: 200,
+        includeInvisible: false,
+      });
+      assert.equal(visibleListing.ok, true, JSON.stringify(visibleListing));
+      const visible = visibleListing.windows.some(
+        (window) =>
+          window.nativeWindowHandle === target.nativeWindowHandle &&
+          window.processId === target.processId,
+      );
       await worker.dispose();
       const commands = createInterface({ input: process.stdin });
       console.log(
         JSON.stringify({
           ready: true,
+          visibleForDiscovery: visible,
+          initialVisibility: { isOffscreen: target.isOffscreen },
           target: {
             nativeWindowHandle: target.nativeWindowHandle,
             processId: target.processId,
@@ -226,6 +246,11 @@ try {
       (node) => node.controlType === "TabItem" && node.name.includes(title),
     );
     assert.ok(original, "original tab remains");
+    assert.equal(
+      blankWorkspaceEvidence(originalTree, rawTree),
+      true,
+      "new task tab must expose a blank/new-tab browser address, not a website",
+    );
     const completed = await worker.execute("accessibility_tree", {
       ...identity,
       maxDepth: 0,
@@ -295,6 +320,7 @@ try {
         ? {
             nativeExistingWindowReuse: true,
             newTaskTabOriginalPreserved: true,
+            selectedBlankTabVerified: true,
             defaultBrowser: defaultBrowser.handler.name,
           }
         : {}),
