@@ -28,7 +28,7 @@ Read the row matching the task; follow section links before reading whole docume
 | Lifetime-bound native targeting and stale-reference behavior | [Window references](windows.md#window-lifetime-references), [accepted design](implementation-plan.md#window-lifetime-design) |
 | Native interop alternatives and tradeoffs | [Native interop research](native-interop-research.md) |
 | Guarded desktop pointer and dedicated input validation | [Pointer actions](pointer.md), [popup/menu/cross-process drop and restoration acceptance](validation.md#scoped-pointer-and-restoration-acceptance) |
-| Text, chords, clipboard preservation and validation | [Text entry](text.md), [clipboard acceptance](validation.md#pi-clipboard-contention-and-privacy-acceptance) |
+| Text, chords, clipboard preservation and validation | [Text entry](text.md), [chord/editor-focus acceptance](validation.md#pi-chords-and-editor-focus-acceptance), [clipboard acceptance](validation.md#pi-clipboard-contention-and-privacy-acceptance) |
 | Personal settings, commands and tool loading | [Settings](settings.md) |
 | Browser reads/actions, dedicated profiles, idle cleanup and fixtures | [Browser](browser.md) |
 | Domain-document consumer rules | [Domain docs](agents/domain.md) |

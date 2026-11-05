@@ -73,15 +73,28 @@ partial class WindowsBridge {
     }
     if(best==null)throw new InvalidOperationException("TEXT_FOCUS_NOT_FOUND: no writable main text control");return best;
   }
-  static void TextCheck(EventWaitHandle cancel,Process listener,IntPtr window,uint owner,IntPtr expectedFocus,bool checkFocus,InteractionGuard interaction) {
+  static void TextCheck(EventWaitHandle cancel,Process listener,IntPtr window,uint owner,IntPtr expectedFocus,bool checkFocus,InteractionGuard interaction,bool requireForeground=true) {
     CheckWindowReference(window);
     if(cancel.WaitOne(0))throw new InvalidOperationException("COMPUTER_USE_STOPPED");
     interaction.Check();
     if(listener.HasExited)throw new InvalidOperationException("STOP_LISTENER_UNAVAILABLE");
     if(!IsWindow(window) || WindowOwner(window)!=owner || !IsWindowEnabled(window) || !IsWindowVisible(window) || IsIconic(window))throw new InvalidOperationException("TARGET_IDENTITY_CHANGED");
-    if(GetForegroundWindow()!=window)throw new InvalidOperationException("TARGET_FOREGROUND_CHANGED: no more text sent");
+    if(requireForeground && GetForegroundWindow()!=window)throw new InvalidOperationException("TARGET_FOREGROUND_CHANGED: no more text sent");
     if(checkFocus)foreach(int key in new int[]{1,2,4,16,17,18,91,92})if(GetAsyncKeyState(key)<0)throw new InvalidOperationException("USER_INPUT_ACTIVE: user button or modifier changed during typing");
     if(checkFocus && TextFocus(window,false)!=expectedFocus)throw new InvalidOperationException("TARGET_FOCUS_CHANGED: no more text sent");
+  }
+  // SetFocus may return before the target thread applies it. Observe the exact
+  // requested field before input; never resend focus or type into the old field.
+  static IntPtr ConfirmTextFocus(AutomationElement requested,EventWaitHandle cancel,Process listener,IntPtr window,uint owner,InteractionGuard interaction) {
+    IntPtr requestedHandle=new IntPtr(requested.Current.NativeWindowHandle);
+    Stopwatch watch=Stopwatch.StartNew();
+    do {
+      TextCheck(cancel,listener,window,owner,IntPtr.Zero,false,interaction,false);
+      IntPtr focus=TextFocus(window,false);
+      if(GetForegroundWindow()==window && focus!=IntPtr.Zero && (requestedHandle!=IntPtr.Zero?focus==requestedHandle:requested.Current.HasKeyboardFocus))return focus;
+      if(cancel.WaitOne(10))throw new InvalidOperationException("COMPUTER_USE_STOPPED");
+    }while(watch.ElapsedMilliseconds<1000);
+    throw new InvalidOperationException("TARGET_FOCUS_CHANGED: requested text field focus was not confirmed; no text sent");
   }
   static void KeyEvent(HeldKey key,bool release) {
     if(!release){BeginWindowDispatch();NotifyPhysicalInput(true);}
@@ -175,8 +188,8 @@ partial class WindowsBridge {
       }
       if(args.ContainsKey("_elementId")){CheckWindowReference(window);BeginWindowDispatch();main.SetFocus();}
       else if(action=="type_text" && TextOption(args,"focusMode","preserve")=="main") {main=MainTextControl(window);CheckWindowReference(window);BeginWindowDispatch();main.SetFocus();result["focusedControl"]=main.Current.ControlType.ProgrammaticName;}
-      if(action=="type_text" && TextFocus(window,false)==IntPtr.Zero) {IntPtr remembered=TextFocus(window);if(remembered!=IntPtr.Zero){CheckWindowReference(window);BeginWindowDispatch();AutomationElement.FromHandle(remembered).SetFocus();}}
-      IntPtr expectedFocus=TextFocus(window,false);if(action=="type_text")AssertWritableText(expectedFocus);
+      if(action=="type_text" && main==null && TextFocus(window,false)==IntPtr.Zero) {IntPtr remembered=TextFocus(window);if(remembered!=IntPtr.Zero){CheckWindowReference(window);BeginWindowDispatch();main=AutomationElement.FromHandle(remembered);main.SetFocus();}}
+      IntPtr expectedFocus=main!=null?ConfirmTextFocus(main,cancel,listener,window,owner,interaction):TextFocus(window,false);if(main!=null){result["focusConfirmed"]=true;result["inputFocusHandle"]=expectedFocus.ToInt64();}if(action=="type_text")AssertWritableText(expectedFocus);
       TextCheck(cancel,listener,window,owner,expectedFocus,action=="type_text",interaction);
       if(action=="type_text")RememberTextFocus(window,expectedFocus);
       if(action=="keypress") {Chord((IEnumerable)args["keys"],cancel,listener,window,owner,held,interaction);result["method"]="sendinput-keychord";}
