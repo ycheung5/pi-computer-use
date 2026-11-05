@@ -74,10 +74,10 @@ The foundation, desktop and browser implementations exist. Complete the remainin
 | --- | --- | --- |
 | 1. Reconcile scope and reuse | Remove DSH manual/parity gates, preserve Pi obligations, map existing accepted cases to their owners. | Current issues and docs have one Pi-first scope; historical comparisons are clearly historical. |
 | 2. Close capability gaps | Finish the named missing Pi text/chord, clipboard, targeting, pointer/control, display and OCR cases. Diagnose only an observed Pi failure. | Independent outcome/cleanup evidence or explicit unavailable/accepted-limit disposition; affected regressions pass. |
-| 3. Finish native agent outcomes | Complete #35 creation, preservation and recovery on owned targets. Reuse the six accepted Pi browser/mixed scenarios in completed #36. | Required missing Pi task/recovery scenarios pass three reset runs with effective model metadata and independent outcomes. Shared physical-control evidence stays with #31/#20. |
+| 3. Finish native agent outcomes | #35 creation/preservation, replacement/partial recovery and composed continuation are accepted. #36 retains its six accepted browser/mixed scenarios. | Named cases passed three fresh runs with effective model metadata and independent outcomes. Actual human/control proof is reused from #31; presentation remains #20. |
 | 4. Release | Complete #21's remaining functional, clean-install, manual and packaging checks; document known limits and useful Pi responsiveness. | Every Pi release obligation has a result/disposition; no DSH setup, credentials, manual run or timing comparison is needed. |
 
-The remaining #35 continuation case [composes registered-tool cancellation and a labelled stand-in edit with real-Pi resumption](validation.md#native-cancellation-and-handback-continuation). Reuse #31's accepted actual-human/control proof; this creates no repeated physical-stop gate.
+The completed #35 continuation case [composes registered-tool cancellation and a labelled stand-in edit with real-Pi resumption](validation.md#native-cancellation-and-handback-continuation). Reuse #31's accepted actual-human/control proof; this creates no repeated physical-stop gate.
 
 Execute per bounded case: establish the Pi result, diagnose an actual failure, make a targeted repair and rerun that case/affected regressions. A blocked case stops dependent activity; it does not reopen accepted cases or mandate a framework. No fixed production retry count or new agent policy is introduced.
 
