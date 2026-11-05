@@ -5,12 +5,41 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { WorkerClient } from "../dist/client.js";
-import {
-  nativeWorkerLaunch,
-  windowsHostEnvironment,
-} from "../dist/launcher.js";
 
+for (const arg of process.argv.slice(2))
+  assert.ok(
+    ["--layout-only", "--lifecycle-only", "--plan"].includes(arg),
+    "unknown indicator test option",
+  );
+assert.ok(
+  !(
+    process.argv.includes("--layout-only") &&
+    process.argv.includes("--lifecycle-only")
+  ),
+  "select one indicator test mode",
+);
+const mode = process.argv.includes("--layout-only")
+  ? "layout"
+  : process.argv.includes("--lifecycle-only")
+    ? "lifecycle"
+    : "default";
+if (process.argv.includes("--plan")) {
+  console.log(
+    JSON.stringify({
+      executed: false,
+      mode,
+      physicalInput: false,
+      globalDisplayChanges: false,
+      exclusiveControl: mode !== "layout",
+    }),
+  );
+  process.exit(0);
+}
+const [{ WorkerClient }, { nativeWorkerLaunch, windowsHostEnvironment }] =
+  await Promise.all([
+    import("../dist/client.js"),
+    import("../dist/launcher.js"),
+  ]);
 const run = promisify(execFile);
 const environment = await windowsHostEnvironment();
 const folder = await mkdtemp(
@@ -77,6 +106,28 @@ try {
   assert.equal(preview.shortcutModifiers, 3);
   assert.equal(preview.escAlwaysEnabled, true);
   assert.equal(preview.injectedKeysIgnored, true);
+  if (mode === "layout") {
+    const after = await worker.execute("health", {});
+    assert.equal(after.control.armed, false);
+    assert.equal(after.control.presentation.visible, false);
+    console.log(
+      JSON.stringify({
+        ok: true,
+        check: "passive display inventory",
+        layout: preview.presentation.layout,
+        physicalInput: false,
+        armed: false,
+        visible: false,
+      }),
+    );
+  } else if (mode === "lifecycle") await verifyHeldLifecycle(preview);
+  else await verifyControlProtocol(preview);
+} finally {
+  await worker.dispose();
+  await rm(folder, { recursive: true, force: true });
+}
+
+async function verifyControlProtocol(preview) {
   const prepared = await worker.execute(
     "prepare_input",
     {},
@@ -174,7 +225,7 @@ try {
       invalidPointerInputRefused: true,
       monitorsReported: preview.presentation.layout.length,
       shortcutConfigured: true,
-      injectedFilter: "configured; physical test pending",
+      injectedFilter: "configured; accepted physical evidence remains in #31",
       visiblePreview:
         process.env.PI_CU_ENABLE_INDICATOR_PREVIEW === "1"
           ? "state transition checked; visual acceptance pending"
@@ -182,7 +233,149 @@ try {
       physicalInput: false,
     }),
   );
-} finally {
-  await worker.dispose();
-  await rm(folder, { recursive: true, force: true });
+}
+
+async function verifyHeldLifecycle(preview) {
+  const samples = [];
+  const observe = async (stage) => {
+    const health = await worker.execute("health", {});
+    assert.equal(health.ok, true, JSON.stringify(health));
+    const c = health.control,
+      p = c.presentation;
+    samples.push({
+      stage,
+      operationId: c.operationId,
+      listenerProcessId: c.listenerProcessId,
+      armed: c.armed,
+      exclusiveControl: c.exclusiveControl,
+      held: p.held,
+      visible: p.visible,
+      visibleWindows: p.visibleWindows,
+      frameErrors: p.frameErrors,
+      remoteVisible: p.remoteVisible,
+      captureAffinityApplied: p.captureAffinityApplied,
+    });
+    return c;
+  };
+  const held = (c) => {
+    assert.equal(c.exclusiveControl, true);
+    assert.equal(c.armed, true);
+    assert.equal(c.presentation.held, true);
+    assert.equal(c.presentation.visible, true);
+    assert.deepEqual(c.presentation.frameErrors, []);
+  };
+  assert.equal(
+    (
+      await worker.execute("settings_update", {
+        changes: {
+          indicatorEnabled: true,
+          cursorIndicatorEnabled: true,
+          remoteIndicatorVisible: true,
+        },
+      })
+    ).ok,
+    true,
+  );
+  const ready = await worker.execute("prepare_input", {}, undefined, operation);
+  assert.equal(ready.ok, true, JSON.stringify(ready));
+  const invalid = async (id) => {
+    const r = await worker.execute(
+      "click",
+      { x: 0, y: 0, nativeWindowHandle: 1, processId: 1 },
+      undefined,
+      id,
+    );
+    assert.equal(r.ok, false);
+    assert.match(r.error, /TARGET_IDENTITY_CHANGED/);
+    assert.equal(r.cleanupConfirmed, true);
+  };
+  await invalid(operation);
+  const first = await observe("acquired");
+  held(first);
+  assert.equal(first.presentation.remoteVisible, true);
+  assert.equal(
+    first.presentation.visibleWindows,
+    preview.presentation.layout.length * 2 + 1,
+  );
+  await worker.execute("wait", { milliseconds: 750 }, undefined, operation);
+  const gap = await observe("after-read-and-gap");
+  held(gap);
+  assert.equal(gap.listenerProcessId, first.listenerProcessId);
+  assert.equal(gap.operationId, first.operationId);
+  const changed = await worker.execute("settings_update", {
+    changes: {
+      indicatorEnabled: false,
+      cursorIndicatorEnabled: false,
+      remoteIndicatorVisible: false,
+      indicatorText: "Pi changed while held",
+      indicatorIdleMs: 200,
+    },
+  });
+  assert.equal(changed.ok, true, JSON.stringify(changed));
+  const configured = await observe("disabled-optional-visuals");
+  held(configured);
+  assert.equal(configured.presentation.remoteVisible, false);
+  assert.equal(
+    configured.presentation.visibleWindows,
+    preview.presentation.layout.length,
+  );
+  assert.equal(configured.presentation.text, "Pi changed while held");
+  await worker.execute("wait", { milliseconds: 750 }, undefined, operation);
+  held(await observe("beyond-configured-idle"));
+  const bad = await worker.execute("settings_update", {
+    changes: { indicatorPosition: "invalid" },
+  });
+  assert.equal(bad.ok, false);
+  held(await observe("after-settings-refusal"));
+  const ended = await worker.execute("operation_end", {}, undefined, operation);
+  assert.equal(ended.ok, true);
+  assert.equal(ended.released, true);
+  const released = await observe("settled-handback");
+  assert.equal(released.exclusiveControl, false);
+  assert.equal(released.presentation.visible, false);
+  const continued = operation + "-new-user-operation";
+  const next = await worker.execute("prepare_input", {}, undefined, continued);
+  assert.equal(next.ok, true);
+  assert.notEqual(next.cancelEvent, ready.cancelEvent);
+  await invalid(continued);
+  const reacquired = await observe("explicit-new-operation");
+  held(reacquired);
+  assert.notEqual(reacquired.operationId, first.operationId);
+  worker.stopOperation(continued);
+  const stopped = await worker.execute(
+    "wait",
+    { milliseconds: 1 },
+    undefined,
+    continued,
+  );
+  assert.equal(stopped.ok, false);
+  assert.match(stopped.error, /STOPPED/);
+  const deadline = Date.now() + 3000;
+  let final;
+  do {
+    final = await observe("after-stop");
+    if (
+      final.exclusiveControl === false &&
+      final.presentation.visible === false
+    )
+      break;
+    await new Promise((r) => setTimeout(r, 20));
+  } while (Date.now() < deadline);
+  assert.equal(final.exclusiveControl, false);
+  assert.equal(final.presentation.visible, false);
+  assert.equal(
+    (await worker.execute("operation_end", {}, undefined, continued)).ok,
+    true,
+  );
+  console.log(
+    JSON.stringify({
+      ok: true,
+      check: "required border operation lifecycle",
+      samples,
+      physicalInput: false,
+      globalDisplayChanges: false,
+      ownCapturePixels: "separate owned-capture case",
+      thirdPartyCapture: "not tested",
+    }),
+  );
 }

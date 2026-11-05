@@ -24,18 +24,18 @@ The updated glow border is source-reviewed. Portable checks, package validation 
 
 A later approximately ten-second preview used temporary settings and showed the expected frame and bar windows on two monitors across six status observations, with no frame errors; the disposable worker and settings were cleaned up and no input or screenshots were sent. The user confirmed that the blue border's appearance and thickness looked right. This does not establish edge click-through, alpha fidelity, third-party capture or real-control lifecycle. A separate read-only Windows hit-test placed a disposable topmost window at each monitor's top-left corner. At one point inside each visible edge, `WindowFromPoint` returned the disposable window both before and during the preview on both monitors; both frames and bars were visible with no frame errors. This samples two edge locations only; actual mouse delivery, remaining edge regions and pointer-tag pass-through remain unverified.
 
-## Manual acceptance checklist
+## Acceptance checklist
 
-- [ ] Verify the required border and control acquisition/release in the [exclusive-control delivery cases](implementation-plan.md#exclusive-control-delivery); quiet-only UIA/browser work remains outside takeover.
-- [ ] Verify border visibility through reads/thinking and idle periods, release before human handback, and reacquisition on explicit continuation. A stale-presentation timer must not silently hide active exclusive control.
-- [ ] Press physical Esc and the configured extra shortcut while UIA is busy. Confirm suppression and held input are released and same-operation retries remain blocked; optional indicator settings must preserve the required local control border.
-- [ ] Send an agent Escape action to a disposable dialog and confirm it does not trigger global stopping. Injected-key filtering is source/protocol checked automatically; this complete keyboard workflow remains unrun until dedicated-desktop acceptance.
-- [ ] Click/drag beneath each overlay region and pointer tag on disposable fixtures. Verify focus/pointer restoration and absence of own-overlay occlusion errors.
-- [ ] Change monitor arrangement, scaling and primary display; check edges, bar placement and the large-cursor tag on each display.
-- [ ] Compare remote-desktop/screen-sharing/recording with visibility enabled and disabled; record Windows affinity status and actual capture behavior.
-- [ ] Check native screenshot/OCR output excludes overlays and resumes them afterward without disarming stopping.
+Current #20 scope reuses accepted control results; an unchecked item here is not a request to repeat a completed physical-stop test.
 
-Mixed-DPI/display changes, physical stopping, actual click-through and third-party recording are pending manual acceptance until recorded; those checks are not inferred from settings persistence or preview status.
+- [x] Human appearance/thickness acceptance and the two sampled native edge hit-tests above.
+- [x] Required border retention across reads, a gap longer than the configured idle value, optional-visual/remote setting changes and a refused settings update; immediate hide after settlement/stop and show for an explicit new operation. See [automated lifecycle evidence](validation.md#automated-border-lifecycle).
+- [x] Actual human editing/explicit continuation and physical stopping from [#31's accepted receipts](validation.md#control-interruption-acceptance). The new lifecycle check supplies presentation state across release/reacquisition; no new physical-key test is queued. Injected-key filtering retains its existing source/protocol scope, not a new dialog-keyboard workflow claim.
+- [ ] Own screenshot/OCR overlay exclusion with capture restoration and stopping still armed. Protocol suspension is accepted; new pixel evidence must enforce the owned-window capture boundary before acquisition.
+- [ ] Actual 150%/200%, mixed-DPI and display/primary/topology changes; check frames/bars and pointer-tag layout. Display settings remain unchanged until the grouped manual setup.
+- [ ] Third-party remote/screen-sharing/recording behavior with visibility enabled/disabled. Windows affinity application is metadata evidence; it does not prove every recorder obeys it.
+
+The current desktop has two 100%-scale monitors. Actual pixel exclusion, unmeasured display configurations, remaining hit-test regions and third-party recording must not be inferred from preview/status assertions. The [execution queue](tickets.md#execution-queue) tracks the remaining #6/#20 session.
 
 ## Browser cues
 
