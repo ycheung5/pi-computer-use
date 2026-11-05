@@ -1,4 +1,5 @@
 export function workspaceScope(owned: {
+  documentTask?: boolean;
   nativeWindowHandle: number;
   processId: number;
   title: string;
@@ -27,4 +28,9 @@ export function refusalWorkspaceEvidence(
   scenario: string,
   verification: Record<string, unknown>,
   audit: Record<string, unknown>[],
+): boolean;
+
+export const nativeDocumentText: { initial: string; final: string };
+export function documentWorkspaceEvidence(
+  outcome: Record<string, unknown> | undefined,
 ): boolean;

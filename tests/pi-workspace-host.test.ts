@@ -482,3 +482,98 @@ test("workspace refusal observations remain separate from semantic decisions", a
     false,
   );
 });
+
+test("native document acceptance rejects overwritten originals and unsaved editor-only success", async () => {
+  const { documentWorkspaceEvidence } = await import("./pi-workspace-host.mjs");
+  const outcome = {
+    tabs: 2,
+    selected: 1,
+    taskVisible: true,
+    taskForeground: true,
+    originalEditor: "original work 1",
+    originalFile: "original work 1",
+    taskEditor: "Pi document 中文 café 😀 — appended",
+    taskFile: "Pi document 中文 café 😀 — appended",
+    savedValues: [
+      "Pi document 中文 café 😀",
+      "Pi document 中文 café 😀 — appended",
+    ],
+  };
+  assert.equal(documentWorkspaceEvidence(outcome), true);
+  for (const damaged of [
+    { originalEditor: "changed" },
+    { originalFile: "changed" },
+    { taskFile: "Pi document 中文 café 😀" },
+    { taskEditor: "wrong" },
+    { savedValues: [outcome.taskFile] },
+    { tabs: 3 },
+    { selected: 0 },
+    { taskVisible: false },
+    { taskForeground: false },
+  ])
+    assert.equal(documentWorkspaceEvidence({ ...outcome, ...damaged }), false);
+  assert.equal(documentWorkspaceEvidence(undefined), false);
+});
+
+test("native document actor permits owned quiet value edits but refuses physical escalation", async () => {
+  const { workspaceScope } = await import("./pi-workspace-host.mjs");
+  const scope = workspaceScope({
+    nativeWindowHandle: 100,
+    processId: 200,
+    title: "Owned",
+    documentTask: true,
+  });
+  scope.after({
+    toolName: "windows_computer_use_find",
+    details: {
+      ok: true,
+      nativeWindowHandle: 100,
+      processId: 200,
+      matches: [{ id: "editor" }],
+    },
+  });
+  const event = (name: string, input: Record<string, unknown>) => ({
+    toolName: `windows_computer_use_${name}`,
+    input,
+  });
+  assert.equal(
+    scope.before(
+      event("set_value", {
+        elementId: "editor",
+        value: "中文",
+        fallbackType: false,
+      }),
+    ),
+    undefined,
+  );
+  for (const [name, input] of [
+    ["set_value", { elementId: "editor", value: "中文" }],
+    ["set_value", { elementId: "foreign", value: "中文", fallbackType: false }],
+    ["type_text", { nativeWindowHandle: 100, processId: 200, text: "中文" }],
+    [
+      "keypress",
+      { nativeWindowHandle: 100, processId: 200, keys: ["Ctrl", "S"] },
+    ],
+  ] as const)
+    assert.equal(scope.before(event(name, input))?.block, true);
+});
+
+test("document task plan starts neither Windows nor a paid episode", () => {
+  const plan = JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        "tests/pi-workspace-host.mjs",
+        "--scenario",
+        "document",
+        "--run",
+        "--plan",
+      ],
+      { encoding: "utf8" },
+    ),
+  );
+  assert.equal(plan.run, false);
+  assert.equal(plan.scenario, "document");
+  assert.equal(plan.physicalInput, false);
+  assert.equal(plan.runs, 3);
+});

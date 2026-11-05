@@ -12,6 +12,10 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { registerComputerUse } from "../dist/extension.js";
 import { computerUseHost } from "./native-host.mjs";
+import {
+  documentWorkspaceEvidence,
+  nativeDocumentText,
+} from "./pi-workspace-host.mjs";
 
 assert.equal(process.platform, "win32");
 const run = promisify(execFile),
@@ -308,7 +312,7 @@ try {
 }
 // The same owned native app also supplies the two remaining agent decisions.
 async function serveWorkspaceDecision(scenario) {
-  assert.ok(["ambiguous", "unsafe-workspace"].includes(scenario));
+  assert.ok(["ambiguous", "unsafe-workspace", "document"].includes(scenario));
   const titlePrefix = `Pi Workspace ${randomUUID()}`;
   const targets = [],
     journals = [],
@@ -363,7 +367,7 @@ async function serveWorkspaceDecision(scenario) {
       await writeFile(document, original);
       const opened = await call("launch_app", {
         target: executable,
-        arguments: `"${title}" ${scenario === "unsafe-workspace" ? "workspace-unsafe" : "workspace"} "${journal}" "${document}" --no-expiry`,
+        arguments: `"${title}" ${scenario === "unsafe-workspace" ? "workspace-unsafe" : scenario === "document" ? "workspace-document" : "workspace"} "${journal}" "${document}" --no-expiry`,
         waitMs: 0,
       });
       assert.equal(opened.ok, true, JSON.stringify(opened));
@@ -409,6 +413,90 @@ async function serveWorkspaceDecision(scenario) {
     ]);
     commands.close();
     if (command === "stop") return { ok: true, stopped: true };
+    if (scenario === "document") {
+      assert.ok(["verify", "preflight"].includes(command));
+      const target = targets[0],
+        journal = journals[0];
+      if (command === "preflight") {
+        const activated = await call("activate_window", {
+          nativeWindowHandle: target.nativeWindowHandle,
+          processId: target.processId,
+        });
+        assert.equal(activated.activated, true, JSON.stringify(activated));
+        const lookup = async (query) => {
+          const r = await call("find", {
+            nativeWindowHandle: target.nativeWindowHandle,
+            processId: target.processId,
+            query,
+            ocrFallback: false,
+          });
+          assert.equal(r.ok, true, JSON.stringify(r));
+          assert.equal(r.matches.length, 1, JSON.stringify(r));
+          return r.matches[0].id;
+        };
+        const invoke = async (query) => {
+          const r = await call("invoke", {
+            elementId: await lookup(query),
+            fallbackClick: false,
+          });
+          assert.equal(r.ok, true, JSON.stringify(r));
+        };
+        await invoke("New task tab");
+        for (const value of [
+          nativeDocumentText.initial,
+          nativeDocumentText.final,
+        ]) {
+          const r = await call("set_value", {
+            elementId: await lookup("Task editor"),
+            value,
+            fallbackType: false,
+          });
+          assert.equal(r.ok, true, JSON.stringify(r));
+          await invoke("Save task");
+        }
+      }
+      // Read the application's actual controls on its UI thread, including the
+      // unselected original tab; saved bytes and save chronology are separate.
+      await writeFile(journal + ".observe", "");
+      const raw = await until(() =>
+        readFile(journal + ".state", "utf8").catch(() => undefined),
+      );
+      const fields = raw.split(":");
+      assert.equal(fields.length, 7);
+      assert.equal(Number(fields[3]), 1);
+      const decode = (x) => Buffer.from(x, "base64").toString("utf8");
+      const entries = (await readFile(journal, "utf8")).trim().split(/\r?\n/);
+      assert.equal(entries.filter((x) => x.startsWith("started:")).length, 1);
+      assert.equal(entries.filter((x) => x.startsWith("new-tab:")).length, 1);
+      const current = await find(target.title);
+      assert.equal(current?.nativeWindowHandle, target.nativeWindowHandle);
+      assert.equal(current?.processId, target.processId);
+      const documentOutcome = {
+        taskVisible: fields[5] === "1",
+        taskForeground: fields[6] === "1",
+        tabs: Number(fields[0]),
+        selected: Number(fields[1]),
+        originalEditor: decode(fields[2]),
+        taskEditor: decode(fields[4]),
+        originalFile: await readFile(originals[0].document, "utf8"),
+        taskFile: await readFile(journal + ".task.txt", "utf8"),
+        savedValues: entries
+          .filter((x) => x.startsWith("saved:"))
+          .map((x) => decode(x.slice(6))),
+      };
+      assert.equal(
+        documentWorkspaceEvidence(documentOutcome),
+        true,
+        JSON.stringify(documentOutcome),
+      );
+      return {
+        ok: true,
+        scenario,
+        documentOutcome,
+        documentTaskVerified: true,
+        physicalInput: false,
+      };
+    }
     assert.equal(command, "verify");
     for (let i = 0; i < targets.length; i++) {
       await inspect(targets[i], originals[i].original);
