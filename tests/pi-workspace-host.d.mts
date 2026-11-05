@@ -34,3 +34,8 @@ export const nativeDocumentText: { initial: string; final: string };
 export function documentWorkspaceEvidence(
   outcome: Record<string, unknown> | undefined,
 ): boolean;
+
+export function documentRecoveryEvidence(
+  verification: Record<string, unknown> | undefined,
+  audit: Record<string, unknown>[],
+): boolean;

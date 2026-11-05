@@ -577,3 +577,85 @@ test("document task plan starts neither Windows nor a paid episode", () => {
   assert.equal(plan.physicalInput, false);
   assert.equal(plan.runs, 3);
 });
+
+test("native recovery requires partial evidence and a fresh replacement-editor mutation", async () => {
+  const { documentRecoveryEvidence } = await import("./pi-workspace-host.mjs");
+  const verification = {
+    documentOutcome: {
+      tabs: 2,
+      selected: 1,
+      taskVisible: true,
+      taskForeground: true,
+      originalEditor: "original work 1",
+      originalFile: "original work 1",
+      taskEditor: "Pi document 中文 café 😀 — appended",
+      taskFile: "Pi document 中文 café 😀 — appended",
+      savedValues: [
+        "Pi document 中文 café 😀",
+        "Pi document 中文 café 😀 — appended",
+      ],
+    },
+    editorRefresh: { oldHandle: 10, newHandle: 20 },
+  };
+  const audit = [
+    { type: "fixture_partial", truncated: true, nodeCount: 1 },
+    {
+      type: "tool_result",
+      toolName: "windows_computer_use_find",
+      details: {
+        ok: true,
+        matches: [{ id: "fresh", name: "Task editor", nativeWindowHandle: 20 }],
+      },
+    },
+    {
+      type: "tool_result",
+      toolName: "windows_computer_use_set_value",
+      details: { ok: true },
+      input: {
+        elementId: "fresh",
+        value: "Pi document 中文 café 😀 — appended",
+      },
+    },
+  ];
+  const [partial, observation, mutation] = audit;
+  assert.ok(partial && observation && mutation);
+  assert.equal(documentRecoveryEvidence(verification, audit), true);
+  assert.equal(documentRecoveryEvidence(verification, audit.slice(1)), false);
+  assert.equal(
+    documentRecoveryEvidence(
+      { ...verification, editorRefresh: { oldHandle: 10, newHandle: 10 } },
+      audit,
+    ),
+    false,
+  );
+  assert.equal(
+    documentRecoveryEvidence(verification, [partial, mutation, observation]),
+    false,
+  );
+  assert.equal(
+    documentRecoveryEvidence(verification, [
+      ...audit.slice(0, 2),
+      { ...mutation, details: { ok: false } },
+    ]),
+    false,
+  );
+});
+
+test("native recovery plan starts no Windows fixture or model", () => {
+  const plan = JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        "tests/pi-workspace-host.mjs",
+        "--scenario",
+        "document-recovery",
+        "--plan",
+      ],
+      { encoding: "utf8" },
+    ),
+  );
+  assert.equal(plan.run, false);
+  assert.equal(plan.scenario, "document-recovery");
+  assert.equal(plan.physicalInput, false);
+  assert.equal(plan.runs, 3);
+});

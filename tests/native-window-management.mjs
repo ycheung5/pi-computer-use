@@ -312,7 +312,11 @@ try {
 }
 // The same owned native app also supplies the two remaining agent decisions.
 async function serveWorkspaceDecision(scenario) {
-  assert.ok(["ambiguous", "unsafe-workspace", "document"].includes(scenario));
+  assert.ok(
+    ["ambiguous", "unsafe-workspace", "document", "document-recovery"].includes(
+      scenario,
+    ),
+  );
   const titlePrefix = `Pi Workspace ${randomUUID()}`;
   const targets = [],
     journals = [],
@@ -367,7 +371,7 @@ async function serveWorkspaceDecision(scenario) {
       await writeFile(document, original);
       const opened = await call("launch_app", {
         target: executable,
-        arguments: `"${title}" ${scenario === "unsafe-workspace" ? "workspace-unsafe" : scenario === "document" ? "workspace-document" : "workspace"} "${journal}" "${document}" --no-expiry`,
+        arguments: `"${title}" ${scenario === "unsafe-workspace" ? "workspace-unsafe" : scenario === "document-recovery" ? "workspace-document-recovery" : scenario === "document" ? "workspace-document" : "workspace"} "${journal}" "${document}" --no-expiry`,
         waitMs: 0,
       });
       assert.equal(opened.ok, true, JSON.stringify(opened));
@@ -413,11 +417,28 @@ async function serveWorkspaceDecision(scenario) {
     ]);
     commands.close();
     if (command === "stop") return { ok: true, stopped: true };
-    if (scenario === "document") {
+    if (["document", "document-recovery"].includes(scenario)) {
       assert.ok(["verify", "preflight"].includes(command));
       const target = targets[0],
         journal = journals[0];
+      let recoveryPreflight;
       if (command === "preflight") {
+        if (scenario === "document-recovery") {
+          const partial = await call("accessibility_tree", {
+            nativeWindowHandle: target.nativeWindowHandle,
+            processId: target.processId,
+            maxNodes: 1,
+          });
+          assert.equal(partial.truncated, true);
+          assert.equal(partial.nodeCount, 1);
+          recoveryPreflight = {
+            partial: {
+              truncated: partial.truncated,
+              nodeCount: partial.nodeCount,
+              truncationReason: partial.truncationReason,
+            },
+          };
+        }
         const activated = await call("activate_window", {
           nativeWindowHandle: target.nativeWindowHandle,
           processId: target.processId,
@@ -446,13 +467,26 @@ async function serveWorkspaceDecision(scenario) {
           nativeDocumentText.initial,
           nativeDocumentText.final,
         ]) {
+          const editorId = await lookup("Task editor");
           const r = await call("set_value", {
-            elementId: await lookup("Task editor"),
+            elementId: editorId,
             value,
             fallbackType: false,
           });
           assert.equal(r.ok, true, JSON.stringify(r));
           await invoke("Save task");
+          if (
+            scenario === "document-recovery" &&
+            value === nativeDocumentText.initial
+          ) {
+            await until(async () =>
+              (await readFile(journal, "utf8")).includes("editor-refreshed:"),
+            );
+            const stale = await call("element_info", { elementId: editorId });
+            assert.equal(stale.ok, false, JSON.stringify(stale));
+            assert.match(stale.error, /STALE_ELEMENT:/, JSON.stringify(stale));
+            recoveryPreflight.staleError = stale.error;
+          }
         }
       }
       // Read the application's actual controls on its UI thread, including the
@@ -489,9 +523,25 @@ async function serveWorkspaceDecision(scenario) {
         true,
         JSON.stringify(documentOutcome),
       );
+      let editorRefresh;
+      if (scenario === "document-recovery") {
+        const refresh = entries.filter((x) =>
+          x.startsWith("editor-refreshed:"),
+        );
+        assert.equal(refresh.length, 1);
+        const fields = refresh[0].split(":");
+        assert.equal(fields.length, 3);
+        editorRefresh = {
+          oldHandle: Number(fields[1]),
+          newHandle: Number(fields[2]),
+        };
+        assert.notEqual(editorRefresh.oldHandle, editorRefresh.newHandle);
+      }
       return {
         ok: true,
         scenario,
+        editorRefresh,
+        recoveryPreflight,
         documentOutcome,
         documentTaskVerified: true,
         physicalInput: false,

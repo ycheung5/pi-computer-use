@@ -13,7 +13,7 @@ class ManagedFixture : Form {
     ManagedFixture form=new ManagedFixture{Text=args[0],StartPosition=FormStartPosition.Manual,Left=140,Top=160,Width=400,Height=220,ShowInTaskbar=false};
     if(args.Length>1&&args[1].StartsWith("workspace",StringComparison.Ordinal)) {
       form.Width=650;form.Height=400;
-      bool documentTask=args[1]=="workspace-document";
+      bool documentTask=args[1].StartsWith("workspace-document",StringComparison.Ordinal),refreshEditor=args[1]=="workspace-document-recovery",refreshed=false;
       var taskEditors=new System.Collections.Generic.List<TextBox>();
       TabControl tabs=new TabControl{Left=10,Top=55,Width=600,Height=280};
       TabPage original=new TabPage("Original document");
@@ -33,6 +33,13 @@ class ManagedFixture : Form {
           string value=taskEditors[index].Text;
           File.WriteAllText(args[2]+".task.txt",value,new System.Text.UTF8Encoding(false));
           File.AppendAllText(args[2],"saved:"+Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(value))+"\n");
+          if(refreshEditor && !refreshed){
+            refreshed=true;TextBox old=taskEditors[index];long oldHandle=old.Handle.ToInt64();
+            TextBox refreshedEditor=new TextBox{AccessibleName="Task editor",Multiline=false,Dock=DockStyle.Fill,Text=value};
+            long newHandle=refreshedEditor.Handle.ToInt64();
+            var page=tabs.TabPages[index+1];page.Controls.Remove(old);page.Controls.Add(refreshedEditor);taskEditors[index]=refreshedEditor;old.Dispose();
+            File.AppendAllText(args[2],"editor-refreshed:"+oldHandle+":"+newHandle+"\n");
+          }
         };form.Controls.Add(save);
       }
       ManagedFixture caller=new ManagedFixture{Text=args[0]+" caller",Left=800,Top=160,Width=300,Height=200,ShowInTaskbar=false};

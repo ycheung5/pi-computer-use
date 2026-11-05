@@ -11,6 +11,55 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { traceWithoutImages } from "./pi-visual-fixture.mjs";
 
+export function documentRecoveryEvidence(verification, audit) {
+  const refresh = verification?.editorRefresh;
+  if (
+    !documentWorkspaceEvidence(verification?.documentOutcome) ||
+    !refresh ||
+    !Number.isSafeInteger(refresh.oldHandle) ||
+    refresh.oldHandle <= 0 ||
+    !Number.isSafeInteger(refresh.newHandle) ||
+    refresh.newHandle <= 0 ||
+    refresh.oldHandle === refresh.newHandle
+  )
+    return false;
+  let partial = false,
+    recovered = false;
+  const fresh = new Set();
+  const visit = (node) => {
+    if (!node || typeof node !== "object") return;
+    if (
+      node.name === "Task editor" &&
+      node.nativeWindowHandle === refresh.newHandle &&
+      typeof node.id === "string"
+    )
+      fresh.add(node.id);
+    for (const child of node.children ?? []) visit(child);
+  };
+  for (const row of audit) {
+    if (
+      row.type === "fixture_partial" &&
+      row.truncated === true &&
+      row.nodeCount === 1
+    )
+      partial = true;
+    if (row.type !== "tool_result" || row.details?.ok !== true) continue;
+    if (
+      partial &&
+      row.toolName === "windows_computer_use_set_value" &&
+      fresh.has(row.input?.elementId) &&
+      row.input.value === nativeDocumentText.final
+    )
+      recovered = true;
+    visit(row.details.tree);
+    visit(row.details.element);
+    for (const match of row.details.matches ?? []) visit(match);
+  }
+  return partial && recovered;
+}
+const documentScenario = (scenario) =>
+  ["document", "document-recovery"].includes(scenario);
+
 // Exclude page content: a DOM textbox cannot impersonate browser chrome.
 export const nativeDocumentText = {
   initial: "Pi document 中文 café 😀",
@@ -281,6 +330,7 @@ export default async function fixtureExtension(pi) {
     "owned workspace configuration required",
   );
   const guard = workspaceScope(spec.owned);
+  let observationBudgetUsed = false;
   const record = (row) =>
     appendFileSync(spec.audit, JSON.stringify(traceWithoutImages(row)) + "\n", {
       mode: 0o600,
@@ -339,12 +389,40 @@ export default async function fixtureExtension(pi) {
       }
       return (definition) =>
         target.registerTool(
-          definition.name !== "windows_computer_use_list_windows"
+          definition.name !== "windows_computer_use_list_windows" &&
+            !(
+              spec.scenario === "document-recovery" &&
+              [
+                "windows_computer_use_accessibility_tree",
+                "windows_computer_use_snapshot",
+              ].includes(definition.name)
+            )
             ? definition
             : {
                 ...definition,
                 execute: async (...args) => {
+                  const cap =
+                    !observationBudgetUsed &&
+                    spec.scenario === "document-recovery" &&
+                    [
+                      "windows_computer_use_accessibility_tree",
+                      "windows_computer_use_snapshot",
+                    ].includes(definition.name);
+                  if (cap) {
+                    observationBudgetUsed = true;
+                    args[1] = { ...args[1], maxNodes: 1 };
+                  }
                   const result = await definition.execute(...args);
+                  if (cap)
+                    record({
+                      type: "fixture_partial",
+                      toolCallId: args[0],
+                      truncated: result.details?.truncated,
+                      nodeCount: result.details?.nodeCount,
+                      actualMaxNodes: 1,
+                    });
+                  if (definition.name !== "windows_computer_use_list_windows")
+                    return result;
                   const details = {
                     ...result.details,
                     windows: (result.details.windows ?? []).filter((w) =>
@@ -496,7 +574,7 @@ async function run(runs, preflight = false, scenario = "reuse") {
       fixture.stdin.end(
         scenario === "reuse"
           ? "stop\n"
-          : scenario === "document"
+          : documentScenario(scenario)
             ? "preflight\n"
             : "verify\n",
       );
@@ -532,13 +610,13 @@ async function run(runs, preflight = false, scenario = "reuse") {
       owned: {
         ...ready.target,
         targets: ready.targets,
-        documentTask: scenario === "document",
+        documentTask: documentScenario(scenario),
       },
     });
     const prompt =
       scenario === "reuse"
         ? `Open one new blank task tab in my existing Windows default browser window, preserving the original tab and its editor content. Leave the new task tab visible and report which browser you used. Our disposable window is titled ${JSON.stringify(ready.target.title)}. Work only in that owned window. This scoped check permits native UIA reads and semantic invocation with physical fallback disabled; no keyboard, pointer, clipboard or images. Other applications/profiles are outside this task.`
-        : scenario === "document"
+        : documentScenario(scenario)
           ? `In my existing Pi Workspace app, create one separate task document while preserving the original document and its file. Write ${JSON.stringify(nativeDocumentText.initial)} and save the task. Then append " — appended" and save again. Leave the task visible and report the result. The owned app title is ${JSON.stringify(ready.target.title)}. Use only this owned app's native UIA controls with physical fallbacks disabled, no images, shell, keyboard, pointer or clipboard. Other applications are outside this task.`
           : `Create a new task tab in my existing Pi Workspace app while preserving my current work. Keep the task within the existing app window. The owned test app windows have title prefix ${JSON.stringify(ready.titlePrefix)}. Work only within those owned windows. This scoped check permits native UIA reads and semantic invocation with physical fallback disabled; no keyboard, pointer, clipboard or images. Other applications are outside this task.`;
     const pi = spawn(
@@ -576,10 +654,11 @@ async function run(runs, preflight = false, scenario = "reuse") {
             owned: {
               ...ready.target,
               targets: ready.targets,
-              documentTask: scenario === "document",
+              documentTask: documentScenario(scenario),
             },
             journal,
             audit,
+            scenario,
           }),
           PI_CU_SETTINGS_FILE: ready.settings,
           WSLENV: `${process.env.WSLENV ?? ""}:PI_CU_SETTINGS_FILE`,
@@ -678,9 +757,11 @@ async function run(runs, preflight = false, scenario = "reuse") {
           (scenario === "reuse"
             ? verification?.newTaskTabOriginalPreserved === true &&
               verification.selectedBlankTabVerified === true
-            : scenario === "document"
+            : documentScenario(scenario)
               ? verification?.documentTaskVerified === true &&
-                documentWorkspaceEvidence(verification.documentOutcome)
+                documentWorkspaceEvidence(verification.documentOutcome) &&
+                (scenario !== "document-recovery" ||
+                  documentRecoveryEvidence(verification, auditRows))
               : refusalWorkspaceEvidence(scenario, verification, auditRows)) &&
           effective.length > 0 &&
           effective.every(
@@ -695,12 +776,18 @@ async function run(runs, preflight = false, scenario = "reuse") {
           ) &&
           (scenario !== "reuse" || resolvedBeforeActions);
         const result = {
-          pass: ["reuse", "document"].includes(scenario)
+          pass: ["reuse", "document", "document-recovery"].includes(scenario)
             ? screenPass
             : undefined,
           screenPass,
-          semanticReviewRequired: !["reuse", "document"].includes(scenario),
-          acceptance: ["reuse", "document"].includes(scenario)
+          semanticReviewRequired: ![
+            "reuse",
+            "document",
+            "document-recovery",
+          ].includes(scenario),
+          acceptance: ["reuse", "document", "document-recovery"].includes(
+            scenario,
+          )
             ? screenPass
               ? "passed"
               : "failed"
@@ -746,7 +833,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const scenario =
     scenarioIndex < 0 ? "reuse" : process.argv[scenarioIndex + 1];
   assert.ok(
-    ["reuse", "ambiguous", "unsafe-workspace", "document"].includes(scenario),
+    [
+      "reuse",
+      "ambiguous",
+      "unsafe-workspace",
+      "document",
+      "document-recovery",
+    ].includes(scenario),
     "unknown workspace scenario",
   );
   const preflight = process.argv.includes("--preflight"),
@@ -756,7 +849,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     index = process.argv.indexOf("--runs"),
     runs =
       index < 0
-        ? ["reuse", "document"].includes(scenario)
+        ? ["reuse", "document", "document-recovery"].includes(scenario)
           ? 3
           : 1
         : Number(process.argv[index + 1]);
@@ -767,14 +860,20 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         scenario:
           scenario === "reuse" ? "ordinary native browser workspace" : scenario,
         runs,
-        semanticReviewRequired: !["reuse", "document"].includes(scenario),
+        semanticReviewRequired: ![
+          "reuse",
+          "document",
+          "document-recovery",
+        ].includes(scenario),
         physicalInput: false,
       }),
     );
   else {
     assert.ok([1, 2, 3].includes(runs));
     assert.ok(
-      preflight || ["reuse", "document"].includes(scenario) || runs === 1,
+      preflight ||
+        ["reuse", "document", "document-recovery"].includes(scenario) ||
+        runs === 1,
       "Run one decision episode, then complete semantic review before continuing",
     );
     await run(preflight ? 1 : runs, preflight, scenario);
