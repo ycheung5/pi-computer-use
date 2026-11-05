@@ -15,6 +15,7 @@ import { computerUseHost } from "./native-host.mjs";
 import {
   documentWorkspaceEvidence,
   nativeDocumentText,
+  nativeHandbackText,
 } from "./pi-workspace-host.mjs";
 
 assert.equal(process.platform, "win32");
@@ -310,12 +311,16 @@ try {
     if (registered) await registry("remove");
   }
 }
-// The same owned native app also supplies the two remaining agent decisions.
+// The owned native app supplies workspace decisions and document outcomes.
 async function serveWorkspaceDecision(scenario) {
   assert.ok(
-    ["ambiguous", "unsafe-workspace", "document", "document-recovery"].includes(
-      scenario,
-    ),
+    [
+      "ambiguous",
+      "unsafe-workspace",
+      "document",
+      "document-recovery",
+      "document-handback",
+    ].includes(scenario),
   );
   const titlePrefix = `Pi Workspace ${randomUUID()}`;
   const targets = [],
@@ -323,6 +328,77 @@ async function serveWorkspaceDecision(scenario) {
     originals = [];
   const flatten = (node) =>
     node ? [node, ...(node.children ?? []).flatMap(flatten)] : [];
+  let handoff;
+  const lookup = async (target, query) => {
+    const r = await call("find", {
+      nativeWindowHandle: target.nativeWindowHandle,
+      processId: target.processId,
+      query,
+      ocrFallback: false,
+    });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.matches.length, 1, JSON.stringify(r));
+    return r.matches[0].id;
+  };
+  const invoke = async (target, query) => {
+    const r = await call("invoke", {
+      elementId: await lookup(target, query),
+      fallbackClick: false,
+    });
+    assert.equal(r.ok, true, JSON.stringify(r));
+  };
+  const observeDocument = async (journal, originalFile) => {
+    await rm(journal + ".state", { force: true });
+    await writeFile(journal + ".observe", "");
+    const raw = await until(() =>
+      readFile(journal + ".state", "utf8").catch(() => undefined),
+    );
+    const fields = raw.split(":");
+    assert.equal(fields.length, 7);
+    assert.equal(Number(fields[3]), 1);
+    const decode = (x) => Buffer.from(x, "base64").toString("utf8");
+    const entries = (await readFile(journal, "utf8")).trim().split(/\r?\n/);
+    assert.equal(entries.filter((x) => x.startsWith("started:")).length, 1);
+    assert.equal(entries.filter((x) => x.startsWith("new-tab:")).length, 1);
+    return {
+      taskVisible: fields[5] === "1",
+      taskForeground: fields[6] === "1",
+      tabs: Number(fields[0]),
+      selected: Number(fields[1]),
+      originalEditor: decode(fields[2]),
+      taskEditor: decode(fields[4]),
+      originalFile: await readFile(originalFile, "utf8"),
+      taskFile: await readFile(journal + ".task.txt", "utf8"),
+      savedValues: entries
+        .filter((x) => x.startsWith("saved:"))
+        .map((x) => decode(x.slice(6))),
+    };
+  };
+  const processIdentity = async (pid) => {
+    assert.ok(Number.isSafeInteger(pid) && pid > 0);
+    const script = `$ErrorActionPreference='Stop';$p=Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}';if($null -eq $p){'null'}else{@{pid=$p.ProcessId;creation=$p.CreationDate.ToUniversalTime().ToString('O');exe=$p.ExecutablePath}|ConvertTo-Json -Compress}`;
+    const r = await run(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
+      ],
+      { windowsHide: true, cwd: folder },
+    );
+    const identity = JSON.parse(r.stdout.trim());
+    if (identity !== null)
+      assert.ok(
+        Number.isSafeInteger(identity.pid) &&
+          typeof identity.creation === "string" &&
+          identity.creation.length > 0 &&
+          typeof identity.exe === "string" &&
+          identity.exe.length > 0,
+        "process identity must be complete",
+      );
+    return identity;
+  };
   const inspect = async (target, expected) => {
     const result = await call("accessibility_tree", {
       nativeWindowHandle: target.nativeWindowHandle,
@@ -371,7 +447,7 @@ async function serveWorkspaceDecision(scenario) {
       await writeFile(document, original);
       const opened = await call("launch_app", {
         target: executable,
-        arguments: `"${title}" ${scenario === "unsafe-workspace" ? "workspace-unsafe" : scenario === "document-recovery" ? "workspace-document-recovery" : scenario === "document" ? "workspace-document" : "workspace"} "${journal}" "${document}" --no-expiry`,
+        arguments: `"${title}" ${scenario === "unsafe-workspace" ? "workspace-unsafe" : scenario === "document-recovery" ? "workspace-document-recovery" : scenario === "document-handback" ? "workspace-document-handback" : scenario === "document" ? "workspace-document" : "workspace"} "${journal}" "${document}" --no-expiry`,
         waitMs: 0,
       });
       assert.equal(opened.ok, true, JSON.stringify(opened));
@@ -384,6 +460,125 @@ async function serveWorkspaceDecision(scenario) {
       };
       targets.push(target);
       await inspect(target, original);
+    }
+    if (scenario === "document-handback") {
+      const target = targets[0],
+        journal = journals[0];
+      const front = await call("activate_window", {
+        nativeWindowHandle: target.nativeWindowHandle,
+        processId: target.processId,
+      });
+      assert.equal(front.activated, true, JSON.stringify(front));
+      await invoke(target, "New task tab");
+      const editorId = await lookup(target, "Task editor");
+      assert.equal(
+        (
+          await call("set_value", {
+            elementId: editorId,
+            value: nativeDocumentText.initial,
+            fallbackType: false,
+          })
+        ).ok,
+        true,
+      );
+      await invoke(target, "Save task");
+      await until(
+        async () =>
+          (await readFile(journal + ".task.txt", "utf8").catch(
+            () => undefined,
+          )) === nativeDocumentText.initial,
+      );
+      const before = await observeDocument(journal, originals[0].document);
+      const abort = new AbortController();
+      let ended = false;
+      const pending = host.tools
+        .get("windows_computer_use_wait")
+        .execute(
+          "handoff-wait",
+          { milliseconds: 30000 },
+          abort.signal,
+          undefined,
+          {},
+        )
+        .then(
+          (r) => {
+            ended = true;
+            return r.details?.error;
+          },
+          (e) => {
+            ended = true;
+            return String(e);
+          },
+        );
+      await delay(250);
+      assert.equal(
+        ended,
+        false,
+        "wait must remain pending before cancellation",
+      );
+      abort.abort(new Error("HANDOFF_WAIT_CANCEL"));
+      const cancellationError = await pending;
+      assert.match(
+        cancellationError,
+        /HANDOFF_WAIT_CANCEL|COMPUTER_USE_STOPPED|COMPUTER_USE_CANCELLED|AbortError/,
+      );
+      await assert.rejects(
+        () =>
+          call("set_value", {
+            elementId: editorId,
+            value: "must-not-send",
+            fallbackType: false,
+          }),
+        /COMPUTER_USE_STOPPED/,
+      );
+      await host.emit("agent_settled", { aborted: true });
+      const health = await call("health");
+      assert.equal(health.ok, true);
+      const c = health.control,
+        controlReleased =
+          c?.started === false ||
+          (c?.exclusiveControl === false &&
+            c?.physicalKeysHeld === 0 &&
+            c?.physicalButtonsHeld === 0);
+      assert.equal(controlReleased, true, JSON.stringify(c));
+      const workerPin = await processIdentity(health.processId);
+      assert.ok(workerPin);
+      for (const close of host.shutdown) await close();
+      await until(async () => {
+        const current = await processIdentity(health.processId);
+        return (
+          current === null ||
+          current.pid !== workerPin.pid ||
+          current.creation !== workerPin.creation ||
+          current.exe.toLowerCase() !== workerPin.exe.toLowerCase()
+        );
+      });
+      // This is a labelled application-side stand-in. Actual human editing and
+      // explicit continuation are already accepted in the shared #31 receipt.
+      await writeFile(journal + ".handoff", "");
+      await until(async () =>
+        (await readFile(journal, "utf8")).includes(
+          "handback-edit:fixture-stand-in",
+        ),
+      );
+      const after = await observeDocument(journal, originals[0].document);
+      assert.equal(before.taskEditor, nativeDocumentText.initial);
+      assert.equal(after.taskEditor, nativeHandbackText.edited);
+      assert.equal(after.taskFile, nativeDocumentText.initial);
+      assert.equal(after.savedValues.length, 1);
+      handoff = {
+        cancelled: true,
+        cancellationError,
+        stoppedMutationRefused: true,
+        settled: true,
+        controlReleased,
+        workerRetired: true,
+        workerPin,
+        editSource: "fixture-stand-in",
+        before,
+        after,
+      };
+      host = create();
     }
     const listed = await call("list_windows", {
       includeInvisible: false,
@@ -417,7 +612,9 @@ async function serveWorkspaceDecision(scenario) {
     ]);
     commands.close();
     if (command === "stop") return { ok: true, stopped: true };
-    if (["document", "document-recovery"].includes(scenario)) {
+    if (
+      ["document", "document-recovery", "document-handback"].includes(scenario)
+    ) {
       assert.ok(["verify", "preflight"].includes(command));
       const target = targets[0],
         journal = journals[0];
@@ -444,37 +641,27 @@ async function serveWorkspaceDecision(scenario) {
           processId: target.processId,
         });
         assert.equal(activated.activated, true, JSON.stringify(activated));
-        const lookup = async (query) => {
-          const r = await call("find", {
-            nativeWindowHandle: target.nativeWindowHandle,
-            processId: target.processId,
-            query,
-            ocrFallback: false,
-          });
-          assert.equal(r.ok, true, JSON.stringify(r));
-          assert.equal(r.matches.length, 1, JSON.stringify(r));
-          return r.matches[0].id;
-        };
-        const invoke = async (query) => {
-          const r = await call("invoke", {
-            elementId: await lookup(query),
-            fallbackClick: false,
-          });
-          assert.equal(r.ok, true, JSON.stringify(r));
-        };
-        await invoke("New task tab");
-        for (const value of [
-          nativeDocumentText.initial,
-          nativeDocumentText.final,
-        ]) {
-          const editorId = await lookup("Task editor");
+        if (scenario !== "document-handback")
+          await invoke(target, "New task tab");
+        for (const value of scenario === "document-handback"
+          ? [nativeHandbackText.final]
+          : [nativeDocumentText.initial, nativeDocumentText.final]) {
+          const editorId = await lookup(target, "Task editor");
+          if (scenario === "document-handback") {
+            const observed = await call("element_info", {
+              elementId: editorId,
+              detailLevel: "full",
+            });
+            assert.equal(observed.ok, true, JSON.stringify(observed));
+            assert.equal(observed.element.value, nativeHandbackText.edited);
+          }
           const r = await call("set_value", {
             elementId: editorId,
             value,
             fallbackType: false,
           });
           assert.equal(r.ok, true, JSON.stringify(r));
-          await invoke("Save task");
+          await invoke(target, "Save task");
           if (
             scenario === "document-recovery" &&
             value === nativeDocumentText.initial
@@ -489,37 +676,21 @@ async function serveWorkspaceDecision(scenario) {
           }
         }
       }
-      // Read the application's actual controls on its UI thread, including the
-      // unselected original tab; saved bytes and save chronology are separate.
-      await writeFile(journal + ".observe", "");
-      const raw = await until(() =>
-        readFile(journal + ".state", "utf8").catch(() => undefined),
+      const documentOutcome = await observeDocument(
+        journal,
+        originals[0].document,
       );
-      const fields = raw.split(":");
-      assert.equal(fields.length, 7);
-      assert.equal(Number(fields[3]), 1);
-      const decode = (x) => Buffer.from(x, "base64").toString("utf8");
       const entries = (await readFile(journal, "utf8")).trim().split(/\r?\n/);
-      assert.equal(entries.filter((x) => x.startsWith("started:")).length, 1);
-      assert.equal(entries.filter((x) => x.startsWith("new-tab:")).length, 1);
       const current = await find(target.title);
       assert.equal(current?.nativeWindowHandle, target.nativeWindowHandle);
       assert.equal(current?.processId, target.processId);
-      const documentOutcome = {
-        taskVisible: fields[5] === "1",
-        taskForeground: fields[6] === "1",
-        tabs: Number(fields[0]),
-        selected: Number(fields[1]),
-        originalEditor: decode(fields[2]),
-        taskEditor: decode(fields[4]),
-        originalFile: await readFile(originals[0].document, "utf8"),
-        taskFile: await readFile(journal + ".task.txt", "utf8"),
-        savedValues: entries
-          .filter((x) => x.startsWith("saved:"))
-          .map((x) => decode(x.slice(6))),
-      };
       assert.equal(
-        documentWorkspaceEvidence(documentOutcome),
+        documentWorkspaceEvidence(
+          documentOutcome,
+          scenario === "document-handback"
+            ? nativeHandbackText.final
+            : nativeDocumentText.final,
+        ),
         true,
         JSON.stringify(documentOutcome),
       );
@@ -541,6 +712,7 @@ async function serveWorkspaceDecision(scenario) {
         ok: true,
         scenario,
         editorRefresh,
+        handoff,
         recoveryPreflight,
         documentOutcome,
         documentTaskVerified: true,

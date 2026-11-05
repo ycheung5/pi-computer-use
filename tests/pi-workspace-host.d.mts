@@ -33,9 +33,16 @@ export function refusalWorkspaceEvidence(
 export const nativeDocumentText: { initial: string; final: string };
 export function documentWorkspaceEvidence(
   outcome: Record<string, unknown> | undefined,
+  expectedFinal?: string,
 ): boolean;
 
 export function documentRecoveryEvidence(
+  verification: Record<string, unknown> | undefined,
+  audit: Record<string, unknown>[],
+): boolean;
+
+export const nativeHandbackText: { edited: string; final: string };
+export function documentHandbackEvidence(
   verification: Record<string, unknown> | undefined,
   audit: Record<string, unknown>[],
 ): boolean;

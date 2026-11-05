@@ -749,3 +749,114 @@ test("native recovery plan starts no Windows fixture or model", () => {
   assert.equal(plan.physicalInput, false);
   assert.equal(plan.runs, 3);
 });
+
+test("native continuation requires cancelled/released setup and preservation of the handback edit", async () => {
+  const { documentHandbackEvidence } = await import("./pi-workspace-host.mjs");
+  const initial = "Pi document 中文 café 😀",
+    edited = initial + " HUMAN",
+    final = edited + " — appended";
+  const before = {
+    tabs: 2,
+    selected: 1,
+    taskVisible: true,
+    taskForeground: true,
+    originalEditor: "original work 1",
+    originalFile: "original work 1",
+    taskEditor: initial,
+    taskFile: initial,
+    savedValues: [initial],
+  };
+  const handoff = {
+    cancelled: true,
+    stoppedMutationRefused: true,
+    settled: true,
+    controlReleased: true,
+    workerRetired: true,
+    editSource: "fixture-stand-in",
+    before,
+    after: { ...before, taskEditor: edited },
+  };
+  const verification = {
+    handoff,
+    documentOutcome: {
+      ...before,
+      taskEditor: final,
+      taskFile: final,
+      savedValues: [initial, final],
+    },
+  };
+  const read = {
+    type: "tool_result",
+    toolName: "windows_computer_use_element_info",
+    details: {
+      ok: true,
+      element: { id: "fresh", name: "Task editor", value: edited },
+    },
+  };
+  const mutate = {
+    type: "tool_result",
+    toolName: "windows_computer_use_set_value",
+    input: { elementId: "fresh", value: final },
+    details: { ok: true },
+  };
+  assert.equal(documentHandbackEvidence(verification, [read, mutate]), true);
+  for (const key of [
+    "cancelled",
+    "stoppedMutationRefused",
+    "settled",
+    "controlReleased",
+    "workerRetired",
+  ])
+    assert.equal(
+      documentHandbackEvidence(
+        { ...verification, handoff: { ...handoff, [key]: false } },
+        [read, mutate],
+      ),
+      false,
+    );
+  assert.equal(documentHandbackEvidence(verification, [mutate, read]), false);
+  assert.equal(
+    documentHandbackEvidence(
+      {
+        ...verification,
+        documentOutcome: {
+          ...verification.documentOutcome,
+          taskFile: initial + " — appended",
+        },
+      },
+      [read, mutate],
+    ),
+    false,
+  );
+  assert.equal(
+    documentHandbackEvidence(
+      {
+        ...verification,
+        handoff: { ...handoff, after: { ...handoff.after, taskFile: edited } },
+      },
+      [read, mutate],
+    ),
+    false,
+    "stand-in edit must not autosave",
+  );
+});
+
+test("native handback plan starts neither setup nor a paid model", () => {
+  const plan = JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        "tests/pi-workspace-host.mjs",
+        "--scenario",
+        "document-handback",
+        "--run",
+        "--plan",
+      ],
+      { encoding: "utf8" },
+    ),
+  );
+  assert.equal(plan.run, false);
+  assert.equal(plan.scenario, "document-handback");
+  assert.equal(plan.physicalInput, false);
+  assert.equal(plan.runs, 3);
+});

@@ -44,7 +44,10 @@ class ManagedFixture : Form {
       }
       ManagedFixture caller=new ManagedFixture{Text=args[0]+" caller",Left=800,Top=160,Width=300,Height=200,ShowInTaskbar=false};
       System.Windows.Forms.Timer commands=new System.Windows.Forms.Timer{Interval=30};
-      commands.Tick+=delegate {if(documentTask && File.Exists(args[2]+".observe")){
+      commands.Tick+=delegate {if(args[1]=="workspace-document-handback" && File.Exists(args[2]+".handoff")){
+        File.Delete(args[2]+".handoff");if(taskEditors.Count!=1 || tabs.SelectedIndex!=1)throw new InvalidOperationException("HANDOFF_TASK_UNAVAILABLE");
+        taskEditors[0].Text+=" HUMAN";File.AppendAllText(args[2],"handback-edit:fixture-stand-in\n");
+      }if(documentTask && File.Exists(args[2]+".observe")){
         File.Delete(args[2]+".observe");
         string taskValue=taskEditors.Count==1?taskEditors[0].Text:"";
         File.WriteAllText(args[2]+".state.pending",tabs.TabPages.Count+":"+tabs.SelectedIndex+":"+Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(originalEditor.Text))+":"+taskEditors.Count+":"+Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(taskValue))+":"+(IsWindowVisible(form.Handle) && !IsIconic(form.Handle)?1:0)+":"+(GetForegroundWindow()==form.Handle?1:0));
