@@ -2,6 +2,7 @@ export function workspaceScope(owned: {
   nativeWindowHandle: number;
   processId: number;
   title: string;
+  targets?: { nativeWindowHandle: number; processId: number; title: string }[];
 }): {
   before(event: {
     toolName: string;
@@ -20,4 +21,11 @@ export function workspaceVerification(facts: {
 export function blankWorkspaceEvidence(
   before: Record<string, unknown>,
   after: Record<string, unknown>,
+): boolean;
+
+export function refusalWorkspaceEvidence(
+  scenario: string,
+  report: string,
+  verification: Record<string, unknown>,
+  audit: Record<string, unknown>[],
 ): boolean;

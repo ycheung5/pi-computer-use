@@ -315,3 +315,154 @@ test("blank workspace proof uses browser chrome and refuses website or unproven 
     false,
   );
 });
+
+test("workspace scope permits both owned roots without mixing their identities", async () => {
+  const { workspaceScope } = await import("./pi-workspace-host.mjs");
+  const first = { nativeWindowHandle: 100, processId: 200, title: "First" };
+  const second = { nativeWindowHandle: 101, processId: 201, title: "Second" };
+  const scope = workspaceScope({ ...first, targets: [first, second] });
+  scope.after({
+    toolName: "windows_computer_use_list_windows",
+    details: {
+      ok: true,
+      windows: [
+        { ...first, windowRef: "w:first" },
+        { ...second, windowRef: "w:second" },
+        { nativeWindowHandle: 102, processId: 202, windowRef: "w:foreign" },
+      ],
+    },
+  });
+  assert.equal(
+    scope.before({
+      toolName: "windows_computer_use_accessibility_tree",
+      input: { windowRef: "w:second" },
+    }),
+    undefined,
+  );
+  assert.equal(
+    scope.before({
+      toolName: "windows_computer_use_accessibility_tree",
+      input: { ...second },
+    }),
+    undefined,
+  );
+  assert.equal(
+    scope.before({
+      toolName: "windows_computer_use_accessibility_tree",
+      input: { nativeWindowHandle: 100, processId: 201 },
+    })?.block,
+    true,
+  );
+  assert.equal(
+    scope.before({
+      toolName: "windows_computer_use_accessibility_tree",
+      input: { windowRef: "w:foreign" },
+    })?.block,
+    true,
+  );
+  assert.doesNotThrow(() =>
+    scope.after({
+      toolName: "windows_computer_use_accessibility_tree",
+      details: { ok: true, ...second, tree: { controlType: "Window" } },
+    }),
+  );
+  assert.throws(
+    () =>
+      scope.after({
+        toolName: "windows_computer_use_accessibility_tree",
+        details: {
+          ok: true,
+          ...second,
+          inputTargetHandle: 100,
+          inputTargetProcessId: 200,
+        },
+      }),
+    /root differs/,
+  );
+});
+
+test("workspace refusal screen requires preserved originals and relevant observations", async () => {
+  const { refusalWorkspaceEvidence } = await import("./pi-workspace-host.mjs");
+  const listing = (windows: unknown[]) => ({
+    type: "tool_result",
+    toolName: "windows_computer_use_list_windows",
+    details: { ok: true, windows },
+  });
+  const preserved = { refusalOriginalsPreserved: true };
+  assert.equal(
+    refusalWorkspaceEvidence(
+      "ambiguous",
+      "Which window should I use?",
+      preserved,
+      [
+        listing([
+          { nativeWindowHandle: 1, processId: 2 },
+          { nativeWindowHandle: 3, processId: 4 },
+        ]),
+      ],
+    ),
+    true,
+  );
+  assert.equal(
+    refusalWorkspaceEvidence("ambiguous", "Done.", preserved, [
+      listing([
+        { nativeWindowHandle: 1, processId: 2 },
+        { nativeWindowHandle: 3, processId: 4 },
+      ]),
+    ]),
+    false,
+  );
+  assert.equal(
+    refusalWorkspaceEvidence("ambiguous", "Which window?", preserved, [
+      listing([{ nativeWindowHandle: 1, processId: 2 }]),
+    ]),
+    false,
+  );
+  assert.equal(
+    refusalWorkspaceEvidence(
+      "ambiguous",
+      "Which window?",
+      { refusalOriginalsPreserved: false },
+      [
+        listing([
+          { nativeWindowHandle: 1, processId: 2 },
+          { nativeWindowHandle: 3, processId: 4 },
+        ]),
+      ],
+    ),
+    false,
+  );
+  const complete = {
+    type: "tool_result",
+    toolName: "windows_computer_use_accessibility_tree",
+    details: { ok: true, truncated: false },
+  };
+  assert.equal(
+    refusalWorkspaceEvidence(
+      "unsafe-workspace",
+      "This app cannot create a safe separate task tab.",
+      preserved,
+      [listing([{ nativeWindowHandle: 1, processId: 2 }]), complete],
+    ),
+    true,
+  );
+  assert.equal(
+    refusalWorkspaceEvidence(
+      "unsafe-workspace",
+      "This app cannot create a safe separate task tab.",
+      preserved,
+      [
+        listing([{ nativeWindowHandle: 1, processId: 2 }]),
+        { ...complete, details: { ok: true, truncated: true } },
+      ],
+    ),
+    false,
+  );
+  assert.equal(
+    refusalWorkspaceEvidence("unsafe-workspace", "Opened it.", preserved, [
+      listing([{ nativeWindowHandle: 1, processId: 2 }]),
+      complete,
+    ]),
+    false,
+  );
+});
