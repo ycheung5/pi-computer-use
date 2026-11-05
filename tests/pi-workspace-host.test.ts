@@ -597,29 +597,81 @@ test("native recovery requires partial evidence and a fresh replacement-editor m
     },
     editorRefresh: { oldHandle: 10, newHandle: 20 },
   };
-  const audit = [
-    { type: "fixture_partial", truncated: true, nodeCount: 1 },
+  const partial = { type: "fixture_partial", truncated: true, nodeCount: 1 };
+  const result = (
+    name: string,
+    input: Record<string, unknown>,
+    details: Record<string, unknown>,
+  ) => ({
+    type: "tool_result",
+    toolName: `windows_computer_use_${name}`,
+    input,
+    details: { ok: true, ...details },
+  });
+  const oldObservation = result(
+    "find",
+    {},
     {
-      type: "tool_result",
-      toolName: "windows_computer_use_find",
-      details: {
-        ok: true,
-        matches: [{ id: "fresh", name: "Task editor", nativeWindowHandle: 20 }],
-      },
+      matches: [
+        { id: "old", name: "Task editor", nativeWindowHandle: 10 },
+        { id: "save", name: "Save task" },
+      ],
     },
-    {
-      type: "tool_result",
-      toolName: "windows_computer_use_set_value",
-      details: { ok: true },
-      input: {
-        elementId: "fresh",
-        value: "Pi document 中文 café 😀 — appended",
-      },
-    },
-  ];
-  const [partial, observation, mutation] = audit;
-  assert.ok(partial && observation && mutation);
+  );
+  const initial = result(
+    "set_value",
+    { elementId: "old", value: "Pi document 中文 café 😀" },
+    {},
+  );
+  const saved = result("invoke", { elementId: "save" }, {});
+  const observation = result(
+    "find",
+    {},
+    { matches: [{ id: "fresh", name: "Task editor", nativeWindowHandle: 20 }] },
+  );
+  const compact = result(
+    "accessibility_tree",
+    {},
+    { tree: { id: "fresh", name: "Task editor" } },
+  );
+  const mutation = result(
+    "set_value",
+    { elementId: "fresh", value: "Pi document 中文 café 😀 — appended" },
+    {},
+  );
+  const prefix = [partial, oldObservation, initial, saved];
+  const audit = [...prefix, observation, mutation];
+  const conflicting = result(
+    "find",
+    {},
+    { matches: [{ id: "fresh", name: "Task editor", nativeWindowHandle: 99 }] },
+  );
+  assert.equal(
+    documentRecoveryEvidence(verification, [
+      ...prefix,
+      compact,
+      conflicting,
+      mutation,
+    ]),
+    false,
+    "later explicit conflict invalidates compact binding",
+  );
+  assert.equal(
+    documentRecoveryEvidence(verification, [
+      ...prefix,
+      compact,
+      mutation,
+      conflicting,
+    ]),
+    false,
+    "later explicit conflict invalidates prior success",
+  );
   assert.equal(documentRecoveryEvidence(verification, audit), true);
+  assert.equal(
+    documentRecoveryEvidence(verification, [...prefix, compact, mutation]),
+    true,
+    "compact observations omit optional HWND metadata",
+  );
   assert.equal(documentRecoveryEvidence(verification, audit.slice(1)), false);
   assert.equal(
     documentRecoveryEvidence(
@@ -629,15 +681,53 @@ test("native recovery requires partial evidence and a fresh replacement-editor m
     false,
   );
   assert.equal(
-    documentRecoveryEvidence(verification, [partial, mutation, observation]),
+    documentRecoveryEvidence(verification, [...prefix, mutation, observation]),
     false,
   );
   assert.equal(
     documentRecoveryEvidence(verification, [
-      ...audit.slice(0, 2),
+      ...prefix,
+      observation,
       { ...mutation, details: { ok: false } },
     ]),
     false,
+  );
+  assert.equal(
+    documentRecoveryEvidence(verification, [
+      partial,
+      oldObservation,
+      initial,
+      observation,
+      mutation,
+    ]),
+    false,
+    "successful initial save must precede replacement observation",
+  );
+  assert.equal(
+    documentRecoveryEvidence(verification, [
+      ...prefix,
+      result("find", {}, { matches: [{ id: "old", name: "Task editor" }] }),
+      { ...mutation, input: { ...mutation.input, elementId: "old" } },
+    ]),
+    false,
+    "old ID cannot count as replacement",
+  );
+  assert.equal(
+    documentRecoveryEvidence(verification, [
+      ...prefix,
+      result(
+        "find",
+        {},
+        {
+          matches: [
+            { id: "fresh", name: "Task editor", nativeWindowHandle: 99 },
+          ],
+        },
+      ),
+      mutation,
+    ]),
+    false,
+    "conflicting explicit HWND metadata must fail",
   );
 });
 

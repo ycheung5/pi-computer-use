@@ -24,16 +24,40 @@ export function documentRecoveryEvidence(verification, audit) {
   )
     return false;
   let partial = false,
-    recovered = false;
-  const fresh = new Set();
+    recovered = false,
+    identityConflict = false,
+    savedInitial = false,
+    initialEditor;
+  const editors = new Set(),
+    saveButtons = new Set(),
+    fresh = new Set();
   const visit = (node) => {
     if (!node || typeof node !== "object") return;
-    if (
-      node.name === "Task editor" &&
-      node.nativeWindowHandle === refresh.newHandle &&
-      typeof node.id === "string"
-    )
-      fresh.add(node.id);
+    if (typeof node.id === "string") {
+      if (node.name === "Save task") saveButtons.add(node.id);
+      if (node.name === "Task editor") {
+        const expectedHandle =
+          !savedInitial || node.id === initialEditor
+            ? refresh.oldHandle
+            : refresh.newHandle;
+        if (
+          node.nativeWindowHandle !== undefined &&
+          node.nativeWindowHandle !== expectedHandle
+        )
+          identityConflict = true;
+        editors.add(node.id);
+        // Compact observations omit native handles. The immutable opaque ID,
+        // observed after the first save/replacement, must differ from the ID
+        // used for the initial write. Never derive identity from AutomationId.
+        if (
+          savedInitial &&
+          node.id !== initialEditor &&
+          (node.nativeWindowHandle === undefined ||
+            node.nativeWindowHandle === refresh.newHandle)
+        )
+          fresh.add(node.id);
+      }
+    }
     for (const child of node.children ?? []) visit(child);
   };
   for (const row of audit) {
@@ -44,18 +68,32 @@ export function documentRecoveryEvidence(verification, audit) {
     )
       partial = true;
     if (row.type !== "tool_result" || row.details?.ok !== true) continue;
+    if (row.toolName === "windows_computer_use_set_value") {
+      if (
+        !savedInitial &&
+        editors.has(row.input?.elementId) &&
+        row.input.value === nativeDocumentText.initial
+      )
+        initialEditor = row.input.elementId;
+      if (
+        partial &&
+        savedInitial &&
+        fresh.has(row.input?.elementId) &&
+        row.input.value === nativeDocumentText.final
+      )
+        recovered = true;
+    }
     if (
-      partial &&
-      row.toolName === "windows_computer_use_set_value" &&
-      fresh.has(row.input?.elementId) &&
-      row.input.value === nativeDocumentText.final
+      row.toolName === "windows_computer_use_invoke" &&
+      initialEditor &&
+      saveButtons.has(row.input?.elementId)
     )
-      recovered = true;
+      savedInitial = true;
     visit(row.details.tree);
     visit(row.details.element);
     for (const match of row.details.matches ?? []) visit(match);
   }
-  return partial && recovered;
+  return partial && recovered && !identityConflict;
 }
 const documentScenario = (scenario) =>
   ["document", "document-recovery"].includes(scenario);
