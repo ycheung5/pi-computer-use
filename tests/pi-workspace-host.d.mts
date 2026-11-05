@@ -25,7 +25,6 @@ export function blankWorkspaceEvidence(
 
 export function refusalWorkspaceEvidence(
   scenario: string,
-  report: string,
   verification: Record<string, unknown>,
   audit: Record<string, unknown>[],
 ): boolean;

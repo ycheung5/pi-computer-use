@@ -1,6 +1,6 @@
 # Guarded pointer actions
 
-Native actions inherit [confirmed visible-window intent](windows.md#default-apps-and-workspaces) within the current operation after resolving the actual target root. Explicit `activate: false` and background dispatch/method preserve their existing behavior; passive observations remain passive. The remaining #30 acceptance is tracked in the queue.
+Native actions inherit [confirmed visible-window intent](windows.md#default-apps-and-workspaces) within the current operation after resolving the actual target root. Explicit `activate: false` and background dispatch/method preserve their existing behavior; passive observations remain passive. Supported #30 acceptance and remaining release owners are recorded in the [queue](tickets.md#execution-queue).
 
 The candidate acquires [exclusive control](spec.md#exclusive-control) before physical pointer dispatch. Foreign injected or unconsumed interference still aborts. Reuse the accepted [#31 control/handback evidence](validation.md#control-interruption-acceptance).
 

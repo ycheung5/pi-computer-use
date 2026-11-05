@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { cp, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
 
 test("workspace actor plan starts no Windows fixture or paid model", () => {
@@ -19,6 +22,37 @@ test("workspace actor plan starts no Windows fixture or paid model", () => {
     ),
   );
   assert.equal(explicitPlan.run, false);
+});
+
+test("decision episodes cannot batch before semantic review", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "pi-workspace-review-gate-"));
+  try {
+    for (const file of ["pi-workspace-host.mjs", "pi-visual-fixture.mjs"])
+      await cp(resolve("tests", file), join(folder, file));
+    for (const scenario of ["ambiguous", "unsafe-workspace"]) {
+      const runner = join(folder, "pi-workspace-host.mjs");
+      const plan = JSON.parse(
+        execFileSync(
+          process.execPath,
+          [runner, "--scenario", scenario, "--plan"],
+          { encoding: "utf8" },
+        ),
+      );
+      assert.equal(plan.runs, 1);
+      assert.equal(plan.semanticReviewRequired, true);
+      assert.throws(
+        () =>
+          execFileSync(
+            process.execPath,
+            [runner, "--scenario", scenario, "--run", "--runs", "3"],
+            { encoding: "utf8", stdio: "pipe" },
+          ),
+        /Run one decision episode/,
+      );
+    }
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
 });
 
 test("workspace scope follows owned observed IDs and refuses unsafe routes", async () => {
@@ -381,86 +415,68 @@ test("workspace scope permits both owned roots without mixing their identities",
   );
 });
 
-test("workspace refusal screen requires preserved originals and relevant observations", async () => {
+test("workspace refusal observations remain separate from semantic decisions", async () => {
   const { refusalWorkspaceEvidence } = await import("./pi-workspace-host.mjs");
+  const first = { nativeWindowHandle: 1, processId: 2 },
+    second = { nativeWindowHandle: 3, processId: 4 };
   const listing = (windows: unknown[]) => ({
     type: "tool_result",
     toolName: "windows_computer_use_list_windows",
     details: { ok: true, windows },
   });
   const preserved = { refusalOriginalsPreserved: true };
-  assert.equal(
-    refusalWorkspaceEvidence(
-      "ambiguous",
-      "Which window should I use?",
-      preserved,
-      [
-        listing([
-          { nativeWindowHandle: 1, processId: 2 },
-          { nativeWindowHandle: 3, processId: 4 },
-        ]),
-      ],
-    ),
-    true,
-  );
-  assert.equal(
-    refusalWorkspaceEvidence("ambiguous", "Done.", preserved, [
-      listing([
-        { nativeWindowHandle: 1, processId: 2 },
-        { nativeWindowHandle: 3, processId: 4 },
-      ]),
-    ]),
-    false,
-  );
-  assert.equal(
-    refusalWorkspaceEvidence("ambiguous", "Which window?", preserved, [
-      listing([{ nativeWindowHandle: 1, processId: 2 }]),
-    ]),
-    false,
-  );
-  assert.equal(
-    refusalWorkspaceEvidence(
-      "ambiguous",
-      "Which window?",
-      { refusalOriginalsPreserved: false },
-      [
-        listing([
-          { nativeWindowHandle: 1, processId: 2 },
-          { nativeWindowHandle: 3, processId: 4 },
-        ]),
-      ],
-    ),
-    false,
-  );
   const complete = {
     type: "tool_result",
     toolName: "windows_computer_use_accessibility_tree",
     details: { ok: true, truncated: false },
   };
   assert.equal(
-    refusalWorkspaceEvidence(
-      "unsafe-workspace",
-      "This app cannot create a safe separate task tab.",
-      preserved,
-      [listing([{ nativeWindowHandle: 1, processId: 2 }]), complete],
-    ),
+    refusalWorkspaceEvidence("ambiguous", preserved, [
+      listing([first, second]),
+    ]),
     true,
   );
   assert.equal(
+    refusalWorkspaceEvidence("ambiguous", preserved, [listing([first])]),
+    false,
+  );
+  assert.equal(
+    refusalWorkspaceEvidence("ambiguous", preserved, [listing([first, first])]),
+    false,
+  );
+  assert.equal(
     refusalWorkspaceEvidence(
-      "unsafe-workspace",
-      "This app cannot create a safe separate task tab.",
-      preserved,
-      [
-        listing([{ nativeWindowHandle: 1, processId: 2 }]),
-        { ...complete, details: { ok: true, truncated: true } },
-      ],
+      "ambiguous",
+      { refusalOriginalsPreserved: false },
+      [listing([first, second])],
     ),
     false,
   );
   assert.equal(
-    refusalWorkspaceEvidence("unsafe-workspace", "Opened it.", preserved, [
-      listing([{ nativeWindowHandle: 1, processId: 2 }]),
+    refusalWorkspaceEvidence("unsafe-workspace", preserved, [
+      listing([first]),
+      complete,
+    ]),
+    true,
+  );
+  assert.equal(
+    refusalWorkspaceEvidence("unsafe-workspace", preserved, [
+      listing([first]),
+      { ...complete, details: { ok: true, truncated: true } },
+    ]),
+    false,
+  );
+  assert.equal(
+    refusalWorkspaceEvidence("unsafe-workspace", preserved, [listing([first])]),
+    false,
+  );
+  assert.equal(
+    refusalWorkspaceEvidence("unsafe-workspace", preserved, [complete]),
+    false,
+  );
+  assert.equal(
+    refusalWorkspaceEvidence("unknown", preserved, [
+      listing([first]),
       complete,
     ]),
     false,
