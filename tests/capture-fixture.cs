@@ -76,6 +76,8 @@ class CaptureFixture {
             Console.WriteLine(Oracle(target));Console.Out.Flush();return;
           }
           if (captured == "cover") cover.Show();
+          else if (captured == "restore") { target.WindowState = FormWindowState.Normal; target.Show(); }
+          else if (captured == "state") { Console.WriteLine("{\"visible\":"+(target.Visible?"true":"false")+",\"minimized\":"+(target.WindowState==FormWindowState.Minimized?"true":"false")+"}");Console.Out.Flush();return; }
           else if (captured == "minimize") target.WindowState = FormWindowState.Minimized;
           else if (captured == "hide") target.Hide();
           else if (captured == "stop") { cover.Dispose(); target.Close(); return; }

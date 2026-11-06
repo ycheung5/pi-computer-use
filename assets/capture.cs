@@ -112,6 +112,8 @@ partial class WindowsBridge {
   static object CaptureScreenshot(Dictionary<string, object> args) {
     if(args.ContainsKey("windowRef") && TextOption(args,"scope","active_window")=="desktop")throw new InvalidOperationException("WINDOW_REFERENCE_CONFLICT: desktop capture cannot use a window reference");
     bool desktopScope = Convert.ToString(args["scope"]) == "desktop";
+    bool windowOnly = args.ContainsKey("windowOnly") && Convert.ToBoolean(args["windowOnly"]);
+    if(windowOnly && desktopScope)throw new InvalidOperationException("INVALID_ARGUMENTS: windowOnly requires window scope");
     int maximum = Convert.ToInt32(args["maxWidth"]);
     Rectangle desktop = SystemInformation.VirtualScreen;
     Rectangle bounds = desktop;
@@ -132,7 +134,7 @@ partial class WindowsBridge {
       if (args.TryGetValue("activate", out requestedActivation) && Convert.ToBoolean(requestedActivation)){BeginWindowDispatch();if(!SetForegroundWindow(target))warnings.Add("WINDOW_ACTIVATION_REFUSED: Windows did not bring the target to foreground");}
       bounds = WindowCaptureBounds(target);
       if (!IsIconic(target) && IsWindowVisible(target) && bounds.Width > 0 && bounds.Height > 0) {
-        if (ClearCaptureRegion(target, bounds, desktop)) {
+        if (!windowOnly && ClearCaptureRegion(target, bounds, desktop)) {
           Bitmap candidate = null;
           try {
             candidate = CopyCaptureRegion(bounds);
@@ -144,7 +146,7 @@ partial class WindowsBridge {
         if (image == null) {
           warnings.Add("PRINTWINDOW_FAILED_OR_BLANK");
           Rectangle visible = Rectangle.Intersect(bounds, desktop);
-          if (visible.Width > 0 && visible.Height > 0) {
+          if (!windowOnly && visible.Width > 0 && visible.Height > 0) {
             Rectangle windowBounds = bounds;
             bounds = visible; method = "screen-region"; occluded = true;
             try { image = CopyCaptureRegion(bounds); }
@@ -157,8 +159,11 @@ partial class WindowsBridge {
         }
       }
       if (image == null && pixelFailure == null) {
-        failed = true; bounds = desktop; method = "screen";
-        warnings.Add("WINDOW_CAPTURE_FAILED: returning desktop pixels instead of the unavailable target surface");
+        if(windowOnly)pixelFailure="WINDOW_CAPTURE_UNAVAILABLE: target is hidden, minimized or PrintWindow failed/blank; screen fallback refused";
+        else {
+          failed = true; bounds = desktop; method = "screen";
+          warnings.Add("WINDOW_CAPTURE_FAILED: returning desktop pixels instead of the unavailable target surface");
+        }
       }
     }
       if (image == null && pixelFailure == null) image = CopyCaptureRegion(bounds);
@@ -171,11 +176,11 @@ partial class WindowsBridge {
       }
       if (pixelFailure != null) {
         Dictionary<string, object> unavailable = Result(false, "screenshot");
-        unavailable["error"] = "SCREEN_REGION_CAPTURE_FAILED";
+        unavailable["error"] = windowOnly?"WINDOW_CAPTURE_UNAVAILABLE":"SCREEN_REGION_CAPTURE_FAILED";
         unavailable["nativeCaptureError"] = pixelFailure;
         unavailable["captureWarnings"] = warnings;
         foreach(var pair in referenceMetadata)unavailable[pair.Key]=pair.Value;
-        unavailable["wgcTarget"] = new Dictionary<string, object> { { "nativeWindowHandle", target.ToInt64() }, { "processId", owner }, { "_windowMarker", WindowReferenceDescriptor(target) } };
+        if(!windowOnly || (IsWindowVisible(target) && !IsIconic(target)))unavailable["wgcTarget"] = new Dictionary<string, object> { { "nativeWindowHandle", target.ToInt64() }, { "processId", owner }, { "_windowMarker", WindowReferenceDescriptor(target) } };
         return unavailable;
       }
       if (maximum > 0 && image.Width > maximum) {

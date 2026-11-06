@@ -46,6 +46,8 @@ Record measurements and outcomes. If a gate fails, bring the concrete trade-off 
 
 ## Coverage matrix
 
+For #6/#20, exercise the opt-in [window-only screenshot contract](spec.md#implementation-decisions) through the existing registered screenshot tool: covered painted pixels, blank-render WGC handoff, hidden/minimized refusal, invalid combinations and unchanged default behavior. Keep strict capture inside the capture module; bypass screen-copy entirely rather than detect unrelated pixels after acquisition. Then use this mode for owned display/presentation fixtures. Actual DPI changes and recording acceptance remain separate checks.
+
 Every supported tool gets argument validation, success, failure, cancellation where applicable, and unsupported-target coverage. A matrix entry maps to named tests or an explicit manual procedure; mocked protocol success alone cannot establish real desktop support.
 
 | Area | Required coverage |

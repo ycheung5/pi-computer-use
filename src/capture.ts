@@ -19,6 +19,12 @@ export const screenshotParameters = {
     processId: { type: "integer", minimum: 1 },
     nativeWindowHandle: { type: "integer", minimum: 1 },
     activate: { type: "boolean", default: false },
+    windowOnly: {
+      type: "boolean",
+      default: false,
+      description:
+        "Native window scope only: use PrintWindow/WGC; refuse screen-copy and desktop fallbacks.",
+    },
     maxWidth: { type: "integer", minimum: 0, maximum: 7680, default: 1600 },
   },
 };
@@ -87,6 +93,7 @@ export async function screenshot(
     "processId",
     "nativeWindowHandle",
     "activate",
+    "windowOnly",
   ]);
   const invalid =
     (args.windowRef !== undefined &&
@@ -99,6 +106,8 @@ export async function screenshot(
     maxWidth < 0 ||
     maxWidth > 7680 ||
     (scope !== "active_window" && scope !== "desktop") ||
+    (args.windowOnly !== undefined && typeof args.windowOnly !== "boolean") ||
+    (args.windowOnly === true && scope === "desktop") ||
     (args.windowTitle !== undefined &&
       (typeof args.windowTitle !== "string" || !args.windowTitle.trim())) ||
     [args.processId, args.nativeWindowHandle].some(
@@ -114,7 +123,7 @@ export async function screenshot(
       ok: false,
       action: "screenshot",
       error:
-        "INVALID_ARGUMENTS: invalid screenshot target, scope or maxWidth (integer 0–7680)",
+        "INVALID_ARGUMENTS: invalid screenshot target, scope, windowOnly or maxWidth (integer 0–7680)",
     };
   let nativeCaptureError: unknown;
   let wgcError: unknown;
@@ -129,7 +138,9 @@ export async function screenshot(
     delete result.wgcTarget;
     if (
       (result.ok ||
-        (result.error === "SCREEN_REGION_CAPTURE_FAILED" &&
+        ((result.error === "SCREEN_REGION_CAPTURE_FAILED" ||
+          (args.windowOnly === true &&
+            result.error === "WINDOW_CAPTURE_UNAVAILABLE")) &&
           result.cleanupConfirmed !== false &&
           result.identityWarning === undefined)) &&
       target &&

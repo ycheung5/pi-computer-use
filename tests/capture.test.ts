@@ -32,6 +32,9 @@ test("screenshots reject invalid bounds and options without touching the desktop
       { scope: "invented" },
       { nativeWindowHandle: -3 },
       { processId: "123" },
+      { windowOnly: "true" },
+      { windowOnly: true, scope: "desktop" },
+      { windowOnly: true, browserTab: "t123" },
     ]) {
       const result = await worker.execute("screenshot", args);
       assert.equal(result.ok, false);

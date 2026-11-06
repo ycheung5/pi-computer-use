@@ -360,7 +360,7 @@ export function registerComputerUse(
     name: "windows_computer_use_screenshot",
     label: "Screenshot",
     description:
-      "Capture a Windows window or desktop without UI Automation. Returns a PNG and screen-coordinate bounds; flagged fallbacks may show occluding content.",
+      "Capture a Windows window or desktop without UI Automation. Returns a PNG and screen-coordinate bounds; flagged fallbacks may show occluding content. Set windowOnly:true for native PrintWindow/WGC capture with no screen-copy or desktop fallback.",
     parameters: Type.Unsafe<Record<string, unknown>>(screenshotParameters),
     executionMode: "sequential",
     async execute(_toolCallId, args, signal, _onUpdate, ctx) {

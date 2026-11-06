@@ -11,7 +11,15 @@ import computerUse from "../dist/extension.js";
 import { computerUseHost } from "./native-host.mjs";
 
 assert.equal(process.platform, "win32");
+assert.ok(
+  process.argv
+    .slice(2)
+    .every((arg) => ["--lifetime-only", "--window-only"].includes(arg)),
+  "unknown capture test option",
+);
 const lifetimeOnly = process.argv.includes("--lifetime-only");
+const windowOnly = process.argv.includes("--window-only");
+assert.ok(!(lifetimeOnly && windowOnly), "select one capture mode");
 const folder = await mkdtemp(join(tmpdir(), "pi-cu-capture-fixture-"));
 const executable = join(folder, "fixture.exe");
 const compiler = join(
@@ -100,6 +108,7 @@ const call = async (extra = {}) => {
       nativeWindowHandle: handle,
       processId: fixture.pid,
       maxWidth: 80,
+      ...(windowOnly ? { windowOnly: true } : {}),
       ...extra,
     },
     undefined,
@@ -133,6 +142,86 @@ const command = async (value) => {
   return reply.toString().trim();
 };
 try {
+  if (windowOnly) await verifyWindowOnly();
+  else await verifyDefault();
+} finally {
+  fixture.stdin.end("stop\n");
+  if (fixture.exitCode === null) await once(fixture, "close");
+  for (const shutdown of host.shutdown) await shutdown();
+  await rm(folder, { recursive: true, force: true });
+}
+
+async function verifyWindowOnly() {
+  const normal = await call();
+  assert.equal(normal.method, "printwindow");
+  assert.deepEqual(centerPixel, [20, 150, 80]);
+  assert.equal(typeof normal.windowRef, "string");
+  assert.ok(normal.windowRef.length > 0);
+  const bound = await call({ windowRef: normal.windowRef });
+  assert.equal(bound.windowRef, normal.windowRef);
+  await command("cover");
+  const covered = await call();
+  assert.ok(["printwindow", "wgc"].includes(covered.method));
+  assert.equal(covered.windowCaptureFailed, false);
+  assert.equal(covered.occludedPossible, false);
+  assert.deepEqual(centerPixel, [20, 150, 80]);
+  fixture.stdin.end("stop\n");
+  await once(fixture, "close");
+  fixture = spawn(executable, [`Pi CU strict black ${Date.now()}`, "black"], {
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+    cwd: folder,
+  });
+  const [ready] = await once(fixture.stdout, "data");
+  handle = Number(ready.toString().trim());
+  await command("cover");
+  const composited = await call();
+  assert.equal(composited.method, "wgc");
+  assert.deepEqual(centerPixel, [0, 0, 0]);
+  for (const state of ["minimize", "hide"]) {
+    await command("restore");
+    assert.deepEqual(JSON.parse(await command("state")), {
+      visible: true,
+      minimized: false,
+    });
+    await command(state);
+    const observed = JSON.parse(await command("state"));
+    assert.equal(observed.minimized, state === "minimize");
+    if (state === "hide") assert.equal(observed.visible, false);
+    const refused = await tool.execute(
+      `strict-${state}`,
+      {
+        nativeWindowHandle: handle,
+        processId: fixture.pid,
+        windowOnly: true,
+      },
+      undefined,
+      undefined,
+      {},
+    );
+    assert.equal(refused.isError, true);
+    assert.match(JSON.stringify(refused.details), /WINDOW_CAPTURE_UNAVAILABLE/);
+    assert.equal(
+      refused.content.some((item) => item.type === "image"),
+      false,
+    );
+  }
+  console.log(
+    JSON.stringify({
+      ok: true,
+      check: "window-only screenshot",
+      normal: normal.method,
+      covered: covered.method,
+      blank: composited.method,
+      hiddenMinimizedRefused: true,
+      pixels: true,
+      physicalInput: false,
+      desktopCapture: false,
+    }),
+  );
+}
+
+async function verifyDefault() {
   const normal = await call();
   assert.deepEqual(
     centerPixel,
@@ -300,9 +389,4 @@ try {
       physicalInput: false,
     }),
   );
-} finally {
-  fixture.stdin.end("stop\n");
-  if (fixture.exitCode === null) await once(fixture, "close");
-  for (const shutdown of host.shutdown) await shutdown();
-  await rm(folder, { recursive: true, force: true });
 }
