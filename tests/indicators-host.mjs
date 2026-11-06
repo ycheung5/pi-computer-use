@@ -1,4 +1,4 @@
-// Nonvisual helper/layout/protocol checks; visible preview is separately opt-in.
+// Helper/layout/protocol checks; visible previews are explicitly opt-in.
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -8,21 +8,25 @@ import { promisify } from "node:util";
 
 for (const arg of process.argv.slice(2))
   assert.ok(
-    ["--layout-only", "--lifecycle-only", "--plan"].includes(arg),
+    [
+      "--layout-only",
+      "--lifecycle-only",
+      "--recording-preview",
+      "--plan",
+    ].includes(arg),
     "unknown indicator test option",
   );
 assert.ok(
-  !(
-    process.argv.includes("--layout-only") &&
-    process.argv.includes("--lifecycle-only")
-  ),
+  process.argv.slice(2).filter((arg) => arg !== "--plan").length <= 1,
   "select one indicator test mode",
 );
 const mode = process.argv.includes("--layout-only")
   ? "layout"
   : process.argv.includes("--lifecycle-only")
     ? "lifecycle"
-    : "default";
+    : process.argv.includes("--recording-preview")
+      ? "recording"
+      : "default";
 if (process.argv.includes("--plan")) {
   console.log(
     JSON.stringify({
@@ -30,7 +34,10 @@ if (process.argv.includes("--plan")) {
       mode,
       physicalInput: false,
       globalDisplayChanges: false,
-      exclusiveControl: mode !== "layout",
+      exclusiveControl: mode === "default" || mode === "lifecycle",
+      ...(mode === "recording"
+        ? { recordingPhases: [true, false], capturesPixels: false }
+        : {}),
     }),
   );
   process.exit(0);
@@ -121,10 +128,80 @@ try {
       }),
     );
   } else if (mode === "lifecycle") await verifyHeldLifecycle(preview);
+  else if (mode === "recording") await verifyRecordingPreview(preview);
   else await verifyControlProtocol(preview);
 } finally {
   await worker.dispose();
   await rm(folder, { recursive: true, force: true });
+}
+
+async function verifyRecordingPreview(preview) {
+  const phases = [];
+  for (const remoteVisible of [true, false]) {
+    // Let the preceding two-second preview expire before changing phase.
+    await new Promise((resolve) => setTimeout(resolve, 2200));
+    const configured = await worker.execute("settings_update", {
+      changes: {
+        indicatorEnabled: true,
+        cursorIndicatorEnabled: false,
+        remoteIndicatorVisible: remoteVisible,
+        indicatorText: remoteVisible
+          ? "Pi recording visible"
+          : "Pi recording hidden",
+      },
+    });
+    assert.equal(configured.ok, true, JSON.stringify(configured));
+    const samples = [];
+    for (let i = 0; i < 8; i++) {
+      const shown = await worker.execute("indicator_preview", { show: true });
+      assert.equal(shown.ok, true, JSON.stringify(shown));
+      assert.equal(shown.armed, false);
+      assert.equal(shown.exclusiveControl, false);
+      assert.equal(shown.presentation.held, false);
+      assert.equal(shown.presentation.visible, true);
+      assert.equal(shown.presentation.remoteVisible, remoteVisible);
+      assert.equal(shown.presentation.captureAffinityApplied, true);
+      assert.deepEqual(shown.presentation.frameErrors, []);
+      assert.equal(
+        shown.presentation.visibleWindows,
+        preview.presentation.layout.length * 2,
+      );
+      samples.push({
+        listenerProcessId: shown.listenerProcessId,
+        remoteVisible: shown.presentation.remoteVisible,
+        visibleWindows: shown.presentation.visibleWindows,
+        captureAffinityApplied: shown.presentation.captureAffinityApplied,
+      });
+      if (i === 0)
+        console.log(
+          JSON.stringify({
+            stage: remoteVisible ? "recording-enabled" : "recording-hidden",
+            seconds: 8,
+            localVisible: true,
+            armed: false,
+            exclusiveControl: false,
+          }),
+        );
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    phases.push({ remoteVisible, samples });
+  }
+  await new Promise((resolve) => setTimeout(resolve, 2200));
+  const ended = (await worker.execute("health", {})).control;
+  assert.equal(ended.armed, false);
+  assert.equal(ended.exclusiveControl, false);
+  assert.equal(ended.presentation.visible, false);
+  console.log(
+    JSON.stringify({
+      ok: true,
+      check: "recording preview helper protocol",
+      phases,
+      physicalInput: false,
+      capturesPixels: false,
+      thirdPartyRecording:
+        "requires user observation; metadata is not a recorder verdict",
+    }),
+  );
 }
 
 async function verifyControlProtocol(preview) {

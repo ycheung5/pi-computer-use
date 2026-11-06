@@ -41,7 +41,7 @@ Work on one bounded missing outcome at a time. Reuse accepted evidence across is
 
 | Order / owner | Next action | User involvement |
 | --- | --- | --- |
-| 1 — #6/#20 | 100%/150%/175% mapping and strict border/control checks passed. Original scaling restored and verified. Changed-arrangement mapping and strict border/control also passed. Right-of-primary restoration verified; user disposition of untested #6 configurations pending. Finish #20 recording/capture-scope reconciliation. | Choose #6 first-release test-limit disposition; #20 recording judgment remains. Both scales are restored to 100%; no custom scaling/sign-out. |
+| 1 — #6/#20 | Scaling and changed-arrangement mapping/strict border-control checks passed; both scales and right-side arrangement restored. #6 limit disposition pending. #20's unarmed two-phase recording preview is prepared and preflighted; [procedure and scope](validation.md#recording-visibility-preparation). | Confirm #6 limit disposition and name the existing recorder for #20, then inspect its two-phase recording locally. Both scales stay 100%; no custom scaling/sign-out or repeated stop-key test. |
 | Deferred — #2 | Validate clean installation once a resettable disposable guest exists. | User explicitly deferred the environment. Do not repeatedly ask or change host virtualization. |
 | Final — #21/#1 | Reconcile all Pi outcomes and accepted limitations, perform final required checks and prepare release. | Final supported-workflow acceptance after agent-owned work is ready. |
 

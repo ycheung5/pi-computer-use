@@ -13,6 +13,7 @@ test("indicator display plans work without a backend or Windows access", async (
     for (const { flag, mode } of [
       { flag: "--layout-only", mode: "layout" },
       { flag: "--lifecycle-only", mode: "lifecycle" },
+      { flag: "--recording-preview", mode: "recording" },
     ]) {
       const plan = JSON.parse(
         execFileSync(process.execPath, [script, flag, "--plan"], {
@@ -23,6 +24,11 @@ test("indicator display plans work without a backend or Windows access", async (
       assert.equal(plan.mode, mode);
       assert.equal(plan.physicalInput, false);
       assert.equal(plan.globalDisplayChanges, false);
+      if (mode === "recording") {
+        assert.equal(plan.exclusiveControl, false);
+        assert.deepEqual(plan.recordingPhases, [true, false]);
+        assert.equal(plan.capturesPixels, false);
+      }
     }
     assert.throws(() =>
       execFileSync(
