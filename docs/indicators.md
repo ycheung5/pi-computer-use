@@ -1,6 +1,6 @@
 # Control indicators
 
-The candidate ties the required border to [exclusive-control acquisition and release](spec.md#exclusive-control). Appearance is accepted; lifecycle, physical and display acceptance remains scoped under #20/#31.
+The candidate ties the required border to [exclusive-control acquisition and release](spec.md#exclusive-control). Appearance, lifecycle, human/control and display acceptance are complete within the recorded #20/#31 scope; release reconciliation remains #21.
 
 The independent Windows stop helper also draws Pi-branded screen edges, a status bar and a pointer tag. The screen border uses a per-pixel translucent blue falloff with a bright core, following the reference glow at 1.5 times its width: a 3-pixel core plus 27-pixel falloff at reference width scale 1, scaled by monitor width (clamped from 1 to 2). The separate Pi status bar and pointer tag retain their existing appearance. If frame preparation or presentation fails, that frame stays hidden and its error is reported until configuration or display layout causes a rebuild; the other indicators continue. It uses non-activating, disabled, layered windows; the pointer guard additionally skips the verified helper process if a Windows point-query API still returns an overlay. The tag follows the pointer, accounts for the current cursor bitmap size and stays inside its monitor's working area.
 
@@ -34,9 +34,9 @@ Current #20 scope reuses accepted control results; an unchecked item here is not
 - [x] Actual human editing/explicit continuation and physical stopping from [#31's accepted receipts](validation.md#control-interruption-acceptance). The new lifecycle check supplies presentation state across release/reacquisition; no new physical-key test is queued. Injected-key filtering retains its existing source/protocol scope, not a new dialog-keyboard workflow claim.
 - [x] Owned strict PrintWindow pixel exclusion, capture restoration and retained control at 100%, 150%/100%, 175%/100% and the changed negative-origin arrangement. [Pixel and layout receipts](validation.md#changed-monitor-arrangement) compose with accepted protocol suspension. This does not claim pixel coverage of every default screen-copy, WGC or OCR path.
 - [x] Actual available 100%/150%/175% scales, mixed-DPI window transitions and a changed display arrangement passed. Both scales are restored; the secondary returned to the right with a recorded vertical alignment difference. See [measured stages](validation.md#mixed-dpi-stages). #6's practical first-release scope is accepted; unavailable 200% and other unexercised display variants stay unverified; optional bars/tag are not universally certified by frame-only pixel samples.
-- [ ] Third-party remote/screen-sharing/recording behavior with visibility enabled/disabled. Windows affinity application is metadata evidence; it does not prove every recorder obeys it.
+- [x] Human-confirmed Windows Snipping Tool region recording: local border visible in both steady phases, included in the recording when enabled and omitted when disabled. [Receipt and composed scope](validation.md#snipping-tool-recording-acceptance). Other recorder/remote methods and unexercised per-route overlay pixels are not certified by this result.
 
-The current desktop has two 100%-scale monitors. Unmeasured display/capture configurations, remaining hit-test regions and third-party recording must not be inferred from the accepted strict-path pixels or preview/status assertions. The [execution queue](tickets.md#execution-queue) tracks the remaining #6/#20 closeout.
+The current desktop has two 100%-scale monitors. Unmeasured display/capture configurations, remaining hit-test regions and third-party recording must not be inferred from the accepted strict-path pixels or preview/status assertions. The [execution queue](tickets.md#execution-queue) records completed #6/#20 and the remaining release work.
 
 ## Browser cues
 

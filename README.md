@@ -1,6 +1,6 @@
 # Pi Windows Computer Use
 
-Native Pi tools for Windows desktop and browser automation from Windows or WSL2 Pi. **The integration is not release-accepted yet**: dedicated physical-input, visual and user acceptance checks remain pending. See [current progress](docs/tickets.md#current-progress) and [remaining work](docs/tickets.md#execution-queue).
+Native Pi tools for Windows desktop and browser automation from Windows or WSL2 Pi. **Not released yet:** clean-install acceptance is user-deferred, and final release checks/user acceptance remain. Scoped functional acceptance and known limits are recorded. See [current progress](docs/tickets.md#current-progress) and [remaining work](docs/tickets.md#execution-queue).
 
 ## Requirements
 
