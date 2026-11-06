@@ -22,7 +22,7 @@ The package is implemented; remaining work is targeted Pi acceptance and repair.
 | Owner | Accepted work | Remaining Pi outcome |
 | --- | --- | --- |
 | #2 — clean installation | Runtime/package provisioning and both current-machine Pi host paths passed; #3/#34 complete. | Clean disposable Windows/WSL installation and prerequisite failure diagnostics; user-deferred. |
-| #6 — screenshot mapping | Capture/fallback, scoped 100% two-monitor/negative-origin mapping and actual 150%/100% and 175%/100% mixed-DPI mapping passed; [stages](validation.md#mixed-dpi-stages). Optional window-only covered/blank pixels and hidden/minimized refusals also passed. | Topology/size-change mapping and original-setting restoration remain; 200% unavailable in this scoped session, not passed. Share display evidence with #20/#30. |
+| #6 — screenshot mapping | Capture/fallback, scoped 100% two-monitor/negative-origin mapping and actual 150%/100% and 175%/100% mixed-DPI mapping passed; [stages](validation.md#mixed-dpi-stages). Optional window-only covered/blank pixels and hidden/minimized refusals also passed. | Original scaling restored and passively verified. Topology/size-change mapping remains; 200% unavailable in this scoped session, not passed. Share display evidence with #20/#30. |
 | #7 — OCR failures | Literal/CJK text, bounds and partial-result semantics passed in named cases. | Completed: missing-resource/null-engine refusals, actual profile-language reporting and cancellation after dispatch with helper exit/fresh-operation recovery; [scoped receipt](validation.md#pi-ocr-failure-acceptance). Clean-machine compatibility stays #2; display mapping stays #6. |
 | #18 — remembered sign-in | Profile lifecycle evidence plus human-confirmed GitHub authentication across actual Pi restart and verified test-profile removal passed. | Completed; [scoped receipt](validation.md#manual-github-remembered-sign-in). |
 | #20 — visible control | Appearance, basic acquire/release/settings/click-through and automated lifecycle accepted. Owned strict PrintWindow border exclusion/control passed at 100%/100%, 150%/100% and 175%/100%; [stages](validation.md#mixed-dpi-stages). | Topology and recording remain; 200% unavailable here, not passed; strict-path pixel evidence does not certify every capture/OCR path. |
@@ -41,7 +41,7 @@ Work on one bounded missing outcome at a time. Reuse accepted evidence across is
 
 | Order / owner | Next action | User involvement |
 | --- | --- | --- |
-| 1 — #6/#20 | 100%/150%/175% mapping and strict border/control checks passed. Confirm original scaling restored, then reconcile topology/recording/unavailable-200% gaps. | User restores the secondary from 175% to 100% after testing; no custom scaling/sign-out. Actual topology/recording judgment where required. |
+| 1 — #6/#20 | 100%/150%/175% mapping and strict border/control checks passed. Original scaling restored and verified. Finish or disposition topology/recording/unavailable-200% gaps. | Actual temporary topology setup and recording judgment where required; no custom scaling/sign-out. Original scaling is restored. |
 | Deferred — #2 | Validate clean installation once a resettable disposable guest exists. | User explicitly deferred the environment. Do not repeatedly ask or change host virtualization. |
 | Final — #21/#1 | Reconcile all Pi outcomes and accepted limitations, perform final required checks and prepare release. | Final supported-workflow acceptance after agent-owned work is ready. |
 
