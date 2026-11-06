@@ -4,6 +4,14 @@
   "description": "Native Pi tools for Windows computer use from Windows and WSL2",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ycheung5/pi-computer-use.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ycheung5/pi-computer-use/issues"
+  },
+  "homepage": "https://github.com/ycheung5/pi-computer-use#readme",
   "keywords": [
     "pi-package",
     "computer-use",

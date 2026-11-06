@@ -13,7 +13,7 @@ Requirements live in [spec](spec.md), delivery/coverage in [implementation-plan]
 | Superseded issues | 10: #4, #5, #9, #10, #11, #12, #13, #15, #23, #37. Superseded is not a completed product delivery. |
 | Open issues | 3: clean-install #2 (user-deferred), release #21 and product parent #1. |
 | Accepted Pi outcomes | Windows/WSL2 packaged launch, ownership, waits, settings/tool selection, Chromium and experimental Firefox workflows; six browser/mixed agent scenarios each passed three reset runs. Native creation/preservation, replacement/partial recovery and composed continuation (#35), #31 control interruption/cleanup and human-confirmed GitHub sign-in persistence/removal also passed. |
-| Latest recorded checks | 187 passed, one skipped; build and current-scale owned display/border checks passed. Existing package/docs and model-free native document/recovery/handback evidence remains scoped to its receipts. #26 chord/editor-focus and #30 app/workspace outcomes are accepted; earlier failures remain recorded. |
+| Latest recorded checks | Final release-audit checks: 187 passed, one historical-reference skip; 91-entry 0.1.0 archive, MIT/notices/version/development-file exclusion and documentation links passed. [Audit](validation.md#final-release-audit). Existing Windows/model/physical receipts retain their source scope; no release declared. |
 
 The package is implemented; remaining work is targeted Pi acceptance and repair. An open issue does not reopen its accepted cases. No overall completion percentage is asserted, and no release is declared. The earlier development baseline and historical comparison receipts remain available through commits/archive tags.
 
@@ -41,7 +41,7 @@ Work on one bounded missing outcome at a time. Reuse accepted evidence across is
 
 | Order / owner | Next action | User involvement |
 | --- | --- | --- |
-| 1 — #21 under #1 | #6/#20 are complete. Perform final agent-owned release reconciliation: coverage/limits, retained failure dispositions, packaging/docs/version/licensing and useful responsiveness evidence. Preserve #2 deferral; release is not yet approved. | Final supported-workflow/limit acceptance after the audit; no more display-scaling or stop-key tests are queued for closed issues. |
+| 1 — #21 under #1 | Agent-owned [release audit](validation.md#final-release-audit) is complete: package/license repair, coherent version/install docs, capability/failure/limit reconciliation and final checks/reviews. #2 remains the deferred clean-install gate; final interactive workflow/limit acceptance and publication follow. | Final supported-workflow/limit acceptance after #2 is resolved; no more display-scaling/stop-key tests for closed issues, and no repeated guest request. |
 | Deferred — #2 | Validate clean installation once a resettable disposable guest exists. | User explicitly deferred the environment. Do not repeatedly ask or change host virtualization. |
 
 Standing scoped idle-test authorization remains. Preserve unrelated applications, documents, clipboard and profiles, serialize desktop activity and request human participation only for genuine physical/private/visual steps. Unknown input cleanup retains actual owners and blocks dependent activity. No DSH/OpenRouter credentials, DSH installation or side-by-side tests are needed.

@@ -30,6 +30,35 @@ try {
   );
   await run("tar", ["-xf", join(folder, filename), "-C", folder]);
   const packageRoot = join(folder, "package");
+  assert.ok(
+    paths.has("LICENSE"),
+    "The published package must include its declared project license",
+  );
+  assert.ok(
+    paths.has("assets/puppeteer-LICENSE.txt"),
+    "The Puppeteer notice must remain packaged",
+  );
+  const manifest = JSON.parse(
+    await readFile(join(packageRoot, "package.json"), "utf8"),
+  );
+  const source = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+  const lock = JSON.parse(
+    await readFile(join(root, "package-lock.json"), "utf8"),
+  );
+  assert.equal(manifest.version, source.version);
+  assert.equal(manifest.version, lock.packages[""].version);
+  assert.equal(manifest.license, "MIT");
+  assert.match(
+    await readFile(join(packageRoot, "LICENSE"), "utf8"),
+    /Permission is hereby granted, free of charge/,
+  );
+  assert.equal(
+    [...paths].some((path) =>
+      /^(src|tests|node_modules|\.git)\/|(^|\/)\.env(?:\.|$)/.test(path),
+    ),
+    false,
+    "Source, development dependencies and local environment files must not ship",
+  );
   const failures = [];
   const walk = async (directory) => {
     for (const item of await readdir(directory, { withFileTypes: true })) {
@@ -81,6 +110,9 @@ try {
       ok: true,
       artifact: filename,
       entries: paths.size,
+      version: manifest.version,
+      projectLicense: manifest.license,
+      developmentFilesExcluded: true,
       documentationLinks: "passed",
     }),
   );

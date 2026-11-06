@@ -7,7 +7,7 @@ Native Pi tools for Windows desktop and browser automation from Windows or WSL2 
 - Default Pi; tested SDK/CLI **1.4.0**. No DSH or other Pi extension is needed.
 - Windows 11 with an interactive desktop; WSL2 Ubuntu is the tested Linux host. WSL requires Windows executable interop, `cmd.exe` and `wslpath`.
 - Windows PowerShell 5.1 and the built-in .NET Framework compiler/desktop assemblies for native helpers. No .NET SDK or separately installed Windows Node is required.
-- Installed Chrome/Edge for browser tasks, or an explicitly selected installed Firefox-family browser (experimental). Ordinary requests use [Windows default-app and existing-window guidance](docs/windows.md#default-apps-and-workspaces); owned app and native Chrome reuse checks passed, with broader acceptance still under #30. The browser protocol channel uses dedicated automation profiles only when that workspace is explicitly selected.
+- Installed Chrome/Edge for browser tasks, or an explicitly selected installed Firefox-family browser (experimental). Ordinary requests use [Windows default-app and existing-window guidance](docs/windows.md#default-apps-and-workspaces); #30's scoped default-app/workspace/foreground acceptance is complete. The browser protocol channel uses dedicated automation profiles only when that workspace is explicitly selected.
 - Available Windows OCR language support for OCR. A vision-capable Pi model is needed to interpret screenshots; no model or credentials are bundled.
 
 Only Windows x64 has live evidence here; runtime digests exist for arm64 but that architecture remains unverified.
@@ -26,6 +26,20 @@ To retain the built checkout as a local Pi package, run `pi install .` from that
 
 Ask Pi to call `windows_computer_use_health` to check its worker. The first computer-use call downloads a pinned, checksum-verified private Windows Node runtime from nodejs.org into `%LOCALAPPDATA%\pi-computer-use\runtime`. Later calls reuse the worker. Initial provisioning requires HTTPS access to nodejs.org; no global Node installation is changed.
 
+## Install a built archive
+
+For a prebuilt `pi-computer-use-0.1.0.tgz` produced by `npm pack`, extract it and install only runtime dependencies, then register the extracted directory with Pi:
+
+```sh
+mkdir pi-computer-use
+tar -xzf pi-computer-use-0.1.0.tgz -C pi-computer-use --strip-components=1
+cd pi-computer-use
+npm install --omit=dev --omit=peer --ignore-scripts
+pi install .
+```
+
+Pi supplies its SDK and TypeBox peers. The archive already contains compiled code; no TypeScript compiler is needed for this path. Keep the extracted directory while Pi references it. This is the prepared distribution procedure; clean-Windows acceptance remains deferred under #2. A registry package or GitHub release has not been published.
+
 Personal settings apply across projects and hosts. Use `/computer-settings show`, `/computer-settings edit`, or `/computer-settings set {"toolPreset":"lazy"}`. Use `/computer-stop` to stop an active operation; physical Esc is armed when physical input is used. See [settings](docs/settings.md), [stopping](docs/stopping.md) and [indicators](docs/indicators.md).
 
 ## Verify
@@ -43,7 +57,11 @@ Run `npm run test:native:lifetime` on Windows after building for scoped owned-wi
 
 Individual commands: `npm test`, `npm run typecheck`, `npm run lint`, `npm run format`, and `npm run lint:fix`. CI runs portable checks and package/documentation validation; it does not imply live Windows or manual acceptance.
 
-For real Pi host, reference-schema and same-machine benchmark checks, use [release validation](docs/validation.md). Serialize live WSL tests with `flock -w 120 /tmp/pi-cu-live-tests.lock`; use dedicated disposable fixture windows and profiles. Physical runners require their documented opt-in on a dedicated interactive desktop. The legacy `native-text-physical.mjs` runner now refuses execution: its old fixture overwrote the original clipboard and could retire an unsettled input owner. Use the preservation-aware OLE runner for supported clipboard checks; cancellation acceptance remains open.
+For real Pi host and scoped live checks, use [release validation](docs/validation.md). Historical reference-schema/benchmark utilities are optional developer tools, not release prerequisites. Serialize live WSL tests with `flock -w 120 /tmp/pi-cu-live-tests.lock`; use dedicated disposable fixture windows and profiles. Physical runners require their documented opt-in and owned-target prerequisites. The legacy `native-text-physical.mjs` runner refuses execution because its fixture did not preserve clipboard/ownership correctly; use the preservation-aware OLE runner for supported clipboard checks. Scoped cancellation/control acceptance is complete; reuse its recorded evidence.
+
+## License
+
+Project code is [MIT licensed](LICENSE). Bundled runtime/dependency notices remain in [Node's license](assets/node-LICENSE.txt) and [Puppeteer's Apache-2.0 license](assets/puppeteer-LICENSE.txt); installed dependencies retain their own licenses. The [release audit](docs/validation.md#final-release-audit) records the tested versions and remaining release gates.
 
 ## Troubleshooting
 

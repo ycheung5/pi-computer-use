@@ -2,6 +2,27 @@
 
 Release status: **not accepted**. Automated and passive fixture results are evidence for their stated paths, not proof that all applications, physical input, displays or user acceptance work. The [spec](spec.md) defines requirements; this page maps them to runnable checks and pending evidence.
 
+## Final release audit
+
+Audit date: 2026-11-06. Baseline `89bdea3`; this audit reuses the closed capability owners and does not repeat desktop, physical-stop or paid-model scenarios. No release/tag/registry publication is performed.
+
+| Area | Result and practical limit |
+| --- | --- |
+| Functional coverage | All 25 implemented tools map below to named checks and accepted owner receipts. #6/#20 display/recording, #26/#27 text/clipboard, #28 targeting, #30 workspace/pointer, #31 control and #35/#36 agent outcomes are complete within their stated scope. |
+| Current portable checks | `npm run check` passed 187 tests, one skipped at the audit baseline (`/tmp/pi-release-audit-check.log`). The skip is the opt-in historical DSH-provider discovery test because its two reference environment variables are absent; it is not a missing Pi release case. This is not clean-OS acceptance. |
+| Remote CI | Main baseline `89bdea3` passed [GitHub Checks run 42195532251](https://github.com/ycheung5/pi-computer-use/actions/runs/42195532251). The connector's commit-run query is PR-scoped and this environment has no `gh`; a bounded unauthenticated read of public Actions metadata supplied the actual status. This baseline result is not a claim about a later audit commit. |
+| Distribution | Existing `test:package` builds/packs/extracts the distribution and checks local documentation links. The audit strengthens it to require the declared project license/Puppeteer notice, coherent source/lock/packed versions and exclusion of development/environment files. Final artifact check passed: 91 entries, version 0.1.0, MIT license and documentation links verified (`/tmp/pi-release-package-final.log`). |
+| Version and compatibility | Candidate remains 0.1.0, matching the lockfile; no tag/publication. Tested Pi SDK/CLI 1.4.0 and TypeBox 1.3.27. Declared host Node >=22.19.0; private Windows runtime 22.23.4. Other SDK/arm64 configurations are not certified. |
+| Dependencies and notices | Production dependency is pinned Puppeteer Core 25.16.0. The lock records 25 runtime dependency paths with MIT, Apache-2.0, ISC or BSD-3-Clause identifiers; no missing license identifiers or install scripts appeared in that runtime subset. Host-provided peers/dev dependencies are separate. Node and Puppeteer notices remain packaged. Installed dependencies retain their own license/notice files; this inventory records declared identifiers. |
+| Repaired packaging gap | The manifest declared MIT but the root LICENSE was absent. The actual tarball regression first failed (`/tmp/pi-release-license-red.log`); an intermediate link check also rejected the README audit anchor before this section existed (`/tmp/pi-release-license-green.log`). The final check passed after both fixes. This audit adds the standard MIT license and repository/support metadata. No runtime code or license-policy change. |
+| Installation instructions | Built checkout instructions retained. Prebuilt archive extraction + runtime-only dependency install + `pi install .` is documented. Installed Pi 1.4.0 source treats local files as extension resources and local directories as packages; a raw .tgz must be extracted first. Git clones run dependency installation but this package has no prepare build, so raw unbuilt GitHub-source installation remains unsupported. These are source-checked instructions, not a fresh clean-machine pass. |
+| Known limits/failure disposition | Preserve hook-removal limits, explicit Windows activation refusals, retained text pacing, experimental installed Firefox, accepted unverified #28 cases, #6 available-scale scope and #20 recorder/capture-route scope. Earlier failures stay with their repair/collector/environment dispositions; closed owners are not reopened by old wording. |
+| Remaining release gates | #2 disposable clean Windows/WSL install remains user-deferred, including prerequisites/update/removal diagnostics. #21 also retains final supported-workflow/limit acceptance, including interactive settings editor/reload judgment, and publication/version/licensing reconciliation. Existing-machine checks do not waive #2. |
+
+The README's stale #30/cancellation-pending statements and this page's current capability table are reconciled during the audit. Historical dated receipts remain historical. Final packaging/review receipts are recorded here. Responsiveness review reuses prior scoped evidence: warm native reads had roughly 74 ms medians at the dated lifetime-checkpoint candidate, not a current whole-agent benchmark. Explicit SendInput retains the documented 50 ms per-unit gap plus scheduling overhead; no minimum-delay or universal-latency claim is made. No new observed performance defect justifies a fresh benchmark/model programme in this audit. Clean-install provisioning responsiveness remains with #2.
+
+Final local verification passed after the fixes: 187 tests with one historical-reference skip (`/tmp/pi-release-audit-final-check.log`), and a built 91-entry 0.1.0 archive with MIT/license notices, version coherence, development/environment-file exclusion and documentation links verified (`/tmp/pi-release-audit-final-package.log`). Both standards/spec reviews reported no unresolved findings. Root license text follows the already-declared MIT license; runtime code and dependency versions are unchanged. No Windows desktop, physical input, clipboard, personal profile, model call, tag or package publication was used for this audit. The agent-owned audit checkpoint is complete; #2 and final #21 user acceptance/publication remain open.
+
 Current scope, 2026-11-02: [ADR 0004](adr/0004-pi-first-acceptance.md) makes Pi functionality the release criterion. DSH manual/host/model runs, credentials and parity benchmarks are removed. Dated DSH/paired reports and earlier “remaining comparison” statements below are historical evidence, not current instructions or blockers; the [Pi-first queue](tickets.md#execution-queue) owns unfinished work. Reference-backed scripts are optional historical developer utilities, not required checks. Do not run manual DSH comparisons unless the user explicitly restores that scope.
 
 The next validation cycle follows the [current implementation phases](implementation-plan.md#detailed-milestones). The [alignment scenario catalog](#alignment-scenario-catalog) below is planned coverage, not additional passing evidence.
@@ -214,35 +235,35 @@ Existing covered/stale/wrong-owner guard evidence remains accepted. Reuse #31 hu
 
 ## Capability coverage
 
-All tool rows share schema comparison above and portable public tool/worker tests. Live runners use disposable windows/profiles and must finish cleanup before another starts. Paths below are commands or fixture names, not claims that a manual case passed.
+All tool rows share portable public tool/worker validation. Current Pi owner receipts below supersede older pending-case wording; historical reference comparisons are not release gates. Live runners use disposable windows/profiles and must finish cleanup before another starts. Paths below are commands or fixture names, not claims that a manual case passed.
 
 | Tool | Portable tests | Live evidence / additional acceptance |
 | --- | --- | --- |
-| health | worker, extension, runtime | `test:native`, `test:wsl`, `test:pi`; cold download/clean-OS acceptance separate |
-| list_windows | windows, ownership | `test:native:windows`, `test:wsl`, `test:pi`; HWND/PID, ambiguity, stale windows |
-| snapshot | accessibility, capture | `test:native:accessibility`, `test:native:capture`; mixed DPI pending |
-| accessibility_tree | accessibility, browser | `test:native:accessibility`, `test:native:chromium`, `test:browser`; truncated/hung providers |
-| find | accessibility, ocr, browser | `test:native:accessibility`, `test:native:ocr`, `test:browser`; sparse OCR fallback and stale identity |
-| element_info | accessibility, browser | `test:native:accessibility`, `test:browser`; IDs/coordinates, owner and password protection |
-| screenshot | capture, browser | `test:native:capture`, `test:browser`; WGC/blank/minimized/occlusion; display changes pending |
-| ocr | ocr | `test:native:ocr`; literal/CJK query and bounds; [failure/cancellation acceptance](#pi-ocr-failure-acceptance); clean-machine availability #2 and display mapping #6 remain separate |
-| click | pointer, browser-actions | `test:native:pointer:guards`, `test:browser:actions`; physical runner/manual checklist pending |
-| double_click | pointer, browser-actions | Same pointer/browser runners; physical effect pending |
-| move | pointer, browser-actions | Same pointer/browser runners; physical hover/restoration pending |
-| drag | pointer | Dedicated physical runner only for real effects; bounds/identity/refusal tests are not drag acceptance |
-| scroll | controls, pointer, browser-actions | `test:native:controls`, `test:browser:actions`; physical fallback pending |
-| type_text | text, browser-actions | `test:native:text`, `test:native:notepad:unicode`, `test:native:clipboard:ole`, `test:browser:actions`; broader clipboard/physical runner pending |
-| keypress | text, browser-actions | `test:native:text`, `test:browser:actions`; real chords, release and Esc interaction pending |
-| focus | controls, browser-actions | `test:native:controls`, `test:browser:actions`; diverse UIA provider behavior pending |
-| invoke | controls, pointer, browser-actions | Same controls/browser/guard runners; expand/collapse and physical fallback acceptance pending |
-| set_value | controls, text, browser-actions | Background fixture controls and browser actions; explicit fallback/input acceptance pending |
-| launch_app | window-management | `test:native:management`; Shell lifetime, restricted interpreter args, target handling |
-| activate_window | window-management, browser-actions | `test:native:management`; OS foreground refusal is explicit, not guaranteed activation |
-| move_window | window-management | `test:native:management`; actual multi-monitor layouts pending |
-| close_window | window-management, browser-actions | `test:native:management`, `test:browser:actions`; veto/dialog/new target identity |
-| wait | waits, worker | `test:native:waits`; bounded delay and abort |
-| wait_for | waits, browser-actions | `test:native:waits`, `test:browser:actions`; observed vs incomplete/timeout outcomes |
-| tools | settings, extension | `test:settings`, real Pi host; full/lite/lazy/custom and execution-time denial |
+| health | worker, extension, runtime | Packaged native/WSL2 launch and real-Pi health/list accepted under #34; cold clean-machine provisioning remains #2. |
+| list_windows | windows, ownership | Native enumeration, ambiguity, stale/wrong-owner/lifetime refusal accepted in [#28 reconciliation](#pi-targeting-and-accessibility-reconciliation). |
+| snapshot | accessibility, capture | Scoped native/Chromium tree and attached-image/error behavior accepted; [targeting](#pi-targeting-and-accessibility-reconciliation) and [capture scope](#screenshot-mapping-closeout). Per-route display pixels are not universally certified. |
+| accessibility_tree | accessibility, browser | Scoped provider, budget/truncation and Chromium observations accepted in [#28 reconciliation](#pi-targeting-and-accessibility-reconciliation). |
+| find | accessibility, ocr, browser | Scoped native/browser lookup, sparse OCR fallback and stale identity accepted; [targeting](#pi-targeting-and-accessibility-reconciliation), [OCR failures](#pi-ocr-failure-acceptance). |
+| element_info | accessibility, browser | Scoped element identity/inspection/owner/privacy checks accepted in [#28 reconciliation](#pi-targeting-and-accessibility-reconciliation). |
+| screenshot | capture, browser | Native/covered/blank/WGC/refusal and actual available DPI/negative-origin mapping accepted in [#6 closeout](#screenshot-mapping-closeout); [#20 composed scope](#snipping-tool-recording-acceptance). |
+| ocr | ocr | Literal/CJK recognition and mapped results plus [resource/language/cancellation acceptance](#pi-ocr-failure-acceptance); clean-machine resources remain #2, unexercised display variants stay unverified. |
+| click | pointer, browser-actions | Owned click effects/guards and [pointer/restoration acceptance](#scoped-pointer-and-restoration-acceptance); [#31 cleanup](#control-interruption-acceptance). |
+| double_click | pointer, browser-actions | Owned native/browser double-click effects and guards accepted in [pointer scope](#scoped-pointer-and-restoration-acceptance). |
+| move | pointer, browser-actions | Owned hover/coordinate and exact cursor restoration accepted in [pointer scope](#scoped-pointer-and-restoration-acceptance); no universal target guarantee. |
+| drag | pointer | Actual owned cross-process drop and [pointer/restoration receipt](#scoped-pointer-and-restoration-acceptance), composed with [held-input cancellation/cleanup](#control-interruption-acceptance). |
+| scroll | controls, pointer, browser-actions | Scoped native-control/browser and physical panel scrolling accepted under #28/#30; [reconciliation](#pi-targeting-and-accessibility-reconciliation). |
+| type_text | text, browser-actions | Exact Unicode/native editor cases and [#26 focus/chords](#pi-chords-and-editor-focus-acceptance), [#27 clipboard](#pi-clipboard-contention-and-privacy-acceptance), [#31 interruption](#control-interruption-acceptance); retain documented pacing. |
+| keypress | text, browser-actions | Actual supported RichEdit chord effects, destination focus and release accepted in [#26](#pi-chords-and-editor-focus-acceptance); stop/agent-Esc scope retained under #31. |
+| focus | controls, browser-actions | Scoped UIA/browser focus and main/preserve editor destinations accepted under [#26](#pi-chords-and-editor-focus-acceptance) and [#28](#pi-targeting-and-accessibility-reconciliation); diverse providers not universally certified. |
+| invoke | controls, pointer, browser-actions | Scoped supported control patterns and native/browser outcomes accepted in [#28](#pi-targeting-and-accessibility-reconciliation) and [native workflows](#native-document-workflow). |
+| set_value | controls, text, browser-actions | Scoped native/browser mutation, protected/read-only refusals and [native creation/recovery](#native-document-workflow) accepted; physical escalation retains #26/#27/#31 scope. |
+| launch_app | window-management | Windows default handler, reuse/ambiguity/unsafe-workspace outcomes accepted in [#30 workspace decisions](#workspace-decision-acceptance). |
+| activate_window | window-management, browser-actions | Supported activation and explicit OS refusal behavior accepted in [#30 pointer/foreground scope](#scoped-pointer-and-restoration-acceptance); activation is not guaranteed. |
+| move_window | window-management | Scoped public management moves/identity checks accepted under #30; available screenshot layouts accepted under #6. Unexercised resolution/primary variants are not passes. |
+| close_window | window-management, browser-actions | Scoped management/browser close, veto/dialog and identity handling accepted under #28/#30; no arbitrary-app closure guarantee. |
+| wait | waits, worker | Bounded public waits, abort, settlement and cleanup accepted; [control interruption](#control-interruption-acceptance). |
+| wait_for | waits, browser-actions | Scoped actual positive/timeout/incomplete observation semantics accepted in [#28](#pi-targeting-and-accessibility-reconciliation), browser tasks and owned workflow receipts. |
+| tools | settings, extension | Settings/preset persistence, execution-time denial, lazy selection and real-Pi host receipts accepted; interactive settings-editor/reload judgment remains part of final #21 user acceptance. |
 
 Portable file names above refer to the corresponding `.test.ts` suites. Tests assert public behavior, not private code structure. The schema inventory supplements rather than replaces action-specific success/failure tests.
 
