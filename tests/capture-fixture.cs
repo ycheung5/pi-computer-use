@@ -11,6 +11,27 @@ class CaptureForm : Form {
 
 class CaptureFixture {
   [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
+  [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr window);
+  [DllImport("user32.dll")] static extern IntPtr GetWindowDpiAwarenessContext(IntPtr window);
+  [DllImport("user32.dll")] static extern int GetAwarenessFromDpiAwarenessContext(IntPtr context);
+  [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window,out uint pid);
+  static string MarkerPoints(CaptureForm form) {
+    if(!Object.Equals(form.Tag,"display"))return "[]";
+    var points=new List<string>();int[,] xy={{70,70},{210,115}};int[,] colors={{230,30,40},{30,60,230}};
+    for(int i=0;i<2;i++){Point p=new Point{X=xy[i,0],Y=xy[i,1]};if(!ClientToScreen(form.Handle,ref p))throw new InvalidOperationException("Marker position unavailable");points.Add("{\"x\":"+p.X+",\"y\":"+p.Y+",\"rgb\":["+colors[i,0]+","+colors[i,1]+","+colors[i,2]+"]}");}
+    return "["+String.Join(",",points.ToArray())+"]";
+  }
+  static string ScreenSamples(CaptureForm form,uint helper) {
+    if(GetForegroundWindow()!=form.Handle)throw new InvalidOperationException("OWNED_CAPTURE_NOT_FOREGROUND");
+    var rows=new List<string>();foreach(int offset in new int[]{16,20,24}){
+      Point p=new Point{X=offset,Y=offset};if(!ClientToScreen(form.Handle,ref p))throw new InvalidOperationException("Owned point unavailable");uint pid;GetWindowThreadProcessId(WindowFromPoint(p),out pid);
+      if(pid!=(uint)System.Diagnostics.Process.GetCurrentProcess().Id && pid!=helper)throw new InvalidOperationException("OWNED_POINT_OCCLUDED");
+      using(var image=new Bitmap(1,1)){using(var g=Graphics.FromImage(image))g.CopyFromScreen(p.X,p.Y,0,0,new Size(1,1));Color c=image.GetPixel(0,0);rows.Add("{\"x\":"+p.X+",\"y\":"+p.Y+",\"rgb\":["+c.R+","+c.G+","+c.B+"]}");}
+    }return "["+String.Join(",",rows.ToArray())+"]";
+  }
+
   [StructLayout(LayoutKind.Sequential)] struct Rect {public int Left,Top,Right,Bottom;}
   [StructLayout(LayoutKind.Sequential)] struct Point {public int X,Y;}
   [StructLayout(LayoutKind.Sequential)] struct Info {public int Size;public Rect Bounds,Work;public uint Flags;}
@@ -37,7 +58,7 @@ class CaptureFixture {
       int frameResult=DwmGetWindowAttribute(form.Handle,9,out frame,Marshal.SizeOf(typeof(Rect)));
       string frameJson=frameResult==0 && frame.Right>frame.Left && frame.Bottom>frame.Top?Box(frame):"null";
       client.Right+=origin.X;client.Bottom+=origin.Y;client.Left=origin.X;client.Top=origin.Y;
-      return "{\"frame\":"+frameJson+",\"frameHresult\":"+frameResult+",\"nativeWindowHandle\":"+form.Handle.ToInt64()+",\"processId\":"+System.Diagnostics.Process.GetCurrentProcess().Id+",\"window\":"+Box(window)+",\"client\":"+Box(client)+",\"minimized\":"+(form.WindowState==FormWindowState.Minimized?"true":"false")+",\"foregroundHandle\":"+GetForegroundWindow().ToInt64()+",\"lastInputTick\":"+input.Tick+"}";
+      return "{\"windowDpi\":"+GetDpiForWindow(form.Handle)+",\"awareness\":"+GetAwarenessFromDpiAwarenessContext(GetWindowDpiAwarenessContext(form.Handle))+",\"points\":"+MarkerPoints(form)+",\"frame\":"+frameJson+",\"frameHresult\":"+frameResult+",\"nativeWindowHandle\":"+form.Handle.ToInt64()+",\"processId\":"+System.Diagnostics.Process.GetCurrentProcess().Id+",\"window\":"+Box(window)+",\"client\":"+Box(client)+",\"minimized\":"+(form.WindowState==FormWindowState.Minimized?"true":"false")+",\"foregroundHandle\":"+GetForegroundWindow().ToInt64()+",\"lastInputTick\":"+input.Tick+"}";
     } finally {SetThreadDpiAwarenessContext(previous);}
   }
   static string Layout() {
@@ -56,9 +77,12 @@ class CaptureFixture {
 
   [STAThread]
   static void Main(string[] args) {
-    SetProcessDPIAware();
+    bool display=Array.IndexOf(args,"--display")>=0;
+    if(display){if(!SetProcessDpiAwarenessContext(new IntPtr(-4)))throw new InvalidOperationException("PMV2_UNAVAILABLE");}else SetProcessDPIAware();
+    if(display)Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
     Console.OutputEncoding = new System.Text.UTF8Encoding(false);
     CaptureForm target = new CaptureForm { Text = args[0], BackColor = Color.FromArgb(20,150,80), StartPosition = FormStartPosition.Manual, Left = 30, Top = 40, Width = 320, Height = 200 };
+    if(display){target.Tag="display";target.Paint+=delegate(object sender,PaintEventArgs e){e.Graphics.ResetTransform();e.Graphics.PageUnit=GraphicsUnit.Pixel;using(var red=new SolidBrush(Color.FromArgb(230,30,40)))e.Graphics.FillRectangle(red,40,50,60,40);using(var blue=new SolidBrush(Color.FromArgb(30,60,230)))e.Graphics.FillRectangle(blue,180,95,60,40);};}
     if (args.Length > 1 && args[1] == "black") { target.FormBorderStyle = FormBorderStyle.None; target.BackColor = Color.Black; }
     CaptureForm cover = new CaptureForm { Text = args[0] + " cover", BackColor = Color.Magenta, StartPosition = FormStartPosition.Manual, Left = 30, Top = 40, Width = 320, Height = 200 };
     target.Shown += delegate { Console.WriteLine(target.Handle.ToInt64()); Console.Out.Flush(); };
@@ -69,6 +93,12 @@ class CaptureFixture {
         target.BeginInvoke((Action)delegate {
           if (captured == "oracle") { Console.WriteLine(Oracle(target));Console.Out.Flush();return; }
           if (captured == "layout") { Console.WriteLine(Layout());Console.Out.Flush();return; }
+          if(captured.StartsWith("sample-screen:",StringComparison.Ordinal)){Console.WriteLine(ScreenSamples(target,UInt32.Parse(captured.Substring(14))));Console.Out.Flush();return;}
+          if(captured.StartsWith("owned-region:",StringComparison.Ordinal)) {
+            string[] p=captured.Split(':');target.FormBorderStyle=FormBorderStyle.None;
+            if(!SetWindowPos(target.Handle,IntPtr.Zero,Int32.Parse(p[1]),Int32.Parse(p[2]),640,480,0x14))throw new InvalidOperationException("Owned region placement failed");
+            target.Refresh();Console.WriteLine(Oracle(target));Console.Out.Flush();return;
+          }
           if (captured.StartsWith("place:",StringComparison.Ordinal)) {
             string[] parts=captured.Split(':');IntPtr previous=SetThreadDpiAwarenessContext(new IntPtr(-4));
             try {if(previous==IntPtr.Zero || !SetWindowPos(target.Handle,IntPtr.Zero,Int32.Parse(parts[1]),Int32.Parse(parts[2]),0,0,0x15))throw new InvalidOperationException("Owned placement failed");}
@@ -86,7 +116,7 @@ class CaptureFixture {
         if (captured == "stop") break;
       }
     });
-    System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 60000 };
+    System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = display?180000:60000 };
     timer.Tick += delegate { cover.Dispose(); target.Close(); };
     timer.Start(); Application.Run(target);
   }

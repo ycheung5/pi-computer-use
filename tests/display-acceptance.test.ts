@@ -35,3 +35,45 @@ test("indicator display plans work without a backend or Windows access", async (
     await rm(folder, { recursive: true, force: true });
   }
 });
+
+test("display capture plan has no backend dependency or display-setting effects", async () => {
+  const folder = await mkdtemp(join(tmpdir(), "pi-capture-plan-"));
+  try {
+    for (const file of ["native-capture.mjs", "native-host.mjs"])
+      await cp(resolve("tests", file), join(folder, file));
+    const plan = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [join(folder, "native-capture.mjs"), "--display", "--plan"],
+        { encoding: "utf8" },
+      ),
+    );
+    assert.equal(plan.executed, false);
+    assert.equal(plan.physicalInput, false);
+    assert.equal(plan.globalDisplayChanges, false);
+    assert.equal(plan.ownedWindowOnly, true);
+    const control = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [join(folder, "native-capture.mjs"), "--control-capture", "--plan"],
+        { encoding: "utf8" },
+      ),
+    );
+    assert.equal(control.ownedWindowOnly, true);
+    assert.equal(control.mode, "control-capture");
+    assert.throws(() =>
+      execFileSync(
+        process.execPath,
+        [
+          join(folder, "native-capture.mjs"),
+          "--display",
+          "--control-capture",
+          "--plan",
+        ],
+        { stdio: "pipe" },
+      ),
+    );
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});

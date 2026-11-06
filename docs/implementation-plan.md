@@ -48,6 +48,8 @@ Record measurements and outcomes. If a gate fails, bring the concrete trade-off 
 
 For #6/#20, exercise the opt-in [window-only screenshot contract](spec.md#implementation-decisions) through the existing registered screenshot tool: covered painted pixels, blank-render WGC handoff, hidden/minimized refusal, invalid combinations and unchanged default behavior. Keep strict capture inside the capture module; bypass screen-copy entirely rather than detect unrelated pixels after acquisition. Then use this mode for owned display/presentation fixtures. Actual DPI changes and recording acceptance remain separate checks.
 
+The existing capture runner supplies backend-free plans and two bounded live modes: `--display` measures per-monitor PMV2 window DPI, independent DWM geometry and painted-point mapping at native/reduced PNG sizes; `--control-capture` samples owned edge pixels before/after strict capture and checks control identity, per-call suspension and settlement release. Run current settings first. In one grouped human session, change only the 1920×1080 monitor from its original 100% to 150%, then 200%, keeping the 2560×1080 monitor at 100%; run both modes at each stage and restore the original settings. Actual display topology/primary changes and third-party recording remain separate until exercised or explicitly dispositioned. No command changes global display settings.
+
 Every supported tool gets argument validation, success, failure, cancellation where applicable, and unsupported-target coverage. A matrix entry maps to named tests or an explicit manual procedure; mocked protocol success alone cannot establish real desktop support.
 
 | Area | Required coverage |
