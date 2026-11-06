@@ -9,9 +9,9 @@ Requirements live in [spec](spec.md), delivery/coverage in [implementation-plan]
 | Measure | Status after scope reconciliation |
 | --- | --- |
 | Tool implementation | All 25 target tools have implementations. Release acceptance concerns Pi correctness, preservation and usability. |
-| Completed issues | 21: #3, #7, #8, #14, #16, #17, #18, #19, #24, #25, #26, #27, #28, #29, #30, #31, #32, #33, #34, #35, #36. Historical comparison completions retain their original evidence scope. |
+| Completed issues | 22: #3, #6, #7, #8, #14, #16, #17, #18, #19, #24, #25, #26, #27, #28, #29, #30, #31, #32, #33, #34, #35, #36. Historical comparison completions retain their original evidence scope. |
 | Superseded issues | 10: #4, #5, #9, #10, #11, #12, #13, #15, #23, #37. Superseded is not a completed product delivery. |
-| Open issues | 5: product #1, release #21 and 3 bounded Pi deliverables below. |
+| Open issues | 4: product #1, release #21 and 2 bounded Pi deliverables (#2/#20). |
 | Accepted Pi outcomes | Windows/WSL2 packaged launch, ownership, waits, settings/tool selection, Chromium and experimental Firefox workflows; six browser/mixed agent scenarios each passed three reset runs. Native creation/preservation, replacement/partial recovery and composed continuation (#35), #31 control interruption/cleanup and human-confirmed GitHub sign-in persistence/removal also passed. |
 | Latest recorded checks | 187 passed, one skipped; build and current-scale owned display/border checks passed. Existing package/docs and model-free native document/recovery/handback evidence remains scoped to its receipts. #26 chord/editor-focus and #30 app/workspace outcomes are accepted; earlier failures remain recorded. |
 
@@ -22,7 +22,7 @@ The package is implemented; remaining work is targeted Pi acceptance and repair.
 | Owner | Accepted work | Remaining Pi outcome |
 | --- | --- | --- |
 | #2 — clean installation | Runtime/package provisioning and both current-machine Pi host paths passed; #3/#34 complete. | Clean disposable Windows/WSL installation and prerequisite failure diagnostics; user-deferred. |
-| #6 — screenshot mapping | Capture/fallback, scoped 100% two-monitor/negative-origin mapping and actual 150%/100% and 175%/100% mixed-DPI mapping passed; [stages](validation.md#mixed-dpi-stages). Optional window-only covered/blank pixels and hidden/minimized refusals also passed. | Original scaling restored and passively verified. Changed left-of-primary arrangement mapping now passed; [receipt](validation.md#changed-monitor-arrangement). Right-of-primary arrangement restored at Y=0 (originally -61); reconcile untested display configurations; 200% unavailable in this scoped session, not passed. Share display evidence with #20/#30. |
+| #6 — screenshot mapping | Capture/fallback, strict window-only refusal/recovery, actual 100%/150%/175% mixed-DPI and changed negative-origin mapping passed; restored display state recorded. | Completed for the user-accepted first-release scope; [closeout](validation.md#screenshot-mapping-closeout). 200% and other unexercised display variants remain unverified; no universal scaling claim. |
 | #7 — OCR failures | Literal/CJK text, bounds and partial-result semantics passed in named cases. | Completed: missing-resource/null-engine refusals, actual profile-language reporting and cancellation after dispatch with helper exit/fresh-operation recovery; [scoped receipt](validation.md#pi-ocr-failure-acceptance). Clean-machine compatibility stays #2; display mapping stays #6. |
 | #18 — remembered sign-in | Profile lifecycle evidence plus human-confirmed GitHub authentication across actual Pi restart and verified test-profile removal passed. | Completed; [scoped receipt](validation.md#manual-github-remembered-sign-in). |
 | #20 — visible control | Appearance, basic acquire/release/settings/click-through and automated lifecycle accepted. Owned strict PrintWindow border exclusion/control passed at 100%/100%, 150%/100% and 175%/100%; [stages](validation.md#mixed-dpi-stages). | Changed left-of-primary arrangement also passed; [receipt](validation.md#changed-monitor-arrangement). Right-of-primary restoration verified (vertical alignment differs by 61 px); recording and remaining scope disposition remain; 200% unavailable here, not passed; strict-path pixel evidence does not certify every capture/OCR path. |
@@ -41,7 +41,7 @@ Work on one bounded missing outcome at a time. Reuse accepted evidence across is
 
 | Order / owner | Next action | User involvement |
 | --- | --- | --- |
-| 1 — #6/#20 | Scaling and changed-arrangement mapping/strict border-control checks passed; both scales and right-side arrangement restored. #6 limit disposition pending. #20's unarmed two-phase recording preview is prepared and preflighted; [procedure and scope](validation.md#recording-visibility-preparation). | Confirm #6 limit disposition and name the existing recorder for #20, then inspect its two-phase recording locally. Both scales stay 100%; no custom scaling/sign-out or repeated stop-key test. |
+| 1 — #20 | #6 is complete with accepted scope. Run the prepared unarmed preview while the user records with Windows Snipping Tool; then reconcile #20 capture/recording scope. [Procedure](validation.md#recording-visibility-preparation). | Start a small region recording including an outer screen edge, confirm readiness, then inspect both phases locally after completion. Both scales stay 100%; no repeated stop-key tests or recording upload. |
 | Deferred — #2 | Validate clean installation once a resettable disposable guest exists. | User explicitly deferred the environment. Do not repeatedly ask or change host virtualization. |
 | Final — #21/#1 | Reconcile all Pi outcomes and accepted limitations, perform final required checks and prepare release. | Final supported-workflow acceptance after agent-owned work is ready. |
 
