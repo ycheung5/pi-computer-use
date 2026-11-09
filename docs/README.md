@@ -9,7 +9,7 @@ Read the row matching the task; follow section links before reading whole docume
 | Delivery, design review and feasibility | [Design revision](implementation-plan.md#design-revision), [plan: detailed milestones](implementation-plan.md#detailed-milestones), [feasibility gates](implementation-plan.md#feasibility-gates) |
 | Test design and release validation | [Spec: testing decisions](spec.md#testing-decisions), [plan: coverage matrix](implementation-plan.md#coverage-matrix) |
 | Pi acceptance, phased testing and agent recovery | [Current phases](implementation-plan.md#detailed-milestones), [baseline audit](validation.md#baseline-identity-and-schema-evidence), [guidance inventory](validation.md#model-visible-guidance-inventory), [scenario catalog](validation.md#alignment-scenario-catalog) |
-| Release checks, capability coverage and pending acceptance | [Current release audit](validation.md#final-release-audit), [capability coverage](validation.md#capability-coverage), [validation history](validation.md) |
+| Release checks, capability coverage and pending acceptance | [0.1.0 release preparation](validation.md#first-release-preparation), [current release audit](validation.md#final-release-audit), [capability coverage](validation.md#capability-coverage), [validation history](validation.md) |
 | Pi interfaces and sources | [Pi extension research](pi-extension-research.md) (research context; current spec takes precedence over earlier proposals) |
 | Domain terminology | [Glossary](../GLOSSARY.md) |
 | Current Pi-first acceptance scope | [ADR 0004](adr/0004-pi-first-acceptance.md) |

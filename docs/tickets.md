@@ -9,9 +9,9 @@ Requirements live in [spec](spec.md), delivery/coverage in [implementation-plan]
 | Measure | Status after scope reconciliation |
 | --- | --- |
 | Tool implementation | All 25 target tools have implementations. Release acceptance concerns Pi correctness, preservation and usability. |
-| Completed issues | 23: #3, #6, #7, #8, #14, #16, #17, #18, #19, #20, #24, #25, #26, #27, #28, #29, #30, #31, #32, #33, #34, #35, #36. Historical comparison completions retain their original evidence scope. |
+| Completed issues | 24: #2, #3, #6, #7, #8, #14, #16, #17, #18, #19, #20, #24, #25, #26, #27, #28, #29, #30, #31, #32, #33, #34, #35, #36. Historical comparison completions retain their original evidence scope. |
 | Superseded issues | 10: #4, #5, #9, #10, #11, #12, #13, #15, #23, #37. Superseded is not a completed product delivery. |
-| Open issues | 3: #2 installation acceptance (second-computer WSL success reported; remaining clean-environment cases deferred), release #21 and product parent #1. |
+| Open issues | 2: release #21 and product parent #1. Installation #2 is complete with explicitly accepted first-release test limitations. |
 | Accepted Pi outcomes | Windows/WSL2 packaged launch, ownership, waits, settings/tool selection, Chromium and experimental Firefox workflows; six browser/mixed agent scenarios each passed three reset runs. Native creation/preservation, replacement/partial recovery and composed continuation (#35), #31 control interruption/cleanup and human-confirmed GitHub sign-in persistence/removal also passed. |
 | Latest recorded checks | Final release-audit checks: 187 passed, one historical-reference skip; 91-entry 0.1.0 archive, MIT/notices/version/development-file exclusion and documentation links passed. [Audit](validation.md#final-release-audit). Existing Windows/model/physical receipts retain their source scope; no release declared. |
 
@@ -21,7 +21,7 @@ The package is implemented; remaining work is targeted Pi acceptance and repair.
 
 | Owner | Accepted work | Remaining Pi outcome |
 | --- | --- | --- |
-| #2 — clean installation | Runtime/package provisioning and both current-machine Pi host paths passed; #3/#34 complete. User reports second-computer WSL installation and computer actions succeeded. | [Second-computer receipt](validation.md#second-computer-installation-report) recorded; disposition of the unreported clean-environment/failure/shutdown cases remains. Do not repeat the successful workflow. |
+| #2 — clean installation | Runtime/package provisioning and both current-machine Pi host paths passed; #3/#34 complete. User reports second-computer WSL installation and computer actions succeeded. | Completed on 2026-11-09: [second-computer WSL success and accepted limitations](validation.md#second-computer-installation-report). Fresh native-Windows/prerequisite-failure/clean-environment shutdown cases remain unverified, not blocking first release. |
 | #6 — screenshot mapping | Capture/fallback, strict window-only refusal/recovery, actual 100%/150%/175% mixed-DPI and changed negative-origin mapping passed; restored display state recorded. | Completed for the user-accepted first-release scope; [closeout](validation.md#screenshot-mapping-closeout). 200% and other unexercised display variants remain unverified; no universal scaling claim. |
 | #7 — OCR failures | Literal/CJK text, bounds and partial-result semantics passed in named cases. | Completed: missing-resource/null-engine refusals, actual profile-language reporting and cancellation after dispatch with helper exit/fresh-operation recovery; [scoped receipt](validation.md#pi-ocr-failure-acceptance). Clean-machine compatibility stays #2; display mapping stays #6. |
 | #18 — remembered sign-in | Profile lifecycle evidence plus human-confirmed GitHub authentication across actual Pi restart and verified test-profile removal passed. | Completed; [scoped receipt](validation.md#manual-github-remembered-sign-in). |
@@ -41,8 +41,7 @@ Work on one bounded missing outcome at a time. Reuse accepted evidence across is
 
 | Order / owner | Next action | User involvement |
 | --- | --- | --- |
-| 1 — #21 under #1 | Agent-owned [release audit](validation.md#final-release-audit) is complete: package/license repair, coherent version/install docs, capability/failure/limit reconciliation and final checks/reviews. The user confirmed [interactive settings/editor/reload](validation.md#interactive-settings-and-reload-acceptance) on 2026-11-09. #2 has user-reported second-computer WSL success; remaining environment-case disposition and final release/limit acceptance precede publication. | Final supported-workflow/limit acceptance after #2 is resolved; no more display-scaling/stop-key tests for closed issues, and no repeated guest request. |
-| 2 — #2 | Record second-computer WSL install/action success; accept or retain the remaining clean-environment test limitations. | Only disposition of unreported cases is needed now. The guest remains deferred; do not repeat the successful workflow or change host virtualization. |
+| 1 — #21 under #1 | Agent-owned [release audit](validation.md#final-release-audit) is complete: package/license repair, coherent version/install docs, capability/failure/limit reconciliation and final checks/reviews. The user confirmed [interactive settings/editor/reload](validation.md#interactive-settings-and-reload-acceptance) on 2026-11-09. #2 is complete with accepted limitations. [0.1.0 release notes and scope](validation.md#first-release-preparation) are prepared; final aggregate approval and publication remain. | Final approval of the prepared release scope/notes; no more display-scaling/stop-key tests for closed issues, and no repeated guest request. |
 
 Standing scoped idle-test authorization remains. Preserve unrelated applications, documents, clipboard and profiles, serialize desktop activity and request human participation only for genuine physical/private/visual steps. Unknown input cleanup retains actual owners and blocks dependent activity. No DSH/OpenRouter credentials, DSH installation or side-by-side tests are needed.
 

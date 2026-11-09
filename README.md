@@ -1,6 +1,6 @@
 # Pi Windows Computer Use
 
-Native Pi tools for Windows desktop and browser automation from Windows or WSL2 Pi. **Not released yet:** clean-install acceptance is user-deferred, and final release checks/user acceptance remain. Scoped functional acceptance and known limits are recorded. See [current progress](docs/tickets.md#current-progress) and [remaining work](docs/tickets.md#execution-queue).
+Native Pi tools for Windows desktop and browser automation from Windows or WSL2 Pi. **Not released yet:** installation acceptance is complete for the user-approved scope; final release approval and publication remain. Scoped functional acceptance and known limits are recorded. See [current progress](docs/tickets.md#current-progress) and [remaining work](docs/tickets.md#execution-queue).
 
 ## Requirements
 
@@ -38,7 +38,7 @@ npm install --omit=dev --omit=peer --ignore-scripts
 pi install .
 ```
 
-Pi supplies its SDK and TypeBox peers. The archive already contains compiled code; no TypeScript compiler is needed for this path. Keep the extracted directory while Pi references it. This is the prepared distribution procedure; clean-Windows acceptance remains deferred under #2. A registry package or GitHub release has not been published.
+Pi supplies its SDK and TypeBox peers. The archive already contains compiled code; no TypeScript compiler is needed for this path. Keep the extracted directory while Pi references it. This is the prepared distribution procedure; installation acceptance #2 is complete with [documented test limitations](docs/validation.md#second-computer-installation-report). A registry package or GitHub release has not been published.
 
 Personal settings apply across projects and hosts. Use `/computer-settings show`, `/computer-settings edit`, or `/computer-settings set {"toolPreset":"lazy"}`. Use `/computer-stop` to stop an active operation; physical Esc is armed when physical input is used. See [settings](docs/settings.md), [stopping](docs/stopping.md) and [indicators](docs/indicators.md).
 
