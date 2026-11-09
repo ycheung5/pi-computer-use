@@ -1,6 +1,6 @@
 # Implementation tickets
 
-Requirements live in [spec](spec.md), delivery/coverage in [implementation-plan](implementation-plan.md), results in [validation](validation.md). This is the current Pi-first queue, reconciled on 2026-11-06 under [ADR 0004](adr/0004-pi-first-acceptance.md). DSH manual/host/model comparisons, credentials and parity benchmarks are discarded.
+Requirements live in [spec](spec.md), delivery/coverage in [implementation-plan](implementation-plan.md), results in [validation](validation.md). This is the current Pi-first queue, reconciled on 2026-11-09 under [ADR 0004](adr/0004-pi-first-acceptance.md). DSH manual/host/model comparisons, credentials and parity benchmarks are discarded.
 
 ## Current investigation and acceptance work
 
@@ -41,7 +41,7 @@ Work on one bounded missing outcome at a time. Reuse accepted evidence across is
 
 | Order / owner | Next action | User involvement |
 | --- | --- | --- |
-| 1 — #21 under #1 | Agent-owned [release audit](validation.md#final-release-audit) is complete: package/license repair, coherent version/install docs, capability/failure/limit reconciliation and final checks/reviews. #2 remains the deferred clean-install gate; final interactive workflow/limit acceptance and publication follow. | Final supported-workflow/limit acceptance after #2 is resolved; no more display-scaling/stop-key tests for closed issues, and no repeated guest request. |
+| 1 — #21 under #1 | Agent-owned [release audit](validation.md#final-release-audit) is complete: package/license repair, coherent version/install docs, capability/failure/limit reconciliation and final checks/reviews. The user confirmed [interactive settings/editor/reload](validation.md#interactive-settings-and-reload-acceptance) on 2026-11-09. #2 remains the deferred clean-install gate; final release/limit acceptance and publication follow. | Final supported-workflow/limit acceptance after #2 is resolved; no more display-scaling/stop-key tests for closed issues, and no repeated guest request. |
 | Deferred — #2 | Validate clean installation once a resettable disposable guest exists. | User explicitly deferred the environment. Do not repeatedly ask or change host virtualization. |
 
 Standing scoped idle-test authorization remains. Preserve unrelated applications, documents, clipboard and profiles, serialize desktop activity and request human participation only for genuine physical/private/visual steps. Unknown input cleanup retains actual owners and blocks dependent activity. No DSH/OpenRouter credentials, DSH installation or side-by-side tests are needed.
