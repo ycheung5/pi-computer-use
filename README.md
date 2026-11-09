@@ -33,7 +33,7 @@ Use your existing Pi installation. Another computer-use extension is not require
 
 ### From npm
 
-Install the published package with:
+Install [@ycheung5/pi-computer-use](https://www.npmjs.com/package/@ycheung5/pi-computer-use) from npm:
 
 ```sh
 pi install npm:@ycheung5/pi-computer-use

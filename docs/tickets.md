@@ -9,13 +9,13 @@ Requirements live in [spec](spec.md), delivery/coverage in [implementation-plan]
 | Measure | Status after scope reconciliation |
 | --- | --- |
 | Tool implementation | All 25 target tools have implementations. Release acceptance concerns Pi correctness, preservation and usability. |
-| Completed issues | 24: #2, #3, #6, #7, #8, #14, #16, #17, #18, #19, #20, #24, #25, #26, #27, #28, #29, #30, #31, #32, #33, #34, #35, #36. Historical comparison completions retain their original evidence scope. |
+| Completed issues | 26: #1, #2, #3, #6, #7, #8, #14, #16, #17, #18, #19, #20, #21, #24, #25, #26, #27, #28, #29, #30, #31, #32, #33, #34, #35, #36. Historical comparison completions retain their original evidence scope. |
 | Superseded issues | 10: #4, #5, #9, #10, #11, #12, #13, #15, #23, #37. Superseded is not a completed product delivery. |
-| Open issues | 2: #21 and parent #1 await verification that the user-published 0.1.0 is publicly available. Final scope approval and installation #2 are complete; accepted limitations remain. |
+| Open issues | None in the first-release delivery queue. #21 and parent #1 are completed after verified npm publication. Accepted test limitations remain documented. |
 | Accepted Pi outcomes | Windows/WSL2 packaged launch, ownership, waits, settings/tool selection, Chromium and experimental Firefox workflows; six browser/mixed agent scenarios each passed three reset runs. Native creation/preservation, replacement/partial recovery and composed continuation (#35), #31 control interruption/cleanup and human-confirmed GitHub sign-in persistence/removal also passed. |
-| Latest recorded checks | Final release-audit checks: 187 passed, one historical-reference skip; 91-entry 0.1.0 archive, MIT/notices/version/development-file exclusion and documentation links passed. [Audit](validation.md#final-release-audit). Existing Windows/model/physical receipts retain their source scope; no release declared. |
+| Latest recorded checks | Final release-audit checks: 187 passed, one historical-reference skip; 91-entry 0.1.0 archive, MIT/notices/version/development-file exclusion and documentation links passed. [Audit](validation.md#final-release-audit). The final scoped/banner package check passed 92 entries. Public npm 0.1.0/latest and downloaded archive hash are verified; earlier Windows/model/physical receipts retain their scope. |
 
-The package is implemented and the user submitted the prepared npm release; remaining work is public registry availability verification and release recording. An open issue does not reopen its accepted cases. No overall completion percentage is asserted, and no release is declared. The earlier development baseline and historical comparison receipts remain available through commits/archive tags.
+The first release is published as [@ycheung5/pi-computer-use@0.1.0](https://www.npmjs.com/package/@ycheung5/pi-computer-use). Its public archive matches the user-submitted build from 73616b5. An open issue does not reopen its accepted cases. Completion is scoped to the accepted first-release requirements and recorded test limitations. The earlier development baseline and historical comparison receipts remain available through commits/archive tags.
 
 ### Delivery outcomes and ownership
 
@@ -33,7 +33,7 @@ The package is implemented and the user submitted the prepared npm release; rema
 | #31 — stop/control | Native Pi Esc, worker shortcut/suppression, native/WSL command stop, rejection/recovery and no-input host-exit cleanup passed; queued-settlement bug fixed. Four known-held Ctrl/button cancellation/target-error cases and actual WSL Pi Ctrl+Alt+F9 and human handback/resume also passed. | Completed: native availability-loss response and existing worker/held-input/host/handback results satisfy the narrowed scope; [acceptance](validation.md#control-interruption-acceptance). |
 | #35 — native agent goals | Three preopened append/save tasks, three creation/preservation/save resets and three replacement/partial-observation recovery workflows have accepted independent evidence. [Creation](validation.md#native-document-workflow); [recovery and collector-failure disposition](validation.md#native-replacement-and-partial-observation-recovery-preparation). | Completed: three real-Pi continuation resets preserved the labelled stand-in edit after cancelled/retired setup. [Composed handback acceptance](validation.md#native-cancellation-and-handback-continuation) reuses #31 actual human/control proof; no new physical-control claim. |
 | #36 — browser/mixed agent goals | Six named Pi scenarios passed three resets: form/delay; navigation/dialog/transfer; stale recovery; quiet mixed task; partial-observation recovery; held-navigation cancellation. | Completed for this scope. Shared physical control stays #31/#20; native creation/recovery stays #35. No DSH leg remains. |
-| #21 under #1 — release | Capability mapping, existing checks and accepted scopes retained. | User-approved 0.1.0 submission is accepted by npm; verify public availability and registry archive identity, then close #21/#1. |
+| #21 under #1 — release | Capability mapping, existing checks and accepted scopes retained. | Completed: user-approved 0.1.0 publication, public version/latest and registry archive identity verified. [Release receipt](validation.md#npm-publication-receipt). |
 
 ### Execution queue
 
@@ -41,7 +41,7 @@ Work on one bounded missing outcome at a time. Reuse accepted evidence across is
 
 | Order / owner | Next action | User involvement |
 | --- | --- | --- |
-| 1 — #21 under #1 | Agent-owned [release audit](validation.md#final-release-audit) is complete: package/license repair, coherent version/install docs, capability/failure/limit reconciliation and final checks/reviews. The user confirmed [interactive settings/editor/reload](validation.md#interactive-settings-and-reload-acceptance) on 2026-11-09. #2 and final scope approval are complete. [npm publication receipt](validation.md#npm-publication-receipt) records accepted submission and verified maintainer; 0.1.0 availability was initially pending npm processing. Verify the public version/checksum, then close #21/#1. | None while npm processes the submission. Do not republish, bump versions or repeat accepted tests. |
+| First release complete | 0.1.0 is public on npm; maintainer/latest and the downloaded archive checksum match. #21 and #1 are complete. | None required for this release. Do not reopen accepted cases or repeat tests without a demonstrated new issue. |
 
 Standing scoped idle-test authorization remains. Preserve unrelated applications, documents, clipboard and profiles, serialize desktop activity and request human participation only for genuine physical/private/visual steps. Unknown input cleanup retains actual owners and blocks dependent activity. No DSH/OpenRouter credentials, DSH installation or side-by-side tests are needed.
 
