@@ -76,7 +76,10 @@ try {
     access(join(install, "node_modules", "@earendil-works", "pi-coding-agent")),
     { code: "ENOENT" },
   );
-  const extension = join(install, "node_modules", "pi-computer-use");
+  const { name } = JSON.parse(
+    await readFile(join(root, "package.json"), "utf8"),
+  );
+  const extension = join(install, "node_modules", ...name.split("/"));
   const cliArguments = [
     "--mode",
     "json",

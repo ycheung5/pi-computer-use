@@ -26,13 +26,23 @@ To retain the built checkout as a local Pi package, run `pi install .` from that
 
 Ask Pi to call `windows_computer_use_health` to check its worker. The first computer-use call downloads a pinned, checksum-verified private Windows Node runtime from nodejs.org into `%LOCALAPPDATA%\pi-computer-use\runtime`. Later calls reuse the worker. Initial provisioning requires HTTPS access to nodejs.org; no global Node installation is changed.
 
+## npm package
+
+The publication target is **`@ycheung5/pi-computer-use`**, version **0.1.0**. It has not been published yet. After publication, install it with:
+
+```sh
+pi install npm:@ycheung5/pi-computer-use
+```
+
+The unscoped npm name `pi-computer-use` belongs to another publisher. The GitHub repository, tool names and personal settings paths stay the same. Author metadata is `ycheung5 <yatfei9@gmail.com>`; npm maintainer ownership and its displayed email come from the publishing npm account.
+
 ## Install a built archive
 
-For a prebuilt `pi-computer-use-0.1.0.tgz` produced by `npm pack`, extract it and install only runtime dependencies, then register the extracted directory with Pi:
+For a prebuilt `ycheung5-pi-computer-use-0.1.0.tgz` produced by `npm pack`, extract it and install only runtime dependencies, then register the extracted directory with Pi:
 
 ```sh
 mkdir pi-computer-use
-tar -xzf pi-computer-use-0.1.0.tgz -C pi-computer-use --strip-components=1
+tar -xzf ycheung5-pi-computer-use-0.1.0.tgz -C pi-computer-use --strip-components=1
 cd pi-computer-use
 npm install --omit=dev --omit=peer --ignore-scripts
 pi install .

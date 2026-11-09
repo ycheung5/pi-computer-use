@@ -29,7 +29,9 @@ The next validation cycle follows the [current implementation phases](implementa
 
 ## First-release preparation
 
-Candidate: **0.1.0**, not published or tagged. All 25 tools are implemented, with named Windows/WSL2, native/browser, control/handback and agent-workflow receipts in the [capability matrix](#capability-coverage). Installation #2 is complete for its accepted scope and the user confirmed interactive settings/editor/reload. This preparation changes documentation only; prior audit code checks retain their source scope.
+Candidate: **`@ycheung5/pi-computer-use@0.1.0`**, not published or tagged. All 25 tools are implemented, with named Windows/WSL2, native/browser, control/handback and agent-workflow receipts in the [capability matrix](#capability-coverage). Installation #2 is complete for its accepted scope and the user confirmed interactive settings/editor/reload. This preparation changes documentation only; prior audit code checks retain their source scope.
+
+The user selected the personal npm scope after discovering the unscoped name belongs to another maintainer. Package/lock names are updated together, public scoped publishing is explicit, and author metadata is `ycheung5 <yatfei9@gmail.com>`. npm sets registry maintainer ownership from the publisher account, independently of the author field. No account email/ownership change or registry publication is performed by this preparation. The scoped tarball name is `ycheung5-pi-computer-use-0.1.0.tgz`; earlier unscoped artifact receipts remain historical. The packaged Pi-host runner now resolves the installed package by its manifest name, including the scope. Scoped-package verification passed: `npm run lint` completed with existing warnings/information, `npm run test:package` built and verified all 91 entries including scoped source/lock/packed-name coherence, author metadata and public access; `npm publish ./ycheung5-pi-computer-use-0.1.0.tgz --dry-run` succeeded for the public registry. No registry publication occurred, and the live Pi-host runner was not rerun for this metadata/path adjustment.
 
 Proposed release notes:
 

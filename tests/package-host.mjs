@@ -45,6 +45,11 @@ try {
   const lock = JSON.parse(
     await readFile(join(root, "package-lock.json"), "utf8"),
   );
+  assert.equal(manifest.name, source.name);
+  assert.equal(manifest.name, lock.name);
+  assert.equal(manifest.name, lock.packages[""].name);
+  assert.deepEqual(manifest.author, source.author);
+  assert.equal(manifest.publishConfig.access, "public");
   assert.equal(manifest.version, source.version);
   assert.equal(manifest.version, lock.packages[""].version);
   assert.equal(manifest.license, "MIT");
@@ -110,6 +115,7 @@ try {
       ok: true,
       artifact: filename,
       entries: paths.size,
+      name: manifest.name,
       version: manifest.version,
       projectLicense: manifest.license,
       developmentFilesExcluded: true,

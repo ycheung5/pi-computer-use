@@ -1,9 +1,16 @@
 {
-  "name": "pi-computer-use",
+  "name": "@ycheung5/pi-computer-use",
   "version": "0.1.0",
   "description": "Native Pi tools for Windows computer use from Windows and WSL2",
   "type": "module",
   "license": "MIT",
+  "author": {
+    "name": "ycheung5",
+    "email": "yatfei9@gmail.com"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ycheung5/pi-computer-use.git"
