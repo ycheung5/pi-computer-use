@@ -1,6 +1,12 @@
 # Release validation
 
-Release status: **publication pending**. Installation acceptance #2 is complete for the user-approved first-release scope; final aggregate release approval/publication remains #21. Automated and passive fixture results are evidence for their stated paths, not proof that all applications, physical input, displays or user acceptance work. The [spec](spec.md) defines requirements; this page maps them to runnable checks and pending evidence.
+Release status: **npm submission accepted; public availability pending**. The user published the prepared 0.1.0 archive on 2026-11-09 after accepting the first-release scope. Registry maintainer identity is verified, but the version was still processing at the initial read; #21/#1 close after public availability is verified. Installation #2 is complete for its accepted scope. Automated and passive fixture results are evidence for their stated paths, not proof that all applications, physical input, displays or user acceptance work. The [spec](spec.md) defines requirements; this page maps them to runnable checks and pending evidence.
+
+## npm publication receipt
+
+On 2026-11-09 the user completed interactive npm publishing authentication and received `+ @ycheung5/pi-computer-use@0.1.0`, with npm stating the package was processing. The submitted archive has 92 entries and SHA-1 `3018e74362be8f5b25739b717d9b455fface1496`, matching the local archive built from source `73616b5`. The user's publication of the prepared package supplies final first-release approval; earlier accepted limitations remain in force.
+
+Initial independent public registry checks returned no 0.1.0 version. An uncached package metadata read confirmed maintainer `ycheung5 <yatfei9@gmail.com>`, with `latest` temporarily pointing to `0.0.0-stage` and 0.1.0 absent. Submission is confirmed; public installation and the final registry archive checksum are not yet verified. Do not republish, change tags or bump versions merely to bypass processing. #21 and #1 remain open only for public availability verification and final recording. No runtime changes, desktop/model tests or second publication were performed.
 
 ## Final release audit
 
@@ -29,11 +35,11 @@ The next validation cycle follows the [current implementation phases](implementa
 
 ## First-release preparation
 
-Candidate: **`@ycheung5/pi-computer-use@0.1.0`**, not published or tagged. All 25 tools are implemented, with named Windows/WSL2, native/browser, control/handback and agent-workflow receipts in the [capability matrix](#capability-coverage). Installation #2 is complete for its accepted scope and the user confirmed interactive settings/editor/reload. This preparation changes documentation only; prior audit code checks retain their source scope.
+Prepared version: **`@ycheung5/pi-computer-use@0.1.0`**. This section records pre-publication preparation; the subsequent submission/availability state is in the [publication receipt](#npm-publication-receipt). No release tag was created by that preparation. All 25 tools are implemented, with named Windows/WSL2, native/browser, control/handback and agent-workflow receipts in the [capability matrix](#capability-coverage). Installation #2 is complete for its accepted scope and the user confirmed interactive settings/editor/reload. This preparation changes documentation only; prior audit code checks retain their source scope.
 
 The user selected the personal npm scope after discovering the unscoped name belongs to another maintainer. Package/lock names are updated together, public scoped publishing is explicit, and author metadata is `ycheung5 <yatfei9@gmail.com>`. npm sets registry maintainer ownership from the publisher account, independently of the author field. No account email/ownership change or registry publication is performed by this preparation. The scoped tarball name is `ycheung5-pi-computer-use-0.1.0.tgz`; earlier unscoped artifact receipts remain historical. The packaged Pi-host runner now resolves the installed package by its manifest name, including the scope. Scoped-package verification passed: `npm run lint` completed with existing warnings/information, `npm run test:package` built and verified all 91 entries including scoped source/lock/packed-name coherence, author metadata and public access; `npm publish ./ycheung5-pi-computer-use-0.1.0.tgz --dry-run` succeeded for the public registry. No registry publication occurred, and the live Pi-host runner was not rerun for this metadata/path adjustment.
 
-The release README now introduces capabilities, example tasks, setup, control and tested limits, with an original static SVG banner and CI/license/platform badges. The configured artifact check passed with 92 entries, including the banner and resolved local documentation links. SVG XML parsed successfully; no runtime behavior, desktop test or model call changed. Registry publication remains pending account publishing authentication.
+The release README now introduces capabilities, example tasks, setup, control and tested limits, with an original static SVG banner and CI/license/platform badges. The configured artifact check passed with 92 entries, including the banner and resolved local documentation links. SVG XML parsed successfully; no runtime behavior, desktop test or model call changed. The first publish attempt was blocked by account publishing authentication; the subsequent accepted submission is recorded in the [publication receipt](#npm-publication-receipt).
 
 Proposed release notes:
 
@@ -46,7 +52,7 @@ Carry these limits into the public release notes: Windows can silently remove lo
 
 Preparation validation on 2026-11-09: `npm run test:package` passed the 91-entry 0.1.0 archive, license/notices, version, development-file exclusion and documentation links. The sandboxed npm pack child first exited without diagnostics (code 226); the same configured check passed with permitted execution outside that sandbox. No source repair was needed. Prior runtime/portable tests were reused because this preparation changes documentation only.
 
-Final aggregate approval and actual publication stay under #21; #1 closes after publication. No npm registry or GitHub release has been created by this preparation.
+At the preparation checkpoint, final aggregate approval and publication remained under #21 and no registry or GitHub release had been created. The subsequent user-approved npm submission is recorded above; #21/#1 close after registry availability is verified.
 
 ## Second-computer installation report
 
@@ -58,7 +64,7 @@ This report supplies WSL installation/use evidence for #2. A fresh disposable na
 
 On 2026-11-09 the user confirmed all four requested checks passed in their Pi session: `/computer-settings show` displayed settings without errors; `/computer-settings edit` opened and cancelled with Esc; reopening and saving unchanged with Enter succeeded; `/reload` followed by `show` retained the settings without extension errors. This is human-reported acceptance of the terminal settings display/editor/reload path, not an independently captured transcript or a separate tool-result renderer test. The session version and host were not separately collected in this confirmation.
 
-No runtime changes, desktop input, paid-model runs or repeated capability tests were performed by the coding agent for this receipt. Reuse the accepted #35/#36 supported workflows. Final release/known-limit acceptance and publication remain with #21; #2 is subsequently closed with the accepted limitations in the second-computer receipt.
+No runtime changes, desktop input, paid-model runs or repeated capability tests were performed by the coding agent for this receipt. Reuse the accepted #35/#36 supported workflows. The subsequent user-approved publication and remaining registry availability check are recorded above; #2 is subsequently closed with the accepted limitations in the second-computer receipt.
 
 ## Design cleanup checkpoint
 
