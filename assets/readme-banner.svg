@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" role="img" aria-labelledby="title desc">
+  <title id="title">Pi Computer Use</title>
+  <desc id="desc">Give Pi a Windows desktop. Native Windows and WSL2, with blue window outlines and a pointer illustration.</desc>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1">
+      <stop stop-color="#081321"/>
+      <stop offset="1" stop-color="#122940"/>
+    </linearGradient>
+    <linearGradient id="blue" x2="1" y2="1">
+      <stop stop-color="#82d5ff"/>
+      <stop offset="0.5" stop-color="#368dff"/>
+      <stop offset="1" stop-color="#696dff"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="320" rx="24" fill="url(#background)"/>
+  <path d="M780 0v320M900 0v320M1020 0v320M1140 0v320M720 80h480M720 200h480" stroke="#28445e" stroke-opacity="0.4"/>
+  <rect x="52" y="48" width="54" height="54" rx="14" fill="#152c46" stroke="#3e79b0"/>
+  <path d="M65 67l10 8-10 8m17 0h10" fill="none" stroke="#95dbff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="124" y="82" fill="#b7d8f6" font-family="Segoe UI, Arial, sans-serif" font-size="17" font-weight="600" letter-spacing="2">WINDOWS + WSL2</text>
+  <text x="52" y="167" fill="#f2f8ff" font-family="Segoe UI, Arial, sans-serif" font-size="57" font-weight="700" letter-spacing="-1.5">Pi Computer Use</text>
+  <text x="55" y="212" fill="#b8cee3" font-family="Segoe UI, Arial, sans-serif" font-size="26">Give Pi a Windows desktop.</text>
+  <rect x="55" y="250" width="330" height="4" rx="2" fill="url(#blue)"/>
+  <rect x="856" y="53" width="269" height="173" rx="16" fill="#10243b" stroke="#325678" stroke-width="2"/>
+  <rect x="784" y="100" width="290" height="175" rx="16" fill="#0c1b2c" stroke="url(#blue)" stroke-width="4"/>
+  <path d="M786 137h286" stroke="#2d4b68"/>
+  <circle cx="806" cy="119" r="4" fill="#5eaaff"/>
+  <circle cx="821" cy="119" r="4" fill="#416a90"/>
+  <circle cx="836" cy="119" r="4" fill="#416a90"/>
+  <rect x="808" y="159" width="146" height="9" rx="4" fill="#355879"/>
+  <rect x="808" y="181" width="111" height="9" rx="4" fill="#253f59"/>
+  <rect x="808" y="217" width="83" height="29" rx="7" fill="#225cb2"/>
+  <path d="M990 183l5 63 15-20 24-3z" fill="#e5f4ff" stroke="#081321" stroke-width="3" stroke-linejoin="round"/>
+</svg>
