@@ -51,12 +51,17 @@ test(
   () => testInputBarrier("click", "settle-stop"),
 );
 
-for (const action of ["keypress", "type_text"] as const)
+for (const action of ["keypress", "click", "type_text"] as const)
   test(
     `worker shutdown cancels ${action} even when its execution deadline is disabled`,
     { skip: process.platform === "win32", timeout: 15000 },
-    () => testInputBarrier(action, "shutdown-held"),
+    () => testInputBarrier(action, "shutdown-held", action === "click"),
   );
+test(
+  "real worker forwards a timed click through native input preparation",
+  { skip: process.platform === "win32", timeout: 15000 },
+  () => testInputBarrier("click", false, true),
+);
 
 async function testInputBarrier(
   action: "click" | "scroll" | "keypress" | "type_text",
@@ -69,6 +74,7 @@ async function testInputBarrier(
     | "listener-exit"
     | "settle-stop"
     | "shutdown-held" = false,
+  timedClick = false,
 ) {
   const args =
     action === "type_text"
@@ -82,7 +88,12 @@ async function testInputBarrier(
         ? { keys: ["Ctrl"], holdMs: 2147483648, timeoutMs: 0 }
         : action === "scroll"
           ? { elementId: "uia:owned-scroller", deltaY: 240 }
-          : { x: 1, y: 1, dispatch: "foreground" };
+          : {
+              x: 1,
+              y: 1,
+              dispatch: "foreground",
+              ...(timedClick ? { holdMs: 2147483648, timeoutMs: 0 } : {}),
+            };
   const root = await mkdtemp(join(tmpdir(), "pi-cu-input-barrier-"));
   const compiler = join(
     root,
@@ -265,8 +276,9 @@ async function testInputBarrier(
       return;
     }
     assert.equal(result.result.ok, true, JSON.stringify(result));
-    if (action === "keypress") {
-      assert.deepEqual(result.result.received.keys, ["Ctrl"]);
+    if (action === "keypress" || timedClick) {
+      if (action === "keypress")
+        assert.deepEqual(result.result.received.keys, ["Ctrl"]);
       assert.equal(result.result.received.holdMs, 2147483648);
       assert.equal(result.result.received.timeoutMs, 0);
     }

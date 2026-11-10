@@ -39,7 +39,7 @@ test("text and key tools reject malformed or unsafe input before touching the de
   }
 });
 
-test("Pi exposes one shared native/browser text declaration and reports key refusal through normal execution", async () => {
+test("Pi exposes shared text/pointer declarations and reports key refusal through normal execution", async () => {
   const { registerComputerUse } = await import("../src/extension.js");
   const tools: import("@earendil-works/pi-coding-agent").ToolDefinition[] = [];
   const shutdown: Array<() => Promise<void>> = [];
@@ -68,27 +68,38 @@ test("Pi exposes one shared native/browser text declaration and reports key refu
     }),
   });
   try {
-    for (const action of ["type_text", "keypress"]) {
+    for (const action of [
+      "type_text",
+      "keypress",
+      "click",
+      "double_click",
+      "drag",
+    ]) {
       const matches = tools.filter(
         (tool) => tool.name === `windows_computer_use_${action}`,
       );
       assert.equal(matches.length, 1);
       const parameters = JSON.parse(JSON.stringify(matches[0]?.parameters));
-      assert.ok(parameters.properties.browserTab);
+      if (["type_text", "keypress"].includes(action))
+        assert.ok(parameters.properties.browserTab);
       assert.ok(parameters.properties.nativeWindowHandle);
-      if (action === "keypress") {
+      if (action === "keypress" || action === "click") {
         assert.equal(parameters.properties.holdMs.minimum, 0);
         assert.equal(
           parameters.properties.timeoutMs.maximum,
           Number.MAX_SAFE_INTEGER,
         );
-      } else {
+      } else if (action === "type_text") {
         assert.equal(parameters.properties.holdMs, undefined);
         assert.equal(parameters.properties.inputDelayMs.minimum, 0);
         assert.equal(
           parameters.properties.timeoutMs.maximum,
           Number.MAX_SAFE_INTEGER,
         );
+      } else {
+        assert.equal(parameters.properties.holdMs, undefined);
+        assert.equal(parameters.properties.inputDelayMs, undefined);
+        assert.equal(parameters.properties.timeoutMs, undefined);
       }
     }
     const keypress = tools.find(

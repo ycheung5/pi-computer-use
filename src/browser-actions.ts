@@ -44,7 +44,16 @@ const definitions: Record<
   { properties: Record<string, Rule>; required?: string[] }
 > = {
   click: {
-    properties: { ...target, ...view, ...element, ...point, button, dispatch },
+    properties: {
+      ...target,
+      ...view,
+      ...element,
+      ...point,
+      button,
+      dispatch,
+      holdMs: timingMilliseconds,
+      timeoutMs: timingMilliseconds,
+    },
   },
   double_click: {
     properties: { ...target, ...view, ...element, ...point, button, dispatch },
@@ -181,6 +190,13 @@ export function normalizeBrowserAction(
   action: string,
   args: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
+  if (
+    action === "click" &&
+    (args.holdMs !== undefined || args.timeoutMs !== undefined)
+  )
+    throw new Error(
+      "TIMING_UNSUPPORTED: click timing requires native foreground dispatch",
+    );
   if (
     action === "keypress" &&
     (args.holdMs !== undefined ||

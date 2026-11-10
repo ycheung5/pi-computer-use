@@ -359,6 +359,16 @@ async function dispatch(
     return;
   }
   if (
+    request.action === "click" &&
+    isBrowserRequest(request.args) &&
+    (request.args.holdMs !== undefined || request.args.timeoutMs !== undefined)
+  ) {
+    process.stdout.write(
+      `${JSON.stringify({ id: request.id, result: { ok: false, action: request.action, error: "TIMING_UNSUPPORTED: click timing requires native foreground dispatch" } })}\n`,
+    );
+    return;
+  }
+  if (
     request.action === "keypress" &&
     isBrowserRequest(request.args) &&
     (request.args.holdMs !== undefined ||
@@ -518,6 +528,8 @@ async function dispatch(
       if (
         (request.args.dispatch === "background" ||
           (request.action === "click" &&
+            request.args.holdMs === undefined &&
+            request.args.timeoutMs === undefined &&
             request.args.elementId &&
             (request.args.button ?? "left") === "left" &&
             !request.args.activate &&

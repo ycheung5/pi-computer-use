@@ -1,9 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import {
-  executionDeadline,
-  keypressTiming,
-  textTiming,
-} from "./input-timing.js";
+import { executionDeadline, pressTiming, textTiming } from "./input-timing.js";
 import type { WorkerResponse, WorkerResult } from "./protocol.js";
 
 export interface WorkerLaunch {
@@ -284,12 +280,12 @@ export class WorkerClient {
     operationId?: string,
   ): Promise<WorkerResult> {
     let inputPolicy:
-      | ReturnType<typeof keypressTiming>
+      | ReturnType<typeof pressTiming>
       | ReturnType<typeof textTiming>
       | undefined;
-    if (action === "keypress" || action === "type_text") {
+    if (action === "keypress" || action === "click" || action === "type_text") {
       try {
-        inputPolicy = (action === "keypress" ? keypressTiming : textTiming)(
+        inputPolicy = (action === "type_text" ? textTiming : pressTiming)(
           args,
           this.options.timeoutMs ?? 30_000,
         );
