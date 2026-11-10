@@ -6,7 +6,7 @@ Requirements and behavioral contracts are authoritative in the [specification](s
 
 ## Input timing delivery
 
-The [input timing/modifier-tap spec](spec.md#input-timing-and-modifier-taps) is the only requirement authority for this first post-release change. It extends existing tools. All three slices are implemented and accepted at the agreed seams, merged into main through PR #44 and prepared for 0.1.1. The [composed receipt](validation.md#input-timing-and-modifier-tap-acceptance) owns the source scope, final checks, live results and fixture-failure dispositions. Published npm 0.1.0 remains unchanged.
+The [input timing/modifier-tap spec](spec.md#input-timing-and-modifier-taps) is the only requirement authority for this first post-release change. It extends existing tools. All three slices are implemented and accepted at the agreed seams, merged into main through PR #44 and published in npm 0.1.1. The [composed receipt](validation.md#input-timing-and-modifier-tap-acceptance) owns the source scope, final checks, live results and fixture-failure dispositions. Published npm 0.1.0 remains unchanged.
 
 1. Extend existing action schemas/normalizers and public tool/worker tests for standalone generic modifiers, timing values, route capability refusal and unchanged defaults.
 2. Keep per-call duration/deadline calculation in reusable request handling rather than duplicate it in host adapters. Thread effective policy through Pi/worker/native execution so omitted, explicit positive and disabled execution deadlines remain consistent. Reuse controlled request peers for long-duration/overflow/cancellation checks without real long sleeps; do not add a general scheduler or test-only production API.
