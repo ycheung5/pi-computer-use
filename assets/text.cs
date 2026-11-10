@@ -110,10 +110,8 @@ partial class WindowsBridge {
     int number;if(key.StartsWith("f") && Int32.TryParse(key.Substring(1),out number) && number>=1 && number<=24)return (ushort)(111+number);return 0;
   }
   static void Chord(IEnumerable values,EventWaitHandle cancel,Process listener,IntPtr window,uint owner,List<HeldKey> held,InteractionGuard interaction,long holdMs=0,InputTiming timing=null) {
-    IntPtr expectedFocus=TextFocus(window,false);
     Action holdCheck=delegate {
       TextCheck(cancel,listener,window,owner,IntPtr.Zero,false,interaction);
-      if(TextFocus(window,false)!=expectedFocus)throw new InvalidOperationException("TARGET_FOCUS_CHANGED: held key interrupted");
     };
     if(timing!=null)timing.Check();
     List<ushort> modifiers=new List<ushort>();string main=null;
@@ -123,7 +121,7 @@ partial class WindowsBridge {
     if(main!=null && code==0) {
       if(main.Length!=1)throw new InvalidOperationException("INVALID_ARGUMENTS: unsupported key");
       uint ignored;uint thread=GetWindowThreadProcessId(window,out ignored);short mapping=VkKeyScanEx(main[0],GetKeyboardLayout(thread));
-      if(mapping==-1) {if(modifiers.Count>0)throw new InvalidOperationException("KEY_LAYOUT_UNSUPPORTED: chord cannot represent this character");TextCheck(cancel,listener,window,owner,IntPtr.Zero,false,interaction);HeldKey unicode=new HeldKey{Scan=main[0],Flags=4};Down(held,unicode);if(timing!=null)timing.Wait(holdMs,cancel,holdCheck);Up(held,unicode);return;}
+      if(mapping==-1) {if(modifiers.Count>0)throw new InvalidOperationException("KEY_LAYOUT_UNSUPPORTED: chord cannot represent this character");TextCheck(cancel,listener,window,owner,IntPtr.Zero,false,interaction);HeldKey unicode=new HeldKey{Scan=main[0],Flags=4};Down(held,unicode);if(timing!=null && holdMs>0)timing.Wait(holdMs,cancel,holdCheck);Up(held,unicode);return;}
       code=(ushort)(mapping & 255);
       // A named shortcut letter is layout-mapped without adding implicit Shift.
       if(modifiers.Count==0){if((mapping & 0x100)!=0)modifiers.Add(16);if((mapping & 0x200)!=0)modifiers.Add(17);if((mapping & 0x400)!=0)modifiers.Add(18);}
@@ -131,7 +129,9 @@ partial class WindowsBridge {
     foreach(ushort modifier in modifiers){TextCheck(cancel,listener,window,owner,IntPtr.Zero,false,interaction);Down(held,new HeldKey{Key=modifier});}
     TextCheck(cancel,listener,window,owner,IntPtr.Zero,false,interaction);
     if(main!=null){HeldKey primary=new HeldKey{Key=code,Flags=(code>=33 && code<=46)?1U:0U};Down(held,primary);}
-    if(timing!=null)timing.Wait(holdMs,cancel,holdCheck);
+    if(timing!=null && holdMs>0)timing.Wait(holdMs,cancel,holdCheck);
+    // Immediate presses release without post-dispatch checks: their effect may move focus.
+    // Positive holds retain the existing keypress target/protection checks during the wait.
     // Release modifiers regardless of target/focus changes caused by the chord.
     for(int i=held.Count-1;i>=0;i--){HeldKey key=held[i];Up(held,key);}
   }
