@@ -24,7 +24,7 @@ Results report effective `timing` (`holdMs`, `timeoutMs`, `deadlinePolicy`), `in
 
 The existing owned fixture prepares scoped acceptance with `npm run test:native:pointer:physical -- --list --case=timing` (safe planning only). The Pi-only `--case=timing` run requires a build, Windows Node and `PI_CU_DEDICATED_INPUT_DESKTOP=1` on the authorized idle test desktop. It observes actual button messages/timestamps and OS state for default click/restoration, zero hold, timed left/right/middle, a covering-target error, shorter deadline and cancellation of a representable very long hold with deadline disabled. Failure or unconfirmed cleanup retains the owner and fixture. This case does not rerun the old physical baseline or physical Esc demonstration.
 
-Portable worker/peer checks verify schema, route refusals, two-layer timing forwarding, default/positive/disabled deadlines, long values, overflow, shutdown and ownership retention without sleeping for long requested durations. Native compilation and the actual fixture effects remain unrun until grouped Windows acceptance; portable results do not establish physical input timing.
+Portable worker/peer checks verify schema, route refusals, two-layer timing forwarding, default/positive/disabled deadlines, long values, overflow, shutdown and ownership retention without sleeping for long requested durations. Native compilation and the scoped actual fixture effects passed; see the [composed receipt](validation.md#input-timing-and-modifier-tap-acceptance). Portable results alone do not establish physical input timing.
 
 ## Validation
 

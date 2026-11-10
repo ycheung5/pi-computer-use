@@ -5,7 +5,7 @@ Read the row matching the task; follow section links before reading whole docume
 | Task | Read |
 | --- | --- |
 | Requirements and scope | [Spec: solution](spec.md#solution), [user stories](spec.md#user-stories), [out of scope](spec.md#out-of-scope) |
-| Planned modifier taps, holds and timing controls | [Input timing spec](spec.md#input-timing-and-modifier-taps), [delivery and focused acceptance](implementation-plan.md#input-timing-delivery) |
+| Modifier taps, holds and timing controls (integration branch) | [Input timing spec](spec.md#input-timing-and-modifier-taps), [delivery](implementation-plan.md#input-timing-delivery), [scoped acceptance](validation.md#input-timing-and-modifier-tap-acceptance) |
 | Implementation contracts | [Spec: implementation decisions](spec.md#implementation-decisions) |
 | Delivery, design review and feasibility | [Design revision](implementation-plan.md#design-revision), [plan: detailed milestones](implementation-plan.md#detailed-milestones), [feasibility gates](implementation-plan.md#feasibility-gates) |
 | Test design and release validation | [Spec: testing decisions](spec.md#testing-decisions), [plan: coverage matrix](implementation-plan.md#coverage-matrix) |
