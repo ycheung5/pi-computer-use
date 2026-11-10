@@ -1,7 +1,15 @@
 using System;
 using System.Threading;
 using System.Windows.Forms;
-class BackgroundForm : Form { protected override bool ShowWithoutActivation { get { return true; } } }
+class BackgroundForm : Form {
+  public bool SuppressKeyMenu;
+  protected override bool ShowWithoutActivation { get { return true; } }
+  protected override void WndProc(ref Message message) {
+    // Keep timing key observations in the ordinary message loop after an Alt tap.
+    if(SuppressKeyMenu && message.Msg==0x112 && (message.WParam.ToInt64() & 0xFFF0)==0xF100) {message.Result=IntPtr.Zero;return;}
+    base.WndProc(ref message);
+  }
+}
 class TimingMessages : IMessageFilter {
   [System.Runtime.InteropServices.DllImport("user32.dll")] static extern int GetMessageTime();
   public bool PreFilterMessage(ref Message message) {
@@ -51,7 +59,7 @@ class ControlsFixture {
     SetProcessDpiAwarenessContext(new IntPtr(-4));
     Console.OutputEncoding=new System.Text.UTF8Encoding(false);
     if(Array.IndexOf(args,"--timing")>=0)Application.AddMessageFilter(new TimingMessages());
-    BackgroundForm form=new BackgroundForm { Text=args[0],Width=520,Height=400 };
+    BackgroundForm form=new BackgroundForm { Text=args[0],Width=520,Height=400,SuppressKeyMenu=Array.IndexOf(args,"--timing")>=0 && Array.IndexOf(args,"--text-chords")>=0 };
     TextBoxBase edit=Array.IndexOf(args,"--text-chords")>=0?(TextBoxBase)new RichTextBox():new TextBox();
     edit.AccessibleName="Background editor";edit.Text="original";edit.Left=10;edit.Top=10;edit.Width=240;
     TextBox readOnly=new TextBox { AccessibleName="Read only editor",Text="fixed",ReadOnly=true,Left=260,Top=10,Width=200 };

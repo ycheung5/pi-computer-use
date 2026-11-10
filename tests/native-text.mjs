@@ -11,6 +11,15 @@ import { computerUseHost } from "./native-host.mjs";
 
 const timing = process.argv.includes("--timing");
 const physical = timing || process.argv.includes("--chords");
+const phaseOptions = process.argv
+  .slice(2)
+  .filter((arg) => arg.startsWith("--phase="));
+const timingPhase = phaseOptions[0]?.slice(8) ?? "all";
+assert.ok(
+  phaseOptions.length <= 1 && ["all", "text", "keyboard"].includes(timingPhase),
+  "invalid timing phase",
+);
+assert.ok(timing || phaseOptions.length === 0, "--phase requires --timing");
 const timingCases = [
   "text-pacing-default-zero-25ms",
   "text-short-deadline",
@@ -24,10 +33,17 @@ const timingCases = [
   "foreground-error-release",
   "short-deadline-release",
   "cancel-disabled-deadline",
-];
+].filter(
+  (name) =>
+    timingPhase === "all" ||
+    (name.startsWith("text-")
+      ? timingPhase === "text"
+      : timingPhase === "keyboard"),
+);
 for (const arg of process.argv.slice(2))
   assert.ok(
-    ["--chords", "--timing", "--plan"].includes(arg),
+    ["--chords", "--timing", "--plan"].includes(arg) ||
+      arg.startsWith("--phase="),
     "unknown native text option",
   );
 if (process.argv.includes("--plan")) {
@@ -41,7 +57,7 @@ if (process.argv.includes("--plan")) {
         : physical
           ? "chords-and-editor-focus"
           : "background-text",
-      ...(timing ? { cases: timingCases } : {}),
+      ...(timing ? { phase: timingPhase, cases: timingCases } : {}),
     }),
   );
   process.exit(0);
@@ -350,7 +366,10 @@ async function verifyTiming() {
     await reply(`key-event:${key}:up:`);
     const down = keyEvents.find((e) => e.key === key && e.direction === "down");
     const up = keyEvents.find((e) => e.key === key && e.direction === "up");
-    assert.ok(down && up, "independent fixture must receive down and up");
+    assert.ok(
+      down && up,
+      `independent fixture must receive down and up: ${JSON.stringify({ key, events: keyEvents })}`,
+    );
     // Message timestamps can wrap and have platform timer quantization.
     const duration = (up.time - down.time + 4294967296) % 4294967296;
     assert.ok(
@@ -367,37 +386,39 @@ async function verifyTiming() {
     );
     return duration;
   };
-  for (const timing of [{}, { holdMs: 0 }, { holdMs: 200 }]) {
-    await focus();
-    resetEvents();
-    const before = await observeText();
-    const result = await call("keypress", {
-      keys: ["Tab"],
-      activate: true,
-      ...timing,
-    });
-    assert.equal(result.ok, true, JSON.stringify(result));
-    assert.equal(result.cleanupConfirmed, true);
-    assert.equal(result.inputDispatched, true);
-    assert.equal(result.interrupted, false);
-    await released(9, timing.holdMs ?? 0);
-    const after = await untilText(
-      (s) => s.focus === secondary.nativeWindowHandle && s.held === 0,
-    );
-    assert.equal(after.primary, before.primary);
-    assert.equal(after.secondary, before.secondary);
-    console.log(
-      JSON.stringify({
-        check:
-          timing.holdMs > 0
-            ? "focus-changing-hold"
-            : "focus-changing-immediate-release",
-        timing,
-        before,
-        after,
-        result,
-      }),
-    );
+  if (timingPhase !== "text") {
+    for (const timing of [{}, { holdMs: 0 }, { holdMs: 200 }]) {
+      await focus();
+      resetEvents();
+      const before = await observeText();
+      const result = await call("keypress", {
+        keys: ["Tab"],
+        activate: true,
+        ...timing,
+      });
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.equal(result.cleanupConfirmed, true);
+      assert.equal(result.inputDispatched, true);
+      assert.equal(result.interrupted, false);
+      await released(9, timing.holdMs ?? 0);
+      const after = await untilText(
+        (s) => s.focus === secondary.nativeWindowHandle && s.held === 0,
+      );
+      assert.equal(after.primary, before.primary);
+      assert.equal(after.secondary, before.secondary);
+      console.log(
+        JSON.stringify({
+          check:
+            timing.holdMs > 0
+              ? "focus-changing-hold"
+              : "focus-changing-immediate-release",
+          timing,
+          before,
+          after,
+          result,
+        }),
+      );
+    }
   }
   const restart = async () => {
     await host.emit("agent_settled", { aborted: false });
@@ -409,222 +430,230 @@ async function verifyTiming() {
     // Settling can retire the worker and its observed element references.
     await refreshEditors();
   };
-  const clear = async () => {
-    await focus();
-    for (const keys of [["Ctrl", "A"], ["Backspace"]]) {
-      const result = await call("keypress", { keys, activate: true });
+  if (timingPhase !== "keyboard") {
+    const clear = async () => {
+      await focus();
+      for (const keys of [["Ctrl", "A"], ["Backspace"]]) {
+        const result = await call("keypress", { keys, activate: true });
+        assert.equal(result.ok, true, JSON.stringify(result));
+      }
+      await untilText((s) => s.primary === "" && s.held === 0);
+    };
+    const tabsOn = reply("text-tabs-ready:True");
+    fixture.stdin.write("text-tabs-on\n");
+    await tabsOn;
+    for (const inputDelayMs of [undefined, 0, 25]) {
+      await clear();
+      const text = "Unicode 測試 🙂\r\nTab\tend";
+      const started = performance.now();
+      const result = await call("type_text", {
+        text,
+        method: "sendinput",
+        activate: true,
+        ...(inputDelayMs === undefined ? {} : { inputDelayMs }),
+      });
       assert.equal(result.ok, true, JSON.stringify(result));
+      assert.equal(result.inputDelayMs, inputDelayMs ?? 50);
+      assert.equal(
+        result.timing.deadlinePolicy,
+        inputDelayMs === undefined ? "default" : "derived",
+      );
+      assert.equal(result.inputDispatched, true);
+      assert.equal(result.interrupted, false);
+      const state = await untilText(
+        (s) =>
+          s.primary.replace(/\r\n/g, "\n") === "Unicode 測試 🙂\nTab\tend" &&
+          s.held === 0,
+      );
+      console.log(
+        JSON.stringify({
+          check: "text-pacing-exact",
+          inputDelayMs: result.inputDelayMs,
+          elapsedMs: performance.now() - started,
+          result,
+          state,
+        }),
+      );
     }
-    await untilText((s) => s.primary === "" && s.held === 0);
-  };
-  const tabsOn = reply("text-tabs-ready:True");
-  fixture.stdin.write("text-tabs-on\n");
-  await tabsOn;
-  for (const inputDelayMs of [undefined, 0, 25]) {
     await clear();
-    const text = "Unicode 測試 🙂\r\nTab\tend";
-    const started = performance.now();
-    const result = await call("type_text", {
-      text,
+    const shortText = await call("type_text", {
+      text: "XY",
       method: "sendinput",
+      inputDelayMs: 3000,
+      timeoutMs: 1000,
       activate: true,
-      ...(inputDelayMs === undefined ? {} : { inputDelayMs }),
     });
-    assert.equal(result.ok, true, JSON.stringify(result));
-    assert.equal(result.inputDelayMs, inputDelayMs ?? 50);
-    assert.equal(
-      result.timing.deadlinePolicy,
-      inputDelayMs === undefined ? "default" : "derived",
-    );
-    assert.equal(result.inputDispatched, true);
-    assert.equal(result.interrupted, false);
-    const state = await untilText(
-      (s) =>
-        s.primary.replace(/\r\n/g, "\n") === "Unicode 測試 🙂\nTab\tend" &&
-        s.held === 0,
-    );
-    console.log(
-      JSON.stringify({
-        check: "text-pacing-exact",
-        inputDelayMs: result.inputDelayMs,
-        elapsedMs: performance.now() - started,
-        result,
-        state,
-      }),
-    );
-  }
-  await clear();
-  const shortText = await call("type_text", {
-    text: "XY",
-    method: "sendinput",
-    inputDelayMs: 3000,
-    timeoutMs: 1000,
-    activate: true,
-  });
-  assert.equal(shortText.ok, false, JSON.stringify(shortText));
-  assert.match(shortText.error, /WORKER_TIMEOUT/);
-  assert.equal(shortText.cleanupConfirmed, true);
-  await untilText((s) => s.primary === "X" && s.held === 0);
-  await restart();
-  await clear();
-  const focusText = call("type_text", {
-    text: "AB",
-    method: "sendinput",
-    inputDelayMs: 3000,
-    timeoutMs: 0,
-    activate: true,
-  });
-  const focusTextOutcome = focusText.then(
-    (result) => ({ result }),
-    (error) => ({ error: String(error) }),
-  );
-  await untilText((s) => s.primary === "A");
-  const textFocusReady = reply("focus-ready");
-  fixture.stdin.write("prepare-focus\n");
-  await textFocusReady;
-  const interruptedText = await focusTextOutcome;
-  assert.ok(
-    interruptedText.result && !interruptedText.result.ok,
-    JSON.stringify(interruptedText),
-  );
-  assert.match(interruptedText.result.error, /TARGET_FOCUS_CHANGED/);
-  await untilText((s) => s.primary === "A" && s.held === 0);
-  await clear();
-  inputUnconfirmed = true;
-  const textController = new AbortController();
-  const longText = host.tools.get("windows_computer_use_type_text").execute(
-    "cancel-text-delay",
-    {
-      ...target,
-      text: "Z",
+    assert.equal(shortText.ok, false, JSON.stringify(shortText));
+    assert.match(shortText.error, /WORKER_TIMEOUT/);
+    assert.equal(shortText.cleanupConfirmed, true);
+    await untilText((s) => s.primary === "X" && s.held === 0);
+    await restart();
+    await clear();
+    const focusText = call("type_text", {
+      text: "AB",
       method: "sendinput",
-      inputDelayMs: Number.MAX_SAFE_INTEGER,
-      timeoutMs: 0,
-      activate: true,
-    },
-    textController.signal,
-    undefined,
-    {},
-  );
-  const textCancelled = longText.then(
-    (result) => ({ result }),
-    (error) => ({ error: String(error) }),
-  );
-  await untilText((s) => s.primary === "Z");
-  textController.abort();
-  const textOutcome = await textCancelled;
-  assert.ok(
-    textOutcome.error || textOutcome.result?.isError,
-    JSON.stringify(textOutcome),
-  );
-  await host.emit("agent_settled", { aborted: true });
-  await untilText((s) => s.primary === "Z" && s.held === 0);
-  inputUnconfirmed = false;
-  await restart();
-  const tabsOff = reply("text-tabs-ready:False");
-  fixture.stdin.write("text-tabs-off\n");
-  await tabsOff;
-  for (const [alias, key] of [
-    ["Ctrl", 17],
-    ["Control", 17],
-    ["Alt", 18],
-    ["Option", 18],
-    ["Shift", 16],
-  ]) {
-    await focus();
-    resetEvents();
-    const result = await call("keypress", { keys: [alias], activate: true });
-    assert.equal(result.ok, true, JSON.stringify(result));
-    assert.equal(result.inputDispatched, true);
-    assert.equal(result.timing.holdMs, 0);
-    await released(key);
-  }
-  for (const [keys, key, holdMs] of [
-    [["F23"], 134, 0],
-    [["F23"], 134, 200],
-    [["Ctrl", "F24"], 135, 200],
-  ]) {
-    await focus();
-    resetEvents();
-    const result = await call("keypress", {
-      keys,
-      holdMs,
+      inputDelayMs: 3000,
       timeoutMs: 0,
       activate: true,
     });
-    assert.equal(result.ok, true, JSON.stringify(result));
-    assert.equal(result.timing.timeoutMs, 0);
-    await released(key, holdMs);
-    if (keys.length > 1) await released(17, holdMs);
+    const focusTextOutcome = focusText.then(
+      (result) => ({ result }),
+      (error) => ({ error: String(error) }),
+    );
+    await untilText((s) => s.primary === "A");
+    const textFocusReady = reply("focus-ready");
+    fixture.stdin.write("prepare-focus\n");
+    await textFocusReady;
+    const interruptedText = await focusTextOutcome;
+    assert.ok(
+      interruptedText.result && !interruptedText.result.ok,
+      JSON.stringify(interruptedText),
+    );
+    assert.match(interruptedText.result.error, /TARGET_FOCUS_CHANGED/);
+    await untilText((s) => s.primary === "A" && s.held === 0);
+    await clear();
+    inputUnconfirmed = true;
+    const textController = new AbortController();
+    const longText = host.tools.get("windows_computer_use_type_text").execute(
+      "cancel-text-delay",
+      {
+        ...target,
+        text: "Z",
+        method: "sendinput",
+        inputDelayMs: Number.MAX_SAFE_INTEGER,
+        timeoutMs: 0,
+        activate: true,
+      },
+      textController.signal,
+      undefined,
+      {},
+    );
+    const textCancelled = longText.then(
+      (result) => ({ result }),
+      (error) => ({ error: String(error) }),
+    );
+    await untilText((s) => s.primary === "Z");
+    textController.abort();
+    const textOutcome = await textCancelled;
+    assert.ok(
+      textOutcome.error || textOutcome.result?.isError,
+      JSON.stringify(textOutcome),
+    );
+    await host.emit("agent_settled", { aborted: true });
+    await untilText((s) => s.primary === "Z" && s.held === 0);
+    inputUnconfirmed = false;
+    await restart();
+    const tabsOff = reply("text-tabs-ready:False");
+    fixture.stdin.write("text-tabs-off\n");
+    await tabsOff;
   }
-  await focus();
-  resetEvents();
-  const foregroundError = call("keypress", {
-    keys: ["F24"],
-    holdMs: 3000,
-    timeoutMs: 0,
-    activate: true,
-  });
-  const foregroundOutcome = foregroundError.then(
-    (result) => ({ result }),
-    (error) => ({ error: String(error) }),
-  );
-  await reply("key-event:135:down:");
-  const ready = reply("timing-foreground-loss:");
-  fixture.stdin.write("timing-foreground-loss\n");
-  const loss = await ready;
-  assert.match(loss, /^timing-foreground-loss:True:[1-9]\d*$/);
-  const siblingHandle = Number(loss.split(":")[2]);
-  await untilText((s) => s.foreground === siblingHandle);
-  const failed = await foregroundOutcome;
-  assert.ok(failed.result && !failed.result.ok, JSON.stringify(failed));
-  assert.match(failed.result.error, /TARGET_FOREGROUND_CHANGED/);
-  await released(135);
-  await focus();
-  resetEvents();
-  const short = await call("keypress", {
-    keys: ["F24"],
-    holdMs: 3000,
-    timeoutMs: 1000,
-    activate: true,
-  });
-  assert.equal(short.ok, false);
-  assert.match(short.error, /WORKER_TIMEOUT/);
-  const shortDuration = await released(135);
-  assert.ok(
-    shortDuration < 3000,
-    "short deadline must interrupt requested hold",
-  );
-  // A deadline may stop the operation. Start the separately authorized next case.
-  await restart();
-  await focus();
-  resetEvents();
-  inputUnconfirmed = true;
-  const controller = new AbortController();
-  const pending = host.tools.get("windows_computer_use_keypress").execute(
-    "cancel-timing",
-    {
-      ...target,
-      keys: ["Ctrl"],
-      holdMs: Number.MAX_SAFE_INTEGER,
+  let outcome;
+  if (timingPhase !== "text") {
+    for (const [alias, key] of [
+      ["Ctrl", 17],
+      ["Control", 17],
+      ["Alt", 18],
+      ["Option", 18],
+      ["Shift", 16],
+    ]) {
+      await focus();
+      resetEvents();
+      const result = await call("keypress", { keys: [alias], activate: true });
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.equal(result.inputDispatched, true);
+      assert.equal(result.timing.holdMs, 0);
+      await released(key);
+    }
+    for (const [keys, key, holdMs] of [
+      [["F23"], 134, 0],
+      [["F23"], 134, 200],
+      [["Ctrl", "F24"], 135, 200],
+    ]) {
+      await focus();
+      resetEvents();
+      const result = await call("keypress", {
+        keys,
+        holdMs,
+        timeoutMs: 0,
+        activate: true,
+      });
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.equal(result.timing.timeoutMs, 0);
+      await released(key, holdMs);
+      if (keys.length > 1) await released(17, holdMs);
+    }
+    await focus();
+    resetEvents();
+    const foregroundError = call("keypress", {
+      keys: ["F24"],
+      holdMs: 3000,
       timeoutMs: 0,
       activate: true,
-    },
-    controller.signal,
-    undefined,
-    {},
-  );
-  const cancelled = pending.then(
-    (result) => ({ result }),
-    (error) => ({ error: String(error) }),
-  );
-  await reply("key-event:17:down:");
-  controller.abort();
-  const outcome = await cancelled;
-  assert.ok(outcome.error || outcome.result?.isError, JSON.stringify(outcome));
-  await host.emit("agent_settled", { aborted: true });
-  await released(17);
-  inputUnconfirmed = false;
+    });
+    const foregroundOutcome = foregroundError.then(
+      (result) => ({ result }),
+      (error) => ({ error: String(error) }),
+    );
+    await reply("key-event:135:down:");
+    const ready = reply("timing-foreground-loss:");
+    fixture.stdin.write("timing-foreground-loss\n");
+    const loss = await ready;
+    assert.match(loss, /^timing-foreground-loss:True:[1-9]\d*$/);
+    const siblingHandle = Number(loss.split(":")[2]);
+    await untilText((s) => s.foreground === siblingHandle);
+    const failed = await foregroundOutcome;
+    assert.ok(failed.result && !failed.result.ok, JSON.stringify(failed));
+    assert.match(failed.result.error, /TARGET_FOREGROUND_CHANGED/);
+    await released(135);
+    await focus();
+    resetEvents();
+    const short = await call("keypress", {
+      keys: ["F24"],
+      holdMs: 3000,
+      timeoutMs: 1000,
+      activate: true,
+    });
+    assert.equal(short.ok, false);
+    assert.match(short.error, /WORKER_TIMEOUT/);
+    const shortDuration = await released(135);
+    assert.ok(
+      shortDuration < 3000,
+      "short deadline must interrupt requested hold",
+    );
+    // A deadline may stop the operation. Start the separately authorized next case.
+    await restart();
+    await focus();
+    resetEvents();
+    inputUnconfirmed = true;
+    const controller = new AbortController();
+    const pending = host.tools.get("windows_computer_use_keypress").execute(
+      "cancel-timing",
+      {
+        ...target,
+        keys: ["Ctrl"],
+        holdMs: Number.MAX_SAFE_INTEGER,
+        timeoutMs: 0,
+        activate: true,
+      },
+      controller.signal,
+      undefined,
+      {},
+    );
+    const cancelled = pending.then(
+      (result) => ({ result }),
+      (error) => ({ error: String(error) }),
+    );
+    await reply("key-event:17:down:");
+    controller.abort();
+    outcome = await cancelled;
+    assert.ok(
+      outcome.error || outcome.result?.isError,
+      JSON.stringify(outcome),
+    );
+    await host.emit("agent_settled", { aborted: true });
+    await released(17);
+    inputUnconfirmed = false;
+  }
   const health = (
     await host.tools
       .get("windows_computer_use_health")
@@ -636,6 +665,7 @@ async function verifyTiming() {
     JSON.stringify({
       ok: true,
       check: "keyboard-timing",
+      phase: timingPhase,
       cases: timingCases,
       cancelled: outcome,
       clipboard: false,
