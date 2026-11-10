@@ -13,7 +13,7 @@ import {
   disposeBrowser,
   isBrowserRequest,
 } from "./browser.js";
-import { browserActionTools } from "./browser-actions.js";
+import { browserActionRefusal, browserActionTools } from "./browser-actions.js";
 import { screenshot, screenshotParameters } from "./capture.js";
 import {
   disposeDesktop,
@@ -358,40 +358,12 @@ async function dispatch(
     );
     return;
   }
-  if (
-    request.action === "click" &&
-    isBrowserRequest(request.args) &&
-    (request.args.holdMs !== undefined || request.args.timeoutMs !== undefined)
-  ) {
+  const browserRefusal = isBrowserRequest(request.args)
+    ? browserActionRefusal(request.action, request.args)
+    : undefined;
+  if (browserRefusal) {
     process.stdout.write(
-      `${JSON.stringify({ id: request.id, result: { ok: false, action: request.action, error: "TIMING_UNSUPPORTED: click timing requires native foreground dispatch" } })}\n`,
-    );
-    return;
-  }
-  if (
-    request.action === "keypress" &&
-    isBrowserRequest(request.args) &&
-    (request.args.holdMs !== undefined ||
-      request.args.timeoutMs !== undefined ||
-      (Array.isArray(request.args.keys) &&
-        request.args.keys.length === 1 &&
-        /^(ctrl|control|alt|option|shift)$/i.test(
-          String(request.args.keys[0]).trim(),
-        )))
-  ) {
-    process.stdout.write(
-      `${JSON.stringify({ id: request.id, result: { ok: false, action: request.action, error: "TIMING_UNSUPPORTED: keypress timing and standalone modifiers require native foreground dispatch" } })}\n`,
-    );
-    return;
-  }
-  if (
-    request.action === "type_text" &&
-    isBrowserRequest(request.args) &&
-    (request.args.inputDelayMs !== undefined ||
-      request.args.timeoutMs !== undefined)
-  ) {
-    process.stdout.write(
-      `${JSON.stringify({ id: request.id, result: { ok: false, action: request.action, error: "TIMING_UNSUPPORTED: text timing requires explicit native sendinput" } })}\n`,
+      `${JSON.stringify({ id: request.id, result: { ok: false, action: request.action, error: browserRefusal } })}\n`,
     );
     return;
   }

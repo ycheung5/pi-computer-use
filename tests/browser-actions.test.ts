@@ -4,8 +4,24 @@ import { once } from "node:events";
 import { createInterface } from "node:readline";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { normalizeBrowserAction } from "../src/browser-actions.js";
 import { registerComputerUse } from "../src/extension.js";
 import { computerUseHost } from "./native-host.mjs";
+
+test("browser set_value refuses timing options before resolving its document", () => {
+  for (const option of ["inputDelayMs", "timeoutMs"]) {
+    assert.throws(
+      () =>
+        normalizeBrowserAction("set_value", {
+          browserTab: "t123",
+          elementId: "t123:e1",
+          value: "fixture",
+          [option]: 0,
+        }),
+      new RegExp(`INVALID_ARGUMENTS: unknown option ${option}`),
+    );
+  }
+});
 
 test("browser form fixture retains submission shape and resets independent delayed-event evidence", async () => {
   const fixture = spawn(process.execPath, [
@@ -73,6 +89,14 @@ test("Pi exposes browser actions through the existing computer-use tools", async
       JSON.stringify(result.details),
       /INVALID_ARGUMENTS.*one non-modifier/,
     );
+    const setValue = tools.find(
+      (tool) => tool.name === "windows_computer_use_set_value",
+    );
+    assert.ok(setValue);
+    const parameters = JSON.parse(JSON.stringify(setValue.parameters));
+    for (const option of ["inputDelayMs", "timeoutMs"]) {
+      assert.equal(parameters.properties[option], undefined);
+    }
     for (const action of [
       "click",
       "double_click",

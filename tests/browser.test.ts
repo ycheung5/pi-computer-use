@@ -91,6 +91,27 @@ test("browser tools validate options before touching a document", async () => {
   }
 });
 
+test("worker rejects set_value timing before browser document resolution or input", async () => {
+  const client = worker();
+  try {
+    for (const option of ["inputDelayMs", "timeoutMs"]) {
+      const result = await client.execute("set_value", {
+        browserTab: "t123",
+        elementId: "t123:e1",
+        value: "fixture",
+        [option]: 0,
+      });
+      assert.equal(result.ok, false);
+      assert.match(
+        String(result.error),
+        new RegExp(`INVALID_ARGUMENTS: unknown option ${option}`),
+      );
+    }
+  } finally {
+    await client.dispose();
+  }
+});
+
 test("profile fixture plans need no backend, dependency tree or fixture files", () => {
   const folder = mkdtempSync(join(tmpdir(), "pi-profile-reconnect-plan-"));
   try {

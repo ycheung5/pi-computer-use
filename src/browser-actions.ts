@@ -137,8 +137,6 @@ const definitions: Record<
       value: { type: "string" },
       fallbackType: { type: "boolean", default: true },
       restoreClipboard: { type: "boolean", default: true },
-      inputDelayMs: timingMilliseconds,
-      timeoutMs: timingMilliseconds,
     },
   },
   activate_window: { properties: { ...target, ...tab } },
@@ -186,17 +184,15 @@ export const browserActionTools = Object.entries(definitions).map(
   }),
 );
 
-export function normalizeBrowserAction(
+export function browserActionRefusal(
   action: string,
   args: Record<string, unknown>,
-): Record<string, unknown> | undefined {
+): string | undefined {
   if (
     action === "click" &&
     (args.holdMs !== undefined || args.timeoutMs !== undefined)
   )
-    throw new Error(
-      "TIMING_UNSUPPORTED: click timing requires native foreground dispatch",
-    );
+    return "TIMING_UNSUPPORTED: click timing requires native foreground dispatch";
   if (
     action === "keypress" &&
     (args.holdMs !== undefined ||
@@ -205,16 +201,21 @@ export function normalizeBrowserAction(
         args.keys.length === 1 &&
         /^(ctrl|control|alt|option|shift)$/i.test(String(args.keys[0]).trim())))
   )
-    throw new Error(
-      "TIMING_UNSUPPORTED: keypress timing and standalone modifiers require native foreground dispatch",
-    );
+    return "TIMING_UNSUPPORTED: keypress timing and standalone modifiers require native foreground dispatch";
   if (
     action === "type_text" &&
     (args.inputDelayMs !== undefined || args.timeoutMs !== undefined)
   )
-    throw new Error(
-      "TIMING_UNSUPPORTED: text timing requires explicit native sendinput",
-    );
+    return "TIMING_UNSUPPORTED: text timing requires explicit native sendinput";
+  return undefined;
+}
+
+export function normalizeBrowserAction(
+  action: string,
+  args: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const refusal = browserActionRefusal(action, args);
+  if (refusal) throw new Error(refusal);
   const definition = definitions[action];
   if (!definition) return undefined;
   const properties: Record<string, Rule> = { ...definition.properties, ...tab };
