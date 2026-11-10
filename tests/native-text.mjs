@@ -322,9 +322,13 @@ async function untilText(predicate) {
   );
 }
 async function verifyTiming() {
-  const primary = (await find("Background editor", "Document"))[0];
-  const secondary = (await find("Secondary editor", "Edit"))[0];
-  assert.ok(primary && secondary);
+  let primary, secondary;
+  const refreshEditors = async () => {
+    primary = (await find("Background editor", "Document"))[0];
+    secondary = (await find("Secondary editor", "Edit"))[0];
+    assert.ok(primary && secondary);
+  };
+  await refreshEditors();
   const focus = async () => {
     const result = await call("focus", {
       elementId: primary.id,
@@ -402,6 +406,8 @@ async function verifyTiming() {
       systemPrompt: "",
       prompt: "Continue owned fixture timing",
     });
+    // Settling can retire the worker and its observed element references.
+    await refreshEditors();
   };
   const clear = async () => {
     await focus();
@@ -590,12 +596,7 @@ async function verifyTiming() {
     "short deadline must interrupt requested hold",
   );
   // A deadline may stop the operation. Start the separately authorized next case.
-  await host.emit("agent_settled", { aborted: false });
-  await host.emit("before_agent_start", {
-    messageType: "user",
-    systemPrompt: "",
-    prompt: "Continue owned fixture timing",
-  });
+  await restart();
   await focus();
   resetEvents();
   inputUnconfirmed = true;
