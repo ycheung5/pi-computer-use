@@ -9,16 +9,33 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { computerUseHost } from "./native-host.mjs";
 
-const physical = process.argv.includes("--chords");
+const timing = process.argv.includes("--timing");
+const physical = timing || process.argv.includes("--chords");
+const timingCases = [
+  "modifier-aliases",
+  "immediate-release",
+  "timed-key-and-chord",
+  "focus-error-release",
+  "short-deadline-release",
+  "cancel-disabled-deadline",
+];
 for (const arg of process.argv.slice(2))
-  assert.ok(["--chords", "--plan"].includes(arg), "unknown native text option");
+  assert.ok(
+    ["--chords", "--timing", "--plan"].includes(arg),
+    "unknown native text option",
+  );
 if (process.argv.includes("--plan")) {
   console.log(
     JSON.stringify({
       executed: false,
       physicalInput: physical,
       clipboard: false,
-      case: physical ? "chords-and-editor-focus" : "background-text",
+      case: timing
+        ? "keyboard-timing"
+        : physical
+          ? "chords-and-editor-focus"
+          : "background-text",
+      ...(timing ? { cases: timingCases } : {}),
     }),
   );
   process.exit(0);
@@ -62,6 +79,7 @@ const fixture = spawn(
   [
     `Pi CU Controls ${Date.now()}`,
     ...(physical ? ["--no-expiry", "--text-chords"] : []),
+    ...(timing ? ["--timing"] : []),
   ],
   {
     stdio: ["pipe", "pipe", "pipe"],
@@ -79,7 +97,12 @@ fixture.stdin.on("error", () => {});
 const lines = createInterface({ input: fixture.stdout });
 const pending = [],
   received = [];
+const keyEvents = [];
 lines.on("line", (line) => {
+  if (line.startsWith("key-event:")) {
+    const [, key, direction, time] = line.split(":");
+    keyEvents.push({ key: Number(key), direction, time: Number(time) });
+  }
   const index = pending.findIndex((w) => line.startsWith(w.prefix));
   if (index < 0) received.push(line);
   else {
@@ -292,6 +315,167 @@ async function untilText(predicate) {
     `expected editor/focus effect not observed: ${JSON.stringify(last)}`,
   );
 }
+async function verifyTiming() {
+  const primary = (await find("Background editor", "Document"))[0];
+  assert.ok(primary);
+  const focus = async () => {
+    const result = await call("focus", {
+      elementId: primary.id,
+      activate: true,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    await untilText(
+      (s) =>
+        s.focus === primary.nativeWindowHandle &&
+        s.foreground === target.nativeWindowHandle,
+    );
+  };
+  const resetEvents = () => {
+    keyEvents.length = 0;
+    for (let i = received.length - 1; i >= 0; i--)
+      if (received[i].startsWith("key-event:")) received.splice(i, 1);
+  };
+  const released = async (key, minimum = 0) => {
+    await reply(`key-event:${key}:up:`);
+    const down = keyEvents.find((e) => e.key === key && e.direction === "down");
+    const up = keyEvents.find((e) => e.key === key && e.direction === "up");
+    assert.ok(down && up, "independent fixture must receive down and up");
+    // Message timestamps can wrap and have platform timer quantization.
+    const duration = (up.time - down.time + 4294967296) % 4294967296;
+    assert.ok(
+      duration >= Math.max(0, minimum - 25),
+      JSON.stringify({ key, minimum, down, up, duration }),
+    );
+    const state = await untilText((s) => s.held === 0);
+    console.log(
+      JSON.stringify({
+        check: "keyboard-timing-events",
+        events: keyEvents,
+        state,
+      }),
+    );
+    return duration;
+  };
+  for (const [alias, key] of [
+    ["Ctrl", 17],
+    ["Control", 17],
+    ["Alt", 18],
+    ["Option", 18],
+    ["Shift", 16],
+  ]) {
+    await focus();
+    resetEvents();
+    const result = await call("keypress", { keys: [alias], activate: true });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.inputDispatched, true);
+    assert.equal(result.timing.holdMs, 0);
+    await released(key);
+  }
+  for (const [keys, key, holdMs] of [
+    [["F23"], 134, 0],
+    [["F23"], 134, 200],
+    [["Ctrl", "F24"], 135, 200],
+  ]) {
+    await focus();
+    resetEvents();
+    const result = await call("keypress", {
+      keys,
+      holdMs,
+      timeoutMs: 0,
+      activate: true,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.timing.timeoutMs, 0);
+    await released(key, holdMs);
+    if (keys.length > 1) await released(17, holdMs);
+  }
+  await focus();
+  resetEvents();
+  const focusError = call("keypress", {
+    keys: ["F24"],
+    holdMs: 3000,
+    timeoutMs: 0,
+    activate: true,
+  });
+  const focusOutcome = focusError.then(
+    (result) => ({ result }),
+    (error) => ({ error: String(error) }),
+  );
+  await reply("key-event:135:down:");
+  const ready = reply("focus-ready");
+  fixture.stdin.write("prepare-focus\n");
+  await ready;
+  const failed = await focusOutcome;
+  assert.ok(failed.result && !failed.result.ok, JSON.stringify(failed));
+  assert.match(failed.result.error, /TARGET_FOCUS_CHANGED/);
+  await released(135);
+  await focus();
+  resetEvents();
+  const short = await call("keypress", {
+    keys: ["F24"],
+    holdMs: 3000,
+    timeoutMs: 1000,
+    activate: true,
+  });
+  assert.equal(short.ok, false);
+  assert.match(short.error, /WORKER_TIMEOUT/);
+  const shortDuration = await released(135);
+  assert.ok(
+    shortDuration < 3000,
+    "short deadline must interrupt requested hold",
+  );
+  // A deadline may stop the operation. Start the separately authorized next case.
+  await host.emit("agent_settled", { aborted: false });
+  await host.emit("before_agent_start", {
+    messageType: "user",
+    systemPrompt: "",
+    prompt: "Continue owned fixture timing",
+  });
+  await focus();
+  resetEvents();
+  inputUnconfirmed = true;
+  const controller = new AbortController();
+  const pending = host.tools.get("windows_computer_use_keypress").execute(
+    "cancel-timing",
+    {
+      ...target,
+      keys: ["Ctrl"],
+      holdMs: Number.MAX_SAFE_INTEGER,
+      timeoutMs: 0,
+      activate: true,
+    },
+    controller.signal,
+    undefined,
+    {},
+  );
+  const cancelled = pending.then(
+    (result) => ({ result }),
+    (error) => ({ error: String(error) }),
+  );
+  await reply("key-event:17:down:");
+  controller.abort();
+  const outcome = await cancelled;
+  assert.ok(outcome.error || outcome.result?.isError, JSON.stringify(outcome));
+  await host.emit("agent_settled", { aborted: true });
+  await released(17);
+  inputUnconfirmed = false;
+  const health = (
+    await host.tools
+      .get("windows_computer_use_health")
+      .execute("health", {}, undefined, undefined, {})
+  ).details;
+  assert.equal(health.control.exclusiveControl, false);
+  assert.equal(health.control.physicalKeysHeld, 0);
+  console.log(
+    JSON.stringify({
+      ok: true,
+      check: "keyboard-timing",
+      cases: timingCases,
+      cancelled: outcome,
+      clipboard: false,
+    }),
+  );
+}
 async function verifyChords() {
   const primary = (await find("Background editor", "Document"))[0],
     secondary = (await find("Secondary editor", "Edit"))[0];
@@ -436,7 +620,8 @@ try {
     Number.isSafeInteger(target.nativeWindowHandle) &&
       target.nativeWindowHandle > 0,
   );
-  if (physical) await verifyChords();
+  if (timing) await verifyTiming();
+  else if (physical) await verifyChords();
   else await verifyBackground();
 } catch (error) {
   console.error(

@@ -40,7 +40,7 @@ const actionDescriptions: Record<string, string> = {
   type_text:
     "Type into the focused control. Native auto tries a background edit then clipboard paste; clipboard restoration is requested by default. Background WM_CHAR is unverified.",
   keypress:
-    'Send a key or chord, for example ["ctrl","a"]. Windows keys are blocked; native background dispatch supports one printable character only.',
+    "Send a key/chord or standalone Ctrl, Alt or Shift. Native foreground holdMs completes and releases in this call; timeoutMs: 0 disables only its execution deadline. Omitted timing preserves defaults. Timing and modifier taps refuse browser/background routes; Windows keys remain blocked. Observe effects before retrying.",
   focus:
     "Focus a fresh UIA or browser page element; observe the intended focus before typing.",
   invoke:

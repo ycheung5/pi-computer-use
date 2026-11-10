@@ -155,6 +155,7 @@ export const nativeDesktop = new NativeDesktopClient({
       "pointer.cs",
       "browser-indicators.cs",
       "text.cs",
+      "input-timing.cs",
     ];
     const framework = join(
       process.env.WINDIR ?? "",

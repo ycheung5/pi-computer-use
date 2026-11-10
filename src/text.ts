@@ -1,3 +1,4 @@
+import { keypressTiming, timingMilliseconds } from "./input-timing.js";
 import { compileNative } from "./native.js";
 import { executePointer } from "./pointer.js";
 import type { WorkerResult } from "./protocol.js";
@@ -41,6 +42,8 @@ export const textTools = [
       additionalProperties: false,
       properties: {
         ...target,
+        holdMs: timingMilliseconds,
+        timeoutMs: timingMilliseconds,
         keys: {
           type: "array",
           items: { type: "string", minLength: 1 },
@@ -100,7 +103,7 @@ export function validateText(
     ...Object.keys(target),
     ...(action === "type_text"
       ? ["text", "method", "focusMode", "restoreClipboard"]
-      : ["keys", "dispatch"]),
+      : ["keys", "dispatch", "holdMs", "timeoutMs"]),
   ]);
   if (
     args.windowRef !== undefined &&
@@ -150,6 +153,18 @@ export function validateText(
     )
       return bad("restoreClipboard must be boolean");
   } else {
+    try {
+      keypressTiming(args, 90_000);
+    } catch (cause) {
+      return error(String(cause instanceof Error ? cause.message : cause));
+    }
+    if (
+      (args.holdMs !== undefined || args.timeoutMs !== undefined) &&
+      (args.dispatch === "background" || args.browserTab !== undefined)
+    )
+      return error(
+        "TIMING_UNSUPPORTED: keypress timing requires native foreground dispatch",
+      );
     if (
       !Array.isArray(args.keys) ||
       args.keys.length < 1 ||
@@ -181,7 +196,12 @@ export function validateText(
           return bad("unsupported key");
       }
     }
-    if (main !== 1) return bad("exactly one non-modifier key is required");
+    if (main !== 1 && !(main === 0 && args.keys.length === 1))
+      return bad("one main key or one standalone generic modifier is required");
+    if (main === 0 && args.browserTab !== undefined)
+      return error(
+        "TIMING_UNSUPPORTED: standalone modifiers require native foreground dispatch",
+      );
     if (
       args.dispatch !== undefined &&
       !["foreground", "background"].includes(String(args.dispatch))

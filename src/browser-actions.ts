@@ -1,3 +1,5 @@
+import { timingMilliseconds } from "./input-timing.js";
+
 // Shared reference-compatible tool schemas; browser execution stays in browser.ts.
 const target = {
   windowRef: { type: "string", minLength: 1 },
@@ -81,6 +83,8 @@ const definitions: Record<
   keypress: {
     required: ["keys"],
     properties: {
+      holdMs: timingMilliseconds,
+      timeoutMs: timingMilliseconds,
       ...target,
       ...tab,
       keys: {
@@ -173,6 +177,17 @@ export function normalizeBrowserAction(
   action: string,
   args: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
+  if (
+    action === "keypress" &&
+    (args.holdMs !== undefined ||
+      args.timeoutMs !== undefined ||
+      (Array.isArray(args.keys) &&
+        args.keys.length === 1 &&
+        /^(ctrl|control|alt|option|shift)$/i.test(String(args.keys[0]).trim())))
+  )
+    throw new Error(
+      "TIMING_UNSUPPORTED: keypress timing and standalone modifiers require native foreground dispatch",
+    );
   const definition = definitions[action];
   if (!definition) return undefined;
   const properties: Record<string, Rule> = { ...definition.properties, ...tab };

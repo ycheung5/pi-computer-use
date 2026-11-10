@@ -358,6 +358,22 @@ async function dispatch(
     );
     return;
   }
+  if (
+    request.action === "keypress" &&
+    isBrowserRequest(request.args) &&
+    (request.args.holdMs !== undefined ||
+      request.args.timeoutMs !== undefined ||
+      (Array.isArray(request.args.keys) &&
+        request.args.keys.length === 1 &&
+        /^(ctrl|control|alt|option|shift)$/i.test(
+          String(request.args.keys[0]).trim(),
+        )))
+  ) {
+    process.stdout.write(
+      `${JSON.stringify({ id: request.id, result: { ok: false, action: request.action, error: "TIMING_UNSUPPORTED: keypress timing and standalone modifiers require native foreground dispatch" } })}\n`,
+    );
+    return;
+  }
   const denial = await settings.authorize(request.action);
   if (denial) {
     process.stdout.write(
@@ -727,6 +743,12 @@ input.on("line", (line) => {
 });
 input.on("close", () => {
   clearInterval(presentationPoll);
+  // EOF is shutdown, including when a call deliberately disabled its deadline.
+  for (const request of requests.values())
+    if (request.action !== "operation_end")
+      void stopOperation(request.operationId).catch((error) =>
+        process.stderr.write(`${String(error)}\n`),
+      );
   process.stdout.write(
     `${JSON.stringify({ event: "shutdown_state", phase: "started" })}\n`,
   );
