@@ -166,8 +166,8 @@ partial class WindowsBridge {
     try {
       long holdMs=0,inputDelayMs=UnicodeInputDelayMs;InputTiming timing=null;
       string text=TextOption(args,"text",""),method=TextOption(args,"method","auto");
+      if(text.IndexOf('\0')>=0)throw new InvalidOperationException("INVALID_ARGUMENTS: NUL text cannot be entered safely");
       if(action=="type_text") {
-        if(text.IndexOf('\0')>=0)throw new InvalidOperationException("INVALID_ARGUMENTS: NUL text cannot be entered safely");
         inputDelayMs=InputTiming.Milliseconds(args,"inputDelayMs",UnicodeInputDelayMs);
         if((args.ContainsKey("inputDelayMs") || args.ContainsKey("timeoutMs")) && (method!="sendinput" || args.ContainsKey("browserTab")))throw new InvalidOperationException("TIMING_UNSUPPORTED: text timing requires explicit native sendinput");
         if(method=="sendinput") {
@@ -195,7 +195,6 @@ partial class WindowsBridge {
       ApplyVisibleIntent(args,window);
       if(textFocus.Count>0 && !textFocus.ContainsKey(PointerOriginKey(window)))ForgetTextFocus();
       uint owner=WindowOwner(window);popups=ControlPopups(owner,window);
-      if(text.IndexOf('\0')>=0)throw new InvalidOperationException("INVALID_ARGUMENTS: NUL text cannot be entered safely");
       if(action=="type_text" && method=="auto" && TextOption(args,"focusMode","preserve")=="preserve" && !Option(args,"activate",false) && BackgroundEdit(window,text,result)) {textInputDispatched=true;result["inputTargetHandle"]=window.ToInt64();result["inputTargetProcessId"]=owner;return result;}
       bool background=action=="type_text"?method=="background":TextOption(args,"dispatch","foreground")=="background";
       if(background) {

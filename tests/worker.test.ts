@@ -6,6 +6,21 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { WorkerClient } from "../src/client.js";
 
+function timingRelayWorker(): WorkerClient {
+  const leaf = `require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.action)setTimeout(()=>console.log(JSON.stringify({id:r.id,result:{ok:true,action:r.action,received:r.args,cleanupConfirmed:true}})),700)});`;
+  const relay = `import {WorkerClient} from ${JSON.stringify(new URL("../src/client.ts", import.meta.url).href)};
+import {createInterface} from 'node:readline';
+const inner=new WorkerClient({timeoutMs:500,launch:async()=>({executable:process.execPath,args:['-e',${JSON.stringify(leaf)}]})});
+const lines=createInterface({input:process.stdin});lines.on('line',async line=>{const r=JSON.parse(line);if(!r.action)return;try{console.log(JSON.stringify({id:r.id,result:await inner.execute(r.action,r.args)}))}catch(e){console.log(JSON.stringify({id:r.id,result:{ok:false,action:r.action,error:String(e)}}))}});lines.on('close',()=>inner.dispose());`;
+  return new WorkerClient({
+    timeoutMs: 500,
+    launch: async () => ({
+      executable: process.execPath,
+      args: ["--import", "tsx", "--input-type=module", "-e", relay],
+    }),
+  });
+}
+
 test("health reaches a lazy reusable worker and disposal closes it", async () => {
   let launches = 0;
   const worker = new WorkerClient({
@@ -313,18 +328,7 @@ input.on('line',line=>{const r=JSON.parse(line);if(r.cancel){clearTimeout(active
   });
 
   test(`${action} timing crosses two request layers without restoring ordinary deadlines or wrapping long timers`, async () => {
-    const leaf = `require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.action)setTimeout(()=>console.log(JSON.stringify({id:r.id,result:{ok:true,action:r.action,received:r.args,cleanupConfirmed:true}})),700)});`;
-    const relay = `import {WorkerClient} from ${JSON.stringify(new URL("../src/client.ts", import.meta.url).href)};
-import {createInterface} from 'node:readline';
-const inner=new WorkerClient({timeoutMs:500,launch:async()=>({executable:process.execPath,args:['-e',${JSON.stringify(leaf)}]})});
-const lines=createInterface({input:process.stdin});lines.on('line',async line=>{const r=JSON.parse(line);if(!r.action)return;try{console.log(JSON.stringify({id:r.id,result:await inner.execute(r.action,r.args)}))}catch(e){console.log(JSON.stringify({id:r.id,result:{ok:false,action:r.action,error:String(e)}}))}});lines.on('close',()=>inner.dispose());`;
-    const worker = new WorkerClient({
-      timeoutMs: 500,
-      launch: async () => ({
-        executable: process.execPath,
-        args: ["--import", "tsx", "--input-type=module", "-e", relay],
-      }),
-    });
+    const worker = timingRelayWorker();
     try {
       for (const timing of [
         { holdMs: 1000 },
@@ -452,18 +456,7 @@ input.on('line',line=>{const r=JSON.parse(line);if(r.cancel){clearTimeout(active
 });
 
 test("text timing crosses two request layers without restoring ordinary deadlines or wrapping long timers", async () => {
-  const leaf = `require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.action)setTimeout(()=>console.log(JSON.stringify({id:r.id,result:{ok:true,action:r.action,received:r.args,cleanupConfirmed:true}})),700)});`;
-  const relay = `import {WorkerClient} from ${JSON.stringify(new URL("../src/client.ts", import.meta.url).href)};
-import {createInterface} from 'node:readline';
-const inner=new WorkerClient({timeoutMs:500,launch:async()=>({executable:process.execPath,args:['-e',${JSON.stringify(leaf)}]})});
-const lines=createInterface({input:process.stdin});lines.on('line',async line=>{const r=JSON.parse(line);if(!r.action)return;try{console.log(JSON.stringify({id:r.id,result:await inner.execute(r.action,r.args)}))}catch(e){console.log(JSON.stringify({id:r.id,result:{ok:false,action:r.action,error:String(e)}}))}});lines.on('close',()=>inner.dispose());`;
-  const worker = new WorkerClient({
-    timeoutMs: 500,
-    launch: async () => ({
-      executable: process.execPath,
-      args: ["--import", "tsx", "--input-type=module", "-e", relay],
-    }),
-  });
+  const worker = timingRelayWorker();
   try {
     for (const timing of [
       { inputDelayMs: 1000 },
