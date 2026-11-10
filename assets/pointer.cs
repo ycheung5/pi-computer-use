@@ -118,11 +118,18 @@ partial class WindowsBridge {
     Dictionary<string,object> result=Result(true,action);result["cleanupConfirmed"]=true;
     IntPtr window=IntPtr.Zero,before=IntPtr.Zero;uint owner=0;
     ControlPoint original=new ControlPoint(),last=original;
-    bool moved=false,held=false,releaseFailed=false,activated=false;uint up=4;
+    bool moved=false,held=false,releaseFailed=false,activated=false,inputDispatched=false;uint up=4;
+    long holdMs=0;InputTiming timing=null;
     AutomationElement element=null;HashSet<long> popups=new HashSet<long>();
     InteractionGuard interaction=null;
     EventWaitHandle cancel=null;
     try {
+      if(action=="click") {
+        holdMs=InputTiming.Milliseconds(args,"holdMs",0);
+        timing=new InputTiming(args,holdMs,args.ContainsKey("holdMs"),40000);
+        var policy=timing.Describe();policy["holdMs"]=holdMs;result["timing"]=policy;
+        if((args.ContainsKey("holdMs") || args.ContainsKey("timeoutMs")) && (TextOption(args,"dispatch","auto")=="background" || (args.ContainsKey("activate") && !Option(args,"activate",false))))throw new InvalidOperationException("TIMING_UNSUPPORTED: click timing requires native foreground dispatch without explicit activate: false");
+      }
       interaction=new InteractionGuard(TextOption(args,"_cancelEvent",""),NumberOption(args,"_stopProcessId",0));before=GetForegroundWindow();GetCursorPos(out original);last=original;
       // Resolve without activation: validate identity and point before any takeover.
       Dictionary<string,object> quiet=new Dictionary<string,object>(args);quiet["activate"]=false;
@@ -139,7 +146,7 @@ partial class WindowsBridge {
       string button=TextOption(args,"button","left"),dispatch=TextOption(args,"dispatch","auto");
       if(action=="click" || action=="double_click" || action=="drag")ForgetTextFocus();
       if(element!=null && !element.Current.IsEnabled)throw new InvalidOperationException("ELEMENT_DISABLED");
-      bool useBackground=dispatch=="background" || (action=="click" && element!=null && button=="left" && dispatch=="auto" && !Option(args,"activate",false));
+      bool useBackground=dispatch=="background" || (action=="click" && !args.ContainsKey("holdMs") && !args.ContainsKey("timeoutMs") && element!=null && button=="left" && dispatch=="auto" && !Option(args,"activate",false));
       if(useBackground && element!=null) {
         if(action=="click" && button=="left") {
           Dictionary<string,object> controlArgs=new Dictionary<string,object>(args);controlArgs["fallbackClick"]=true;
@@ -181,7 +188,7 @@ partial class WindowsBridge {
       int repetitions=action=="double_click"?2:1;
       for(int iteration=0;iteration<repetitions;iteration++) {
         for(int i=0;i<path.Count;i++) {
-          interaction.Check();
+          if(timing!=null)timing.Check();interaction.Check();
           ControlPoint p=path[i],current;GetCursorPos(out current);
           if(moved && (current.X!=last.X || current.Y!=last.Y))throw new InvalidOperationException("USER_INPUT_CHANGED: pointer moved during automation");
           if(action=="drag" && i>0) {
@@ -197,9 +204,13 @@ partial class WindowsBridge {
           } else PointerCheck(cancel,window,owner,p,true,action!="move" || Option(args,"activate",false));
           if(action=="click" || action=="double_click" || (action=="drag" && i==0)) {
             // Set held before the down attempt: uncertain dispatch still requires an up.
-            held=true;PointerSend(down,0);
+            held=true;inputDispatched=true;PointerSend(down,0);
             if(cancel.WaitOne(0))throw new InvalidOperationException("COMPUTER_USE_STOPPED");
           }
+          if(action=="click" && holdMs>0)timing.Wait(holdMs,cancel,delegate {
+            interaction.Check();PointerCheck(cancel,window,owner,p,true);
+            ControlPoint currentPointer;if(!GetCursorPos(out currentPointer) || currentPointer.X!=last.X || currentPointer.Y!=last.Y)throw new InvalidOperationException("USER_INPUT_CHANGED: pointer moved during automation");
+          });
           if(action=="click" || action=="double_click") {PointerSend(up,0);held=false;}
           if(action=="scroll") {int y=NumberOption(args,"deltaY",480),x=NumberOption(args,"deltaX",0);if(y!=0)PointerSend(0x800,-y);if(x!=0){PointerCheck(cancel,window,owner,p,true,action!="move" || Option(args,"activate",false));PointerSend(0x1000,x);}}
           if(action=="drag" && i<path.Count-1 && cancel.WaitOne(10))throw new InvalidOperationException("COMPUTER_USE_STOPPED");
@@ -212,6 +223,7 @@ partial class WindowsBridge {
     finally {
       if(held)try {PointerSend(up,0);held=false;}catch(Exception error){releaseFailed=true;result["ok"]=false;result["error"]="INPUT_CLEANUP_UNCONFIRMED: "+error.Message;}
       result["cleanupConfirmed"]=!releaseFailed;
+      if(action=="click"){result["inputDispatched"]=inputDispatched;result["interrupted"]=!Convert.ToBoolean(result["ok"]);}
       if(cancel!=null)cancel.Dispose();
       if(pointerListener!=null){pointerListener.Dispose();pointerListener=null;}
       ControlPoint now;bool same=CurrentReferenceIntact() && GetCursorPos(out now) && now.X==last.X && now.Y==last.Y;

@@ -71,6 +71,7 @@ assert.ok(
       "cross-app-discovery",
       "owned-popup",
       "native-menu",
+      "timing",
     ].includes(selectedCase),
   "unknown case",
 );
@@ -85,6 +86,7 @@ if (options.includes("--list")) {
       executed: false,
       cases: selectedCase
         ? [
+            selectedCase === "timing" ||
             selectedCase.startsWith("cross-app-") ||
             selectedCase === "owned-popup" ||
             selectedCase === "native-menu"
@@ -100,6 +102,18 @@ if (options.includes("--list")) {
             "coordinate-scroll",
             "drag-cancellation-release",
           ],
+      ...(selectedCase === "timing"
+        ? {
+            timingCases: [
+              "default-click-restoration",
+              "zero-hold",
+              "timed-left-right-middle",
+              "target-error-release",
+              "short-deadline-release",
+              "cancel-disabled-deadline",
+            ],
+          }
+        : {}),
       pending: [
         "successful-drag-drop",
         "foreground-restoration",
@@ -115,6 +129,8 @@ if (options.includes("--list")) {
   );
   process.exit(0);
 }
+if (selectedCase === "timing")
+  assert.equal(engine, "pi", "timing case exercises Pi only");
 assert.equal(
   process.env.PI_CU_DEDICATED_INPUT_DESKTOP,
   "1",
@@ -166,6 +182,7 @@ const fixture = spawn(
   [
     `Pi CU Controls ${Date.now()}`,
     "--no-expiry",
+    ...(selectedCase === "timing" ? ["--timing"] : []),
     ...(selectedCase === "native-menu"
       ? ["--native-menu", "--outside-menu"]
       : []),
@@ -177,6 +194,18 @@ const fixture = spawn(
   },
 );
 const [ready] = await once(fixture.stdout, "data");
+const pointerEvents = [];
+let eventBuffer = "";
+fixture.stdout.on("data", (chunk) => {
+  eventBuffer += chunk.toString();
+  const lines = eventBuffer.split(/\r?\n/);
+  eventBuffer = lines.pop();
+  for (const line of lines)
+    if (line.startsWith("pointer-event:")) {
+      const [, button, direction, time] = line.split(":");
+      pointerEvents.push({ button, direction, time: Number(time) });
+    }
+});
 const target = {
   nativeWindowHandle: Number(ready.toString().trim()),
   processId: fixture.pid,
@@ -314,6 +343,170 @@ async function runCase() {
   };
   const initial = await observePointer();
   assert.equal(initial.clicks, 0);
+  if (selectedCase === "timing") {
+    const surface = (await find("Pointer fixture surface", "Pane"))[0];
+    assert.ok(surface);
+    const box = surface.boundingBox;
+    assert.ok(box && box.width > 0 && box.height > 0);
+    const point = {
+      x: Math.round(box.x + box.width / 2),
+      y: Math.round(box.y + box.height / 2),
+    };
+    const observe = async () => {
+      const line = await fixtureReply(
+        "observe-pointer-timing",
+        "pointer-timing-state:",
+      );
+      const [held, foreground, x, y] = line
+        .slice("pointer-timing-state:".length)
+        .split(":")
+        .map(Number);
+      assert.ok([held, foreground, x, y].every(Number.isFinite));
+      return { held, foreground, pointer: { x, y } };
+    };
+    const until = async (predicate) => {
+      const end = Date.now() + 5000;
+      do {
+        if (predicate()) return;
+        await new Promise((r) => setTimeout(r, 25));
+      } while (Date.now() < end);
+      throw Error("independent pointer event not observed");
+    };
+    const release = async (start, button, minimum = 0) => {
+      const priorUnconfirmed = pointerState.unconfirmed;
+      pointerState.unconfirmed = true;
+      await until(() =>
+        pointerEvents
+          .slice(start)
+          .some((e) => e.button === button && e.direction === "up"),
+      );
+      const events = pointerEvents
+        .slice(start)
+        .filter((e) => e.button === button);
+      assert.deepEqual(
+        events.map((e) => e.direction),
+        ["down", "up"],
+      );
+      const duration =
+        (events[1].time - events[0].time + 4294967296) % 4294967296;
+      assert.ok(
+        duration >= Math.max(0, minimum - 25),
+        JSON.stringify({ events, duration, minimum }),
+      );
+      const state = await observe();
+      if (state.held === 0) pointerState.unconfirmed = priorUnconfirmed;
+      assert.equal(
+        state.held,
+        0,
+        "OS must independently confirm all supported buttons released",
+      );
+      console.log(
+        JSON.stringify({
+          check: "pointer-timing-events",
+          button,
+          duration,
+          events,
+          state,
+        }),
+      );
+      return { duration, state };
+    };
+    for (const [button, timing] of [
+      ["left", {}],
+      ["left", { holdMs: 0 }],
+      ["left", { holdMs: 200 }],
+      ["right", { holdMs: 200, timeoutMs: 0 }],
+      ["middle", { holdMs: 200, timeoutMs: 5000 }],
+    ]) {
+      const before = await observe(),
+        start = pointerEvents.length;
+      const result = await call("click", { ...point, button, ...timing });
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.equal(result.inputDispatched, true);
+      assert.equal(result.timing.holdMs, timing.holdMs ?? 0);
+      const { state } = await release(start, button, timing.holdMs ?? 0);
+      assert.deepEqual(
+        state.pointer,
+        before.pointer,
+        "restore cursor only after release",
+      );
+      assert.equal(
+        state.foreground,
+        before.foreground,
+        "default foreground restoration",
+      );
+    }
+    let start = pointerEvents.length;
+    const errorCall = call("click", { ...point, holdMs: 3000, timeoutMs: 0 });
+    const errorOutcome = errorCall.then(
+      (result) => ({ result }),
+      (error) => ({ error: String(error) }),
+    );
+    await until(() =>
+      pointerEvents.slice(start).some((e) => e.direction === "down"),
+    );
+    await fixtureReply("cover", "covered");
+    const failed = await errorOutcome;
+    assert.ok(failed.result && !failed.result.ok, JSON.stringify(failed));
+    assert.match(
+      failed.result.error,
+      /POINT_OCCLUDED|TARGET_FOREGROUND_CHANGED/,
+    );
+    await release(start, "left");
+    await fixtureReply("uncover", "uncovered");
+    start = pointerEvents.length;
+    const short = await call("click", {
+      ...point,
+      holdMs: 3000,
+      timeoutMs: 1000,
+    });
+    assert.equal(short.ok, false);
+    assert.match(short.error, /WORKER_TIMEOUT/);
+    assert.ok((await release(start, "left")).duration < 3000);
+    await host.emit("agent_settled", { aborted: false });
+    await host.emit("before_agent_start", {
+      messageType: "user",
+      systemPrompt: "",
+      prompt: "Continue owned pointer timing fixture",
+    });
+    start = pointerEvents.length;
+    const controller = new AbortController();
+    // Caller cancellation can reject before cleanup: retain until settlement and OS release confirm it.
+    pointerState.unconfirmed = true;
+    const pending = execute(
+      "click",
+      { ...target, ...point, holdMs: Number.MAX_SAFE_INTEGER, timeoutMs: 0 },
+      controller.signal,
+    );
+    const cancelled = pending.then(
+      (result) => ({ result }),
+      (error) => ({ error: String(error) }),
+    );
+    await until(() =>
+      pointerEvents.slice(start).some((e) => e.direction === "down"),
+    );
+    controller.abort();
+    const outcome = await cancelled;
+    assert.ok(
+      outcome.error || outcome.result?.ok === false,
+      JSON.stringify(outcome),
+    );
+    await host.emit("agent_settled", { aborted: true });
+    await release(start, "left");
+    const health = await execute("health", {});
+    assert.equal(health.control.exclusiveControl, false);
+    assert.equal(health.control.physicalKeysHeld, 0);
+    pointerState.unconfirmed = false;
+    console.log(
+      JSON.stringify({
+        ok: true,
+        check: "pointer-timing",
+        cancelled: outcome,
+        physicalInput: true,
+      }),
+    );
+    return;
+  }
   if (selectedCase === "owned-popup" || selectedCase === "native-menu") {
     const activated = await call("activate_window", { activate: true });
     assert.equal(activated.activated, true, JSON.stringify(activated));

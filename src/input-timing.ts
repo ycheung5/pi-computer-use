@@ -40,7 +40,7 @@ export function inputTiming(
   };
 }
 
-export function keypressTiming(
+export function pressTiming(
   args: Record<string, unknown>,
   ordinaryTimeoutMs: number,
 ) {

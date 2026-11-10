@@ -28,7 +28,7 @@ Read the row matching the task; follow section links before reading whole docume
 | Scoped native document and visual agent acceptance | [Document workflow](validation.md#native-document-workflow), [handback continuation](validation.md#native-cancellation-and-handback-continuation), [opt-in visual runner](windows.md#scoped-visual-agent-check), [A04 evidence](validation.md#visual-ocr-association-preflight) |
 | Lifetime-bound native targeting and stale-reference behavior | [Window references](windows.md#window-lifetime-references), [accepted design](implementation-plan.md#window-lifetime-design) |
 | Native interop alternatives and tradeoffs | [Native interop research](native-interop-research.md) |
-| Guarded desktop pointer and dedicated input validation | [Pointer actions](pointer.md), [popup/menu/cross-process drop and restoration acceptance](validation.md#scoped-pointer-and-restoration-acceptance) |
+| Guarded desktop pointer and dedicated input validation | [Pointer actions](pointer.md), [single-click holds/deadlines](pointer.md#single-click-holds-and-deadlines), [popup/menu/cross-process drop and restoration acceptance](validation.md#scoped-pointer-and-restoration-acceptance) |
 | Text, chords, keypress timing, clipboard preservation and validation | [Text entry](text.md), [keypress timing](text.md#keypress-holds-and-deadlines), [chord/editor-focus acceptance](validation.md#pi-chords-and-editor-focus-acceptance), [clipboard acceptance](validation.md#pi-clipboard-contention-and-privacy-acceptance) |
 | Personal settings, commands and tool loading | [Settings](settings.md) |
 | Browser reads/actions, dedicated profiles, idle cleanup and fixtures | [Browser](browser.md) |

@@ -1,4 +1,4 @@
-import { keypressTiming, timingMilliseconds } from "./input-timing.js";
+import { pressTiming, timingMilliseconds } from "./input-timing.js";
 import { compileNative } from "./native.js";
 import { executePointer } from "./pointer.js";
 import type { WorkerResult } from "./protocol.js";
@@ -154,7 +154,7 @@ export function validateText(
       return bad("restoreClipboard must be boolean");
   } else {
     try {
-      keypressTiming(args, 90_000);
+      pressTiming(args, 90_000);
     } catch (cause) {
       return error(String(cause instanceof Error ? cause.message : cause));
     }

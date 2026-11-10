@@ -71,6 +71,15 @@ test("Pointer comparison plans without resources and refuses unapproved input", 
         /MODULE_NOT_FOUND|ENOENT|Windows Node/,
       );
     }
+    const timing = run("--list", "--engine=pi", "--case=timing");
+    assert.equal(timing.status, 0, timing.stderr);
+    assert.deepEqual(JSON.parse(timing.stdout).cases, ["timing"]);
+    assert.ok(
+      JSON.parse(timing.stdout).timingCases.includes("target-error-release"),
+    );
+    const timingDenied = run("--case=timing");
+    assert.notEqual(timingDenied.status, 0);
+    assert.match(timingDenied.stderr, /PI_CU_DEDICATED_INPUT_DESKTOP=1/);
     const invalid = run("--list", "--engine=other");
     assert.notEqual(invalid.status, 0);
     assert.match(invalid.stderr, /engine must be pi or reference/);

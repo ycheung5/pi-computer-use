@@ -30,7 +30,7 @@ const actionDescriptions: Record<string, string> = {
   element_info:
     "Inspect a fresh UIA or page element ID, or a physical screen point.",
   click:
-    "Click a control or physical screen point; background delivery is unverified. Browser page IDs act inside the page. Observe effects before retrying.",
+    "Click a control or physical screen point. Native foreground holdMs presses and releases left/right/middle in this call; timeoutMs: 0 disables only its execution deadline. Explicit timing refuses browser/background and activate: false routes. Omitted timing preserves defaults; background delivery is unverified. Observe effects before retrying.",
   double_click:
     "Double-click a control or physical screen point; background delivery is unverified. Browser page IDs act inside the page. Observe effects before retrying.",
   move: "Move the pointer to a control or physical screen point; browser page IDs act inside the page. Observe hover effects.",
