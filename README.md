@@ -133,7 +133,7 @@ The release audit recorded **187 passing portable tests**, one opt-in historical
 - Second-computer WSL installation and desktop actions were user-confirmed. Fresh native-Windows installation, broken-prerequisite handling and shutdown in that clean environment remain accepted, unverified first-release test limitations.
 - Display mapping was exercised at **100%, 150% and 175%**, including a changed negative-origin layout. Other configurations, including 200%, remain unverified.
 - Windows may refuse foreground activation or access to elevated/protected interfaces. The extension reports refusal rather than bypassing Windows protections.
-- Explicit Unicode SendInput retains a **50 ms per-unit delay**. Clipboard preservation has format-dependent limits; installed Firefox support is experimental.
+- Explicit Unicode SendInput defaults to a **50 ms per-unit delay**; explicit native pacing and per-call deadlines are [configurable](docs/text.md#sendinput-pacing-and-deadlines). Clipboard preservation has format-dependent limits; installed Firefox support is experimental.
 - Arm64, genuine same-HWND/PID reuse, verified UIPI denial and additional recorder/remote/capture variants remain unverified.
 
 See the [release scope](docs/validation.md#first-release-preparation) for the accepted limits and their evidence.

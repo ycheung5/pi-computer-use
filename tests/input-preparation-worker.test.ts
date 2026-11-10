@@ -8,7 +8,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { WorkerClient } from "../src/client.js";
 
-for (const action of ["click", "scroll", "keypress"] as const)
+for (const action of ["click", "scroll", "keypress", "type_text"] as const)
   test(
     `real worker waits for a matching input preparation acknowledgment before native ${action} dispatch`,
     { skip: process.platform === "win32", timeout: 15000 },
@@ -51,14 +51,15 @@ test(
   () => testInputBarrier("click", "settle-stop"),
 );
 
-test(
-  "worker shutdown cancels a keypress hold even when its execution deadline is disabled",
-  { skip: process.platform === "win32", timeout: 15000 },
-  () => testInputBarrier("keypress", "shutdown-held"),
-);
+for (const action of ["keypress", "type_text"] as const)
+  test(
+    `worker shutdown cancels ${action} even when its execution deadline is disabled`,
+    { skip: process.platform === "win32", timeout: 15000 },
+    () => testInputBarrier(action, "shutdown-held"),
+  );
 
 async function testInputBarrier(
-  action: "click" | "scroll" | "keypress",
+  action: "click" | "scroll" | "keypress" | "type_text",
   refuseControl:
     | false
     | "refused"
@@ -70,11 +71,18 @@ async function testInputBarrier(
     | "shutdown-held" = false,
 ) {
   const args =
-    action === "keypress"
-      ? { keys: ["Ctrl"], holdMs: 2147483648, timeoutMs: 0 }
-      : action === "scroll"
-        ? { elementId: "uia:owned-scroller", deltaY: 240 }
-        : { x: 1, y: 1, dispatch: "foreground" };
+    action === "type_text"
+      ? {
+          text: "a\r\n🙂\t",
+          method: "sendinput",
+          inputDelayMs: 2147483648,
+          timeoutMs: 0,
+        }
+      : action === "keypress"
+        ? { keys: ["Ctrl"], holdMs: 2147483648, timeoutMs: 0 }
+        : action === "scroll"
+          ? { elementId: "uia:owned-scroller", deltaY: 240 }
+          : { x: 1, y: 1, dispatch: "foreground" };
   const root = await mkdtemp(join(tmpdir(), "pi-cu-input-barrier-"));
   const compiler = join(
     root,
@@ -92,7 +100,7 @@ async function testInputBarrier(
   );
   await writeFile(
     fake,
-    `#!/usr/bin/env node\nconst {createInterface}=require('node:readline');const {appendFileSync,existsSync,writeFileSync}=require('node:fs');createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.cancel)return;if(r.action==='stop')writeFileSync(process.env.PI_CU_BARRIER_JOURNAL+'.stop','stopped');if(r.action==='take_control'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='refused'){console.log(JSON.stringify({id:r.id,result:{ok:false,action:r.action,error:'EXCLUSIVE_CONTROL_UNAVAILABLE'}}));return;}if(r.action==='release'&&['release-unconfirmed','settle-stop'].includes(process.env.PI_CU_BARRIER_REFUSE_CONTROL))appendFileSync(process.env.PI_CU_BARRIER_JOURNAL,'release\\n');if(r.action==='click'||r.action==='scroll'||r.action==='keypress'){appendFileSync(process.env.PI_CU_BARRIER_JOURNAL,'dispatch\\n');if(process.env.PI_CU_BARRIER_REFUSE_CONTROL==='shutdown-held'){const poll=setInterval(()=>{if(existsSync(process.env.PI_CU_BARRIER_JOURNAL+'.stop')){clearInterval(poll);console.log(JSON.stringify({id:r.id,result:{ok:false,action:r.action,error:'COMPUTER_USE_STOPPED',cleanupConfirmed:true,inputDispatched:true}}));}},5);return;}if(process.env.PI_CU_BARRIER_HOLD==='1')return;}console.log(JSON.stringify({id:r.id,result:{ok:!(r.action==='click'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='lost'),error:r.action==='click'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='lost'?'EXCLUSIVE_CONTROL_LOST: test protection loss':undefined,action:r.action,operationId:r.args.operationId,exclusiveControl:(r.action==='take_control'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL!=='unconfirmed')||(r.action==='disarm'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='release-unconfirmed'),hookInstalled:true,listenerProcessId:process.pid,received:r.args,cleanupConfirmed:process.env.PI_CU_BARRIER_HOLD!=='uncertain'}}));if(r.action==='take_control'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='listener-exit')setInterval(()=>{if(existsSync(process.env.PI_CU_BARRIER_JOURNAL+'.exit-listener'))process.exit(0);},5);});\n`,
+    `#!/usr/bin/env node\nconst {createInterface}=require('node:readline');const {appendFileSync,existsSync,writeFileSync}=require('node:fs');createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.cancel)return;if(r.action==='stop')writeFileSync(process.env.PI_CU_BARRIER_JOURNAL+'.stop','stopped');if(r.action==='take_control'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='refused'){console.log(JSON.stringify({id:r.id,result:{ok:false,action:r.action,error:'EXCLUSIVE_CONTROL_UNAVAILABLE'}}));return;}if(r.action==='release'&&['release-unconfirmed','settle-stop'].includes(process.env.PI_CU_BARRIER_REFUSE_CONTROL))appendFileSync(process.env.PI_CU_BARRIER_JOURNAL,'release\\n');if(r.action==='click'||r.action==='scroll'||r.action==='keypress'||r.action==='type_text'){appendFileSync(process.env.PI_CU_BARRIER_JOURNAL,'dispatch\\n');if(process.env.PI_CU_BARRIER_REFUSE_CONTROL==='shutdown-held'){const poll=setInterval(()=>{if(existsSync(process.env.PI_CU_BARRIER_JOURNAL+'.stop')){clearInterval(poll);console.log(JSON.stringify({id:r.id,result:{ok:false,action:r.action,error:'COMPUTER_USE_STOPPED',cleanupConfirmed:true,inputDispatched:true}}));}},5);return;}if(process.env.PI_CU_BARRIER_HOLD==='1')return;}console.log(JSON.stringify({id:r.id,result:{ok:!(r.action==='click'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='lost'),error:r.action==='click'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='lost'?'EXCLUSIVE_CONTROL_LOST: test protection loss':undefined,action:r.action,operationId:r.args.operationId,exclusiveControl:(r.action==='take_control'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL!=='unconfirmed')||(r.action==='disarm'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='release-unconfirmed'),hookInstalled:true,listenerProcessId:process.pid,received:r.args,cleanupConfirmed:process.env.PI_CU_BARRIER_HOLD!=='uncertain'}}));if(r.action==='take_control'&&process.env.PI_CU_BARRIER_REFUSE_CONTROL==='listener-exit')setInterval(()=>{if(existsSync(process.env.PI_CU_BARRIER_JOURNAL+'.exit-listener'))process.exit(0);},5);});\n`,
     { mode: 0o755 },
   );
   await writeFile(
@@ -260,6 +268,12 @@ async function testInputBarrier(
     if (action === "keypress") {
       assert.deepEqual(result.result.received.keys, ["Ctrl"]);
       assert.equal(result.result.received.holdMs, 2147483648);
+      assert.equal(result.result.received.timeoutMs, 0);
+    }
+    if (action === "type_text") {
+      assert.equal(result.result.received.text, "a\r\n🙂\t");
+      assert.equal(result.result.received.method, "sendinput");
+      assert.equal(result.result.received.inputDelayMs, 2147483648);
       assert.equal(result.result.received.timeoutMs, 0);
     }
     assert.equal(await readFile(journal, "utf8"), "dispatch\n");

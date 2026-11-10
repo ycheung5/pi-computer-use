@@ -164,7 +164,21 @@ partial class WindowsBridge {
     InteractionGuard interaction=null;
     AutomationElement main=null;bool cleanup=true;
     try {
-      long holdMs=0;InputTiming timing=null;
+      long holdMs=0,inputDelayMs=UnicodeInputDelayMs;InputTiming timing=null;
+      string text=TextOption(args,"text",""),method=TextOption(args,"method","auto");
+      if(action=="type_text") {
+        if(text.IndexOf('\0')>=0)throw new InvalidOperationException("INVALID_ARGUMENTS: NUL text cannot be entered safely");
+        inputDelayMs=InputTiming.Milliseconds(args,"inputDelayMs",UnicodeInputDelayMs);
+        if((args.ContainsKey("inputDelayMs") || args.ContainsKey("timeoutMs")) && (method!="sendinput" || args.ContainsKey("browserTab")))throw new InvalidOperationException("TIMING_UNSUPPORTED: text timing requires explicit native sendinput");
+        if(method=="sendinput") {
+          long units=text.Replace("\r\n","\n").Length;
+          if(inputDelayMs!=0 && units>9007199254740991L/inputDelayMs)throw new InvalidOperationException("INVALID_ARGUMENTS: requested pacing duration is not representable");
+          long duration=args.ContainsKey("inputDelayMs")?units*inputDelayMs:0;
+          timing=new InputTiming(args,duration,args.ContainsKey("inputDelayMs"),40000);
+          var policy=timing.Describe();policy["inputDelayMs"]=inputDelayMs;result["timing"]=policy;
+          result["inputDelayMs"]=inputDelayMs;result["inputUnitsDispatched"]=0;
+        }
+      }
       if(action=="keypress") {
         holdMs=InputTiming.Milliseconds(args,"holdMs",0);
         timing=new InputTiming(args,holdMs,args.ContainsKey("holdMs"),40000);
@@ -181,15 +195,14 @@ partial class WindowsBridge {
       ApplyVisibleIntent(args,window);
       if(textFocus.Count>0 && !textFocus.ContainsKey(PointerOriginKey(window)))ForgetTextFocus();
       uint owner=WindowOwner(window);popups=ControlPopups(owner,window);
-      string text=TextOption(args,"text",""),method=TextOption(args,"method","auto");
       if(text.IndexOf('\0')>=0)throw new InvalidOperationException("INVALID_ARGUMENTS: NUL text cannot be entered safely");
-      if(action=="type_text" && method=="auto" && TextOption(args,"focusMode","preserve")=="preserve" && !Option(args,"activate",false) && BackgroundEdit(window,text,result)) {result["inputTargetHandle"]=window.ToInt64();result["inputTargetProcessId"]=owner;return result;}
+      if(action=="type_text" && method=="auto" && TextOption(args,"focusMode","preserve")=="preserve" && !Option(args,"activate",false) && BackgroundEdit(window,text,result)) {textInputDispatched=true;result["inputTargetHandle"]=window.ToInt64();result["inputTargetProcessId"]=owner;return result;}
       bool background=action=="type_text"?method=="background":TextOption(args,"dispatch","foreground")=="background";
       if(background) {
         if(!args.ContainsKey("windowRef") && !args.ContainsKey("windowTitle") && !args.ContainsKey("processId") && !args.ContainsKey("nativeWindowHandle"))throw new InvalidOperationException("BACKGROUND_TARGET_REQUIRED");
         string characters=action=="type_text"?text:Convert.ToString(((IList)args["keys"])[0]);
         IntPtr recipient=TextFocus(window);if(recipient==IntPtr.Zero)recipient=window;AssertWritableText(recipient);
-        foreach(char character in characters) {CheckWindowReference(window);if(!IsWindow(window) || WindowOwner(window)!=owner || WindowOwner(recipient)!=owner)throw new InvalidOperationException("TARGET_IDENTITY_CHANGED");BeginWindowDispatch();if(!ControlPost(recipient,0x102,new IntPtr(character),new IntPtr(1)))throw new InvalidOperationException("TEXT_DISPATCH_UNCONFIRMED: some WM_CHAR messages may have been delivered; never replay");if(action=="keypress")textInputDispatched=true;}
+        foreach(char character in characters) {CheckWindowReference(window);if(!IsWindow(window) || WindowOwner(window)!=owner || WindowOwner(recipient)!=owner)throw new InvalidOperationException("TARGET_IDENTITY_CHANGED");BeginWindowDispatch();if(!ControlPost(recipient,0x102,new IntPtr(character),new IntPtr(1)))throw new InvalidOperationException("TEXT_DISPATCH_UNCONFIRMED: some WM_CHAR messages may have been delivered; never replay");textInputDispatched=true;}
         result["method"]="postmessage-wmchar";result["verification"]="unconfirmed";result["verified"]=false;result["inputTargetHandle"]=window.ToInt64();result["inputTargetProcessId"]=owner;return result;
       }
       if(TextOption(args,"_cancelEvent","").Length==0)throw new InvalidOperationException("WCU_NEEDS_INPUT: physical text/key input requires independent stopping");
@@ -210,17 +223,18 @@ partial class WindowsBridge {
       if(action=="type_text")RememberTextFocus(window,expectedFocus);
       if(action=="keypress") {Chord((IEnumerable)args["keys"],cancel,listener,window,owner,held,interaction,holdMs,timing);result["method"]="sendinput-keychord";}
       else if(method=="sendinput") {
-        // Modern Notepad also corrupts seeded/appended text with a 10 ms gap.
-        // Keep complete pairs paced and cancellable; dispatch is still not verification.
+        // Preserve complete UTF-16 pairs and newline/tab handling at the selected pace.
+        // Dispatch is still not application verification.
         for(int index=0;index<text.Length;index++) {
           char character=text[index];
           if(character=='\r' && index+1<text.Length && text[index+1]=='\n')index++;
-          TextCheck(cancel,listener,window,owner,expectedFocus,true,interaction);
+          timing.Check();TextCheck(cancel,listener,window,owner,expectedFocus,true,interaction);
           HeldKey key=character=='\r' || character=='\n'?new HeldKey{Key=13}:character=='\t'?new HeldKey{Key=9}:new HeldKey{Scan=character,Flags=4};
           Down(held,key);Up(held,key);
-          if(cancel.WaitOne(UnicodeInputDelayMs))throw new InvalidOperationException("COMPUTER_USE_STOPPED");
+          result["inputUnitsDispatched"]=Convert.ToInt32(result["inputUnitsDispatched"])+1;
+          timing.Wait(inputDelayMs,cancel,delegate {TextCheck(cancel,listener,window,owner,expectedFocus,true,interaction);});
         }
-        result["method"]="sendinput-unicode";result["inputDelayMs"]=UnicodeInputDelayMs;
+        result["method"]="sendinput-unicode";
       }else {
         // All UIA focus/provider calls finish BEFORE clipboard replacement.
         ProcessStartInfo info=new ProcessStartInfo{FileName=TextOption(args,"_clipboardExecutable",""),UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true,StandardOutputEncoding=Encoding.UTF8,StandardErrorEncoding=Encoding.UTF8};
@@ -255,7 +269,7 @@ partial class WindowsBridge {
       }
       if(cancel!=null)cancel.Dispose();if(listener!=null)listener.Dispose();
       result["cleanupConfirmed"]=cleanup;
-      if(action=="keypress"){result["inputDispatched"]=textInputDispatched;result["interrupted"]=!Convert.ToBoolean(result["ok"]); }
+      if(action=="keypress" || action=="type_text"){result["inputDispatched"]=textInputDispatched;result["interrupted"]=!Convert.ToBoolean(result["ok"]); }
       // No potentially blocked UIA verification is permitted before clipboard cleanup.
       if(cleanup)RestoreControlState(result,before,pointer,window,popups,Option(args,"activate",false),interaction);
       else {result["pointer"]="left: cleanup unconfirmed";result["foreground"]="left: cleanup unconfirmed";}

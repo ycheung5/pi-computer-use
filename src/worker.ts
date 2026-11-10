@@ -374,6 +374,17 @@ async function dispatch(
     );
     return;
   }
+  if (
+    request.action === "type_text" &&
+    isBrowserRequest(request.args) &&
+    (request.args.inputDelayMs !== undefined ||
+      request.args.timeoutMs !== undefined)
+  ) {
+    process.stdout.write(
+      `${JSON.stringify({ id: request.id, result: { ok: false, action: request.action, error: "TIMING_UNSUPPORTED: text timing requires explicit native sendinput" } })}\n`,
+    );
+    return;
+  }
   const denial = await settings.authorize(request.action);
   if (denial) {
     process.stdout.write(

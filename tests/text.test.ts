@@ -82,7 +82,14 @@ test("Pi exposes one shared native/browser text declaration and reports key refu
           parameters.properties.timeoutMs.maximum,
           Number.MAX_SAFE_INTEGER,
         );
-      } else assert.equal(parameters.properties.holdMs, undefined);
+      } else {
+        assert.equal(parameters.properties.holdMs, undefined);
+        assert.equal(parameters.properties.inputDelayMs.minimum, 0);
+        assert.equal(
+          parameters.properties.timeoutMs.maximum,
+          Number.MAX_SAFE_INTEGER,
+        );
+      }
     }
     const keypress = tools.find(
       (tool) => tool.name === "windows_computer_use_keypress",
@@ -174,6 +181,74 @@ test("keypress timing validates before input and keeps native foreground semanti
       holdMs: Number.MAX_SAFE_INTEGER,
     });
     assert.match(String(overflow.error), /INVALID_ARGUMENTS.*representable/);
+  } finally {
+    await worker.dispose();
+  }
+});
+
+test("SendInput pacing accepts safe explicit intervals and refuses incapable routes before input", async () => {
+  const worker = new WorkerClient({
+    launch: async () => ({
+      executable: process.execPath,
+      args: [
+        "--import",
+        "tsx",
+        fileURLToPath(new URL("../src/worker.ts", import.meta.url)),
+      ],
+    }),
+  });
+  try {
+    for (const timing of [
+      {},
+      { inputDelayMs: 0 },
+      { inputDelayMs: 25 },
+      { inputDelayMs: 2147483648, timeoutMs: 0 },
+    ]) {
+      const result = await worker.execute("type_text", {
+        text: "a\r\n🙂\t",
+        method: "sendinput",
+        ...timing,
+      });
+      assert.match(String(result.error), /UNSUPPORTED_HOST/);
+    }
+    for (const method of [
+      undefined,
+      "auto",
+      "clipboard",
+      "background",
+      "sendinput",
+    ])
+      for (const browserTab of method === "sendinput"
+        ? ["owned:1"]
+        : [undefined]) {
+        const result = await worker.execute("type_text", {
+          text: "no input",
+          ...(method ? { method } : {}),
+          ...(browserTab ? { browserTab } : {}),
+          inputDelayMs: 0,
+          timeoutMs: 0,
+        });
+        assert.match(String(result.error), /TIMING_UNSUPPORTED/);
+      }
+    for (const field of ["inputDelayMs", "timeoutMs"])
+      for (const value of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, "1", null]) {
+        const result = await worker.execute("type_text", {
+          text: "x",
+          method: "sendinput",
+          [field]: value,
+        });
+        assert.match(String(result.error), /INVALID_ARGUMENTS/);
+      }
+    for (const args of [
+      { text: "xy", inputDelayMs: Number.MAX_SAFE_INTEGER, timeoutMs: 0 },
+      { text: "x", inputDelayMs: Number.MAX_SAFE_INTEGER },
+    ]) {
+      const result = await worker.execute("type_text", {
+        method: "sendinput",
+        ...args,
+      });
+      assert.match(String(result.error), /INVALID_ARGUMENTS.*representable/);
+    }
   } finally {
     await worker.dispose();
   }

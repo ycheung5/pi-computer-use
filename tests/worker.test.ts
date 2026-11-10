@@ -410,3 +410,133 @@ test("keypress deadline reports cleanup uncertainty before its timeout category"
     await worker.dispose();
   }
 });
+
+test("text explicit deadlines stop cooperatively and preserve cleanup without replay", async () => {
+  const peer = `const input=require('node:readline').createInterface({input:process.stdin});let active;let calls=0;
+input.on('line',line=>{const r=JSON.parse(line);if(r.cancel){clearTimeout(active.timer);console.log(JSON.stringify({id:active.id,result:{ok:false,action:'type_text',cleanupConfirmed:true,inputDispatched:true,interrupted:true,calls}}));return;}if(!r.action)return;calls++;active={id:r.id,timer:setTimeout(()=>console.log(JSON.stringify({id:r.id,result:{ok:true,action:r.action,cleanupConfirmed:true,calls}})),500)};});`;
+  const worker = new WorkerClient({
+    timeoutMs: 2000,
+    launch: async () => ({ executable: process.execPath, args: ["-e", peer] }),
+  });
+  try {
+    const result = await worker.execute("type_text", {
+      text: "a\r\n🙂\t",
+      method: "sendinput",
+      inputDelayMs: 1000,
+      timeoutMs: 150,
+    });
+    assert.equal(result.ok, false);
+    assert.match(String(result.error), /WORKER_TIMEOUT.*not replayed/);
+    assert.equal(result.cleanupConfirmed, true);
+    assert.equal(result.calls, 1);
+    assert.equal(result.inputDispatched, true);
+    assert.equal(result.interrupted, true);
+  } finally {
+    await worker.dispose();
+  }
+});
+
+test("text timing crosses two request layers without restoring ordinary deadlines or wrapping long timers", async () => {
+  const leaf = `require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.action)setTimeout(()=>console.log(JSON.stringify({id:r.id,result:{ok:true,action:r.action,received:r.args,cleanupConfirmed:true}})),700)});`;
+  const relay = `import {WorkerClient} from ${JSON.stringify(new URL("../src/client.ts", import.meta.url).href)};
+import {createInterface} from 'node:readline';
+const inner=new WorkerClient({timeoutMs:500,launch:async()=>({executable:process.execPath,args:['-e',${JSON.stringify(leaf)}]})});
+const lines=createInterface({input:process.stdin});lines.on('line',async line=>{const r=JSON.parse(line);if(!r.action)return;try{console.log(JSON.stringify({id:r.id,result:await inner.execute(r.action,r.args)}))}catch(e){console.log(JSON.stringify({id:r.id,result:{ok:false,action:r.action,error:String(e)}}))}});lines.on('close',()=>inner.dispose());`;
+  const worker = new WorkerClient({
+    timeoutMs: 500,
+    launch: async () => ({
+      executable: process.execPath,
+      args: ["--import", "tsx", "--input-type=module", "-e", relay],
+    }),
+  });
+  try {
+    for (const timing of [
+      { inputDelayMs: 1000 },
+      { timeoutMs: 0 },
+      { timeoutMs: 2000 },
+      { inputDelayMs: 2147483648 },
+      { inputDelayMs: 2147483648, timeoutMs: 0 },
+      { timeoutMs: Number.MAX_SAFE_INTEGER },
+    ]) {
+      const result = await worker.execute("type_text", {
+        text: "a\r\n🙂\t",
+        method: "sendinput",
+        ...timing,
+      });
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.deepEqual(result.received, {
+        text: "a\r\n🙂\t",
+        method: "sendinput",
+        ...timing,
+      });
+    }
+  } finally {
+    await worker.dispose();
+  }
+});
+
+test("unrepresentable text timing is refused before launching a worker", async () => {
+  let launches = 0;
+  const worker = new WorkerClient({
+    launch: async () => {
+      launches++;
+      throw Error("must not start");
+    },
+  });
+  try {
+    for (const timing of [
+      { inputDelayMs: Number.MAX_SAFE_INTEGER },
+      { inputDelayMs: Infinity },
+      { timeoutMs: NaN },
+      { timeoutMs: -1 },
+      { timeoutMs: 0.5 },
+    ]) {
+      const result = await worker.execute("type_text", {
+        text: "x",
+        method: "sendinput",
+        ...timing,
+      });
+      assert.equal(result.ok, false);
+      assert.match(String(result.error), /INVALID_ARGUMENTS/);
+    }
+    assert.equal(launches, 0);
+  } finally {
+    await worker.dispose();
+  }
+});
+
+test("text deadline results expose normalized-unit pacing budgets and default policy", async () => {
+  const peer = `let active;require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.cancel)console.log(JSON.stringify({id:active.id,result:{ok:false,action:'type_text',cleanupConfirmed:true,inputDispatched:true}}));else if(r.action)active=r;});`;
+  const worker = new WorkerClient({
+    timeoutMs: 150,
+    launch: async () => ({ executable: process.execPath, args: ["-e", peer] }),
+  });
+  try {
+    for (const [args, expected] of [
+      [{}, { inputDelayMs: 50, timeoutMs: 150, deadlinePolicy: "default" }],
+      [
+        { inputDelayMs: 0 },
+        { inputDelayMs: 0, timeoutMs: 150, deadlinePolicy: "derived" },
+      ],
+      [
+        { inputDelayMs: 1 },
+        { inputDelayMs: 1, timeoutMs: 155, deadlinePolicy: "derived" },
+      ],
+      [
+        { inputDelayMs: 1000, timeoutMs: 150 },
+        { inputDelayMs: 1000, timeoutMs: 150, deadlinePolicy: "explicit" },
+      ],
+    ] as const) {
+      const result = await worker.execute("type_text", {
+        text: "a\r\n🙂\t",
+        method: "sendinput",
+        ...args,
+      });
+      assert.equal(result.ok, false);
+      assert.equal(result.cleanupConfirmed, true);
+      assert.deepEqual(result.timing, expected);
+    }
+  } finally {
+    await worker.dispose();
+  }
+});

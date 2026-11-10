@@ -20,6 +20,10 @@ test("owned text timing plan prepares only the new scoped keyboard cases without
   assert.equal(result.clipboard, false);
   assert.equal(result.case, "keyboard-timing");
   assert.deepEqual(result.cases, [
+    "text-pacing-default-zero-25ms",
+    "text-short-deadline",
+    "text-focus-interruption",
+    "text-cancel-long-delay",
     "modifier-aliases",
     "immediate-release",
     "timed-key-and-chord",

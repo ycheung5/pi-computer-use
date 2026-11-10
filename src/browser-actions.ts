@@ -78,6 +78,8 @@ const definitions: Record<
         default: "preserve",
       },
       restoreClipboard: { type: "boolean", default: true },
+      inputDelayMs: timingMilliseconds,
+      timeoutMs: timingMilliseconds,
     },
   },
   keypress: {
@@ -126,6 +128,8 @@ const definitions: Record<
       value: { type: "string" },
       fallbackType: { type: "boolean", default: true },
       restoreClipboard: { type: "boolean", default: true },
+      inputDelayMs: timingMilliseconds,
+      timeoutMs: timingMilliseconds,
     },
   },
   activate_window: { properties: { ...target, ...tab } },
@@ -187,6 +191,13 @@ export function normalizeBrowserAction(
   )
     throw new Error(
       "TIMING_UNSUPPORTED: keypress timing and standalone modifiers require native foreground dispatch",
+    );
+  if (
+    action === "type_text" &&
+    (args.inputDelayMs !== undefined || args.timeoutMs !== undefined)
+  )
+    throw new Error(
+      "TIMING_UNSUPPORTED: text timing requires explicit native sendinput",
     );
   const definition = definitions[action];
   if (!definition) return undefined;

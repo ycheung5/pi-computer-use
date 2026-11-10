@@ -36,7 +36,10 @@ export function inputTiming(
     );
   return {
     timeoutMs,
-    deadlinePolicy: args.holdMs !== undefined ? "derived" : "default",
+    deadlinePolicy:
+      args.holdMs !== undefined || args.inputDelayMs !== undefined
+        ? "derived"
+        : "default",
   };
 }
 
@@ -47,6 +50,35 @@ export function keypressTiming(
   const holdMs =
     args.holdMs === undefined ? 0 : milliseconds(args.holdMs, "holdMs");
   return { holdMs, ...inputTiming(args, holdMs, ordinaryTimeoutMs) };
+}
+
+/** Count dispatched UTF-16 units, treating CRLF as the existing single Enter. */
+export function textTiming(
+  args: Record<string, unknown>,
+  ordinaryTimeoutMs: number,
+) {
+  const inputDelayMs =
+    args.inputDelayMs === undefined
+      ? 50
+      : milliseconds(args.inputDelayMs, "inputDelayMs");
+  if (args.inputDelayMs !== undefined || args.timeoutMs !== undefined) {
+    if (args.method !== "sendinput" || args.browserTab !== undefined)
+      throw new Error(
+        "TIMING_UNSUPPORTED: text timing requires explicit native sendinput",
+      );
+  }
+  const units =
+    typeof args.text === "string" ? args.text.replace(/\r\n/g, "\n").length : 0;
+  const requestedDuration =
+    args.inputDelayMs === undefined ? 0 : units * inputDelayMs;
+  if (!Number.isSafeInteger(requestedDuration))
+    throw new Error(
+      "INVALID_ARGUMENTS: requested pacing duration is not representable",
+    );
+  return {
+    inputDelayMs,
+    ...inputTiming(args, requestedDuration, ordinaryTimeoutMs),
+  };
 }
 
 /** Node timers accept signed 32-bit intervals; chain monotonic chunks without wrapping. */

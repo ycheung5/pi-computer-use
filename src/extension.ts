@@ -38,7 +38,7 @@ const actionDescriptions: Record<string, string> = {
   scroll:
     "Scroll a control or physical screen point; native element scrolling tries background first. Positive deltaY scrolls down. Browser tabs scroll inside the page.",
   type_text:
-    "Type into the focused control. Native auto tries a background edit then clipboard paste; clipboard restoration is requested by default. Background WM_CHAR is unverified.",
+    "Type into the focused control. Native auto tries a background edit then clipboard paste; clipboard restoration is requested by default. Explicit native sendinput supports inputDelayMs (default 50; zero adds no delay) and timeoutMs (zero disables execution deadline). Other routes refuse timing fields. Partial input is never replayed; observe text to verify it. Background WM_CHAR is unverified.",
   keypress:
     "Send a key/chord or standalone Ctrl, Alt or Shift. Native foreground holdMs completes and releases in this call; timeoutMs: 0 disables only its execution deadline. Omitted timing preserves defaults. Timing and modifier taps refuse browser/background routes; Windows keys remain blocked. Observe effects before retrying.",
   focus:

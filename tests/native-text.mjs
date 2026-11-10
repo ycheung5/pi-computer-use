@@ -12,6 +12,10 @@ import { computerUseHost } from "./native-host.mjs";
 const timing = process.argv.includes("--timing");
 const physical = timing || process.argv.includes("--chords");
 const timingCases = [
+  "text-pacing-default-zero-25ms",
+  "text-short-deadline",
+  "text-focus-interruption",
+  "text-cancel-long-delay",
   "modifier-aliases",
   "immediate-release",
   "timed-key-and-chord",
@@ -356,6 +360,129 @@ async function verifyTiming() {
     );
     return duration;
   };
+  const restart = async () => {
+    await host.emit("agent_settled", { aborted: false });
+    await host.emit("before_agent_start", {
+      messageType: "user",
+      systemPrompt: "",
+      prompt: "Continue owned fixture timing",
+    });
+  };
+  const clear = async () => {
+    await focus();
+    for (const keys of [["Ctrl", "A"], ["Backspace"]]) {
+      const result = await call("keypress", { keys, activate: true });
+      assert.equal(result.ok, true, JSON.stringify(result));
+    }
+    await untilText((s) => s.primary === "" && s.held === 0);
+  };
+  const tabsOn = reply("text-tabs-ready:True");
+  fixture.stdin.write("text-tabs-on\n");
+  await tabsOn;
+  for (const inputDelayMs of [undefined, 0, 25]) {
+    await clear();
+    const text = "Unicode 測試 🙂\r\nTab\tend";
+    const started = performance.now();
+    const result = await call("type_text", {
+      text,
+      method: "sendinput",
+      activate: true,
+      ...(inputDelayMs === undefined ? {} : { inputDelayMs }),
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.inputDelayMs, inputDelayMs ?? 50);
+    assert.equal(
+      result.timing.deadlinePolicy,
+      inputDelayMs === undefined ? "default" : "derived",
+    );
+    assert.equal(result.inputDispatched, true);
+    assert.equal(result.interrupted, false);
+    const state = await untilText(
+      (s) =>
+        s.primary.replace(/\r\n/g, "\n") === "Unicode 測試 🙂\nTab\tend" &&
+        s.held === 0,
+    );
+    console.log(
+      JSON.stringify({
+        check: "text-pacing-exact",
+        inputDelayMs: result.inputDelayMs,
+        elapsedMs: performance.now() - started,
+        result,
+        state,
+      }),
+    );
+  }
+  await clear();
+  const shortText = await call("type_text", {
+    text: "XY",
+    method: "sendinput",
+    inputDelayMs: 3000,
+    timeoutMs: 1000,
+    activate: true,
+  });
+  assert.equal(shortText.ok, false, JSON.stringify(shortText));
+  assert.match(shortText.error, /WORKER_TIMEOUT/);
+  assert.equal(shortText.cleanupConfirmed, true);
+  await untilText((s) => s.primary === "X" && s.held === 0);
+  await restart();
+  await clear();
+  const focusText = call("type_text", {
+    text: "AB",
+    method: "sendinput",
+    inputDelayMs: 3000,
+    timeoutMs: 0,
+    activate: true,
+  });
+  const focusTextOutcome = focusText.then(
+    (result) => ({ result }),
+    (error) => ({ error: String(error) }),
+  );
+  await untilText((s) => s.primary === "A");
+  const textFocusReady = reply("focus-ready");
+  fixture.stdin.write("prepare-focus\n");
+  await textFocusReady;
+  const interruptedText = await focusTextOutcome;
+  assert.ok(
+    interruptedText.result && !interruptedText.result.ok,
+    JSON.stringify(interruptedText),
+  );
+  assert.match(interruptedText.result.error, /TARGET_FOCUS_CHANGED/);
+  await untilText((s) => s.primary === "A" && s.held === 0);
+  await clear();
+  inputUnconfirmed = true;
+  const textController = new AbortController();
+  const longText = host.tools.get("windows_computer_use_type_text").execute(
+    "cancel-text-delay",
+    {
+      ...target,
+      text: "Z",
+      method: "sendinput",
+      inputDelayMs: Number.MAX_SAFE_INTEGER,
+      timeoutMs: 0,
+      activate: true,
+    },
+    textController.signal,
+    undefined,
+    {},
+  );
+  const textCancelled = longText.then(
+    (result) => ({ result }),
+    (error) => ({ error: String(error) }),
+  );
+  await untilText((s) => s.primary === "Z");
+  textController.abort();
+  const textOutcome = await textCancelled;
+  assert.ok(
+    textOutcome.error || textOutcome.result?.isError,
+    JSON.stringify(textOutcome),
+  );
+  await host.emit("agent_settled", { aborted: true });
+  await untilText((s) => s.primary === "Z" && s.held === 0);
+  inputUnconfirmed = false;
+  await restart();
+  const tabsOff = reply("text-tabs-ready:False");
+  fixture.stdin.write("text-tabs-off\n");
+  await tabsOff;
   for (const [alias, key] of [
     ["Ctrl", 17],
     ["Control", 17],

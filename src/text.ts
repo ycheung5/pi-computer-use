@@ -1,4 +1,8 @@
-import { keypressTiming, timingMilliseconds } from "./input-timing.js";
+import {
+  keypressTiming,
+  textTiming,
+  timingMilliseconds,
+} from "./input-timing.js";
 import { compileNative } from "./native.js";
 import { executePointer } from "./pointer.js";
 import type { WorkerResult } from "./protocol.js";
@@ -31,6 +35,8 @@ export const textTools = [
           default: "preserve",
         },
         restoreClipboard: { type: "boolean", default: true },
+        inputDelayMs: timingMilliseconds,
+        timeoutMs: timingMilliseconds,
       },
       required: ["text"],
     },
@@ -102,7 +108,14 @@ export function validateText(
   const allowed = new Set([
     ...Object.keys(target),
     ...(action === "type_text"
-      ? ["text", "method", "focusMode", "restoreClipboard"]
+      ? [
+          "text",
+          "method",
+          "focusMode",
+          "restoreClipboard",
+          "inputDelayMs",
+          "timeoutMs",
+        ]
       : ["keys", "dispatch", "holdMs", "timeoutMs"]),
   ]);
   if (
@@ -135,6 +148,11 @@ export function validateText(
       return bad(
         "text must be nonempty, without NUL, at most 1000000 UTF-16 units",
       );
+    try {
+      textTiming(args, 90_000);
+    } catch (cause) {
+      return error(String(cause instanceof Error ? cause.message : cause));
+    }
     if (
       args.method !== undefined &&
       !["auto", "clipboard", "sendinput", "background"].includes(
