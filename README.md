@@ -57,11 +57,11 @@ To retain the built checkout as a local Pi package, run `pi install .` from that
 
 ### Install a built archive
 
-For a prebuilt `ycheung5-pi-computer-use-0.1.0.tgz` produced by `npm pack`:
+For a prebuilt `ycheung5-pi-computer-use-0.1.1.tgz` produced by `npm pack`:
 
 ```sh
 mkdir pi-computer-use
-tar -xzf ycheung5-pi-computer-use-0.1.0.tgz -C pi-computer-use --strip-components=1
+tar -xzf ycheung5-pi-computer-use-0.1.1.tgz -C pi-computer-use --strip-components=1
 cd pi-computer-use
 npm install --omit=dev --omit=peer --ignore-scripts
 pi install .
@@ -128,7 +128,7 @@ Settings are shared across projects and native Windows/WSL2 Pi in `%LOCALAPPDATA
 
 ## Tested scope and known limits
 
-The release audit recorded **187 passing portable tests**, one opt-in historical-reference skip, and checks of the built distribution. Named native/browser agent workflows and human control/display checks have separate [acceptance receipts](docs/validation.md#capability-coverage). CI is not a claim that every application or desktop state works.
+The input-timing update passed **214 portable tests**, with one opt-in historical-reference skip, plus native compilation and built-distribution checks. Named native/browser agent workflows and human control/display checks have separate [acceptance receipts](docs/validation.md#capability-coverage). CI is not a claim that every application or desktop state works.
 
 - Second-computer WSL installation and desktop actions were user-confirmed. Fresh native-Windows installation, broken-prerequisite handling and shutdown in that clean environment remain accepted, unverified first-release test limitations.
 - Display mapping was exercised at **100%, 150% and 175%**, including a changed negative-origin layout. Other configurations, including 200%, remain unverified.

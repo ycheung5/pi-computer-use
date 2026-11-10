@@ -1,6 +1,6 @@
 # Pi Windows Computer Use
 
-Status: agreed scope. Original product specification: [GitHub issue #1](https://github.com/ycheung5/pi-computer-use/issues/1). Version 0.1.0 is published and its product/release owners are completed. The post-release [input timing and modifier-tap specification](#input-timing-and-modifier-taps) is implemented on its integration branch; it is not part of published 0.1.0. [ADR 0004](adr/0004-pi-first-acceptance.md) supersedes mandatory DSH parity; historical alignment records are not current release gates.
+Status: agreed scope. Original product specification: [GitHub issue #1](https://github.com/ycheung5/pi-computer-use/issues/1). Version 0.1.0 is published and its product/release owners are completed. The post-release [input timing and modifier-tap specification](#input-timing-and-modifier-taps) is merged into main for 0.1.1; it is not part of published 0.1.0. [ADR 0004](adr/0004-pi-first-acceptance.md) supersedes mandatory DSH parity; historical alignment records are not current release gates.
 
 ## Problem Statement
 
@@ -156,13 +156,13 @@ Accepted product decision, 2026-11-01; scoped control (#31) and presentation/dis
 
 ## Further Notes
 
-Version 0.1.0 is published with its scoped acceptance and documented limitations. The input-timing change below is implemented on its integration branch with scoped acceptance recorded. Follow the [current outcome map and queue](tickets.md#delivery-outcomes-and-ownership), [input-timing delivery plan](implementation-plan.md#input-timing-delivery) and [validation receipts](validation.md#npm-publication-receipt). Each runnable scenario proceeds through baseline, diagnosis, targeted repair and affected regressions; final reconciliation and optimization follow the required outcomes. Pi functional and preservation requirements remain binding; removed DSH comparison gates must not be reintroduced through historical notes.
+Version 0.1.0 is published with its scoped acceptance and documented limitations. The input-timing change below is merged into main for 0.1.1 with scoped acceptance recorded. Follow the [current outcome map and queue](tickets.md#delivery-outcomes-and-ownership), [input-timing delivery plan](implementation-plan.md#input-timing-delivery) and [validation receipts](validation.md#npm-publication-receipt). Each runnable scenario proceeds through baseline, diagnosis, targeted repair and affected regressions; final reconciliation and optimization follow the required outcomes. Pi functional and preservation requirements remain binding; removed DSH comparison gates must not be reintroduced through historical notes.
 
 Issue tracker: [ycheung5/pi-computer-use](https://github.com/ycheung5/pi-computer-use). See [tracker configuration](agents/issue-tracker.md) for operations and [triage labels](agents/triage-labels.md) for status vocabulary.
 
 ## Input timing and modifier taps
 
-Status: implemented and scoped acceptance recorded on integration/input-timing-40, 2026-11-10; [GitHub specification #40](https://github.com/ycheung5/pi-computer-use/issues/40). The following template is the canonical first-change requirement set. See the [composed receipt](validation.md#input-timing-and-modifier-tap-acceptance). These new parameters are not in the unchanged published npm 0.1.0.
+Status: implemented, accepted and merged through PR #44 for 0.1.1, 2026-11-10; [GitHub specification #40](https://github.com/ycheung5/pi-computer-use/issues/40). The following template is the canonical first-change requirement set. See the [composed receipt](validation.md#input-timing-and-modifier-tap-acceptance). These new parameters are not in the unchanged published npm 0.1.0.
 
 ### Problem Statement
 
@@ -227,4 +227,4 @@ Broader named-key coverage, Windows keys, left/right modifiers, numpad/media key
 
 ### Further Notes
 
-The user confirmed this first-change scope after choosing a two-change delivery. Existing 0.1.0 acceptance remains closed and reusable. This spec describes the integration-branch implementation; the unchanged npm 0.1.0 does not accept the new timing parameters. Readable key names remain the agent-facing interface. Required input release and uncertain-cleanup safeguards qualify every duration/timeout option. Future broader input coverage must be specified and accepted separately rather than silently added here.
+The user confirmed this first-change scope after choosing a two-change delivery. Existing 0.1.0 acceptance remains closed and reusable. This spec describes the implementation merged into main for 0.1.1; the unchanged npm 0.1.0 does not accept the new timing parameters. Readable key names remain the agent-facing interface. Required input release and uncertain-cleanup safeguards qualify every duration/timeout option. Future broader input coverage must be specified and accepted separately rather than silently added here.

@@ -1,6 +1,22 @@
 # Release validation
 
-Release status: **0.1.0 published on npm, 2026-11-09**. The user published the prepared package after accepting its first-release scope. Public version/latest, maintainer identity and the downloaded registry archive checksum are independently verified. #21 and product parent #1 are complete; accepted test limitations remain in force. Automated and passive fixture results are evidence for their stated paths, not proof that all applications, physical input, displays or user acceptance work. The [spec](spec.md) defines requirements; this page maps them to runnable checks and pending evidence.
+Release status: **0.1.0 published on npm, 2026-11-09; 0.1.1 preparation below**. The user published the prepared package after accepting its first-release scope. Public version/latest, maintainer identity and the downloaded registry archive checksum are independently verified. #21 and product parent #1 are complete; accepted test limitations remain in force. Automated and passive fixture results are evidence for their stated paths, not proof that all applications, physical input, displays or user acceptance work. The [spec](spec.md) defines requirements; this page maps them to runnable checks and pending evidence.
+
+## 0.1.1 release preparation
+
+Prepared version: **`@ycheung5/pi-computer-use@0.1.1`**, 2026-11-10. [PR #44](https://github.com/ycheung5/pi-computer-use/pull/44) is merged as `f9a64b4`; the merged integration branch is removed locally and remotely. Package and lockfile versions are updated together. npm 0.1.0 remains the published baseline until a separate successful publication; no release tag has been created by this preparation.
+
+Release notes:
+
+- Tap standalone Ctrl/Control, Alt/Option and Shift.
+- Set optional `holdMs` for a keypress/chord or single mouse click, with release before the call settles.
+- Set optional `inputDelayMs` for explicitly selected native SendInput text; omission keeps the 50 ms default and zero removes intentional inter-unit delay.
+- Set optional `timeoutMs` on these input calls: positive overrides the execution deadline, zero disables it. When omitted, explicit hold/pacing gets a duration-aware execution budget across both request layers.
+- Retain cancellation, emergency stop, target guards, cleanup acknowledgement and non-replay. Unsupported routes and unrepresentable durations refuse before input.
+
+The [input acceptance receipt](#input-timing-and-modifier-tap-acceptance) owns Windows behavior evidence and its fixture limitations; it is reused without repeating physical tests. This release does not add broader keyboard/device coverage or promise that lower text delays work in every application. Existing first-release platform and Windows protection limits remain in force.
+
+Preparation checks passed: `npm run check` reported **214 passed, one historical-reference skip** (`/tmp/pi-cu-011-check.log`); `npm run test:package` verified the **95-entry 0.1.1 archive**, package/lock/packed-version coherence, license notices, development-file exclusion and local documentation links (`/tmp/pi-cu-011-package.log`). No runtime behavior was changed during release preparation, and no desktop or model tests were repeated.
 
 ## Input timing and modifier-tap acceptance
 

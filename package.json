@@ -1,6 +1,6 @@
 {
   "name": "@ycheung5/pi-computer-use",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Native Pi tools for Windows computer use from Windows and WSL2",
   "type": "module",
   "license": "MIT",
