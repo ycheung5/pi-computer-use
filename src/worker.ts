@@ -13,7 +13,7 @@ import {
   disposeBrowser,
   isBrowserRequest,
 } from "./browser.js";
-import { browserActionTools } from "./browser-actions.js";
+import { browserActionRefusal, browserActionTools } from "./browser-actions.js";
 import { screenshot, screenshotParameters } from "./capture.js";
 import {
   disposeDesktop,
@@ -358,6 +358,15 @@ async function dispatch(
     );
     return;
   }
+  const browserRefusal = isBrowserRequest(request.args)
+    ? browserActionRefusal(request.action, request.args)
+    : undefined;
+  if (browserRefusal) {
+    process.stdout.write(
+      `${JSON.stringify({ id: request.id, result: { ok: false, action: request.action, error: browserRefusal } })}\n`,
+    );
+    return;
+  }
   const denial = await settings.authorize(request.action);
   if (denial) {
     process.stdout.write(
@@ -491,6 +500,8 @@ async function dispatch(
       if (
         (request.args.dispatch === "background" ||
           (request.action === "click" &&
+            request.args.holdMs === undefined &&
+            request.args.timeoutMs === undefined &&
             request.args.elementId &&
             (request.args.button ?? "left") === "left" &&
             !request.args.activate &&
@@ -727,6 +738,12 @@ input.on("line", (line) => {
 });
 input.on("close", () => {
   clearInterval(presentationPoll);
+  // EOF is shutdown, including when a call deliberately disabled its deadline.
+  for (const request of requests.values())
+    if (request.action !== "operation_end")
+      void stopOperation(request.operationId).catch((error) =>
+        process.stderr.write(`${String(error)}\n`),
+      );
   process.stdout.write(
     `${JSON.stringify({ event: "shutdown_state", phase: "started" })}\n`,
   );

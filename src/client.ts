@@ -1,4 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { executionDeadline, pressTiming, textTiming } from "./input-timing.js";
 import type { WorkerResponse, WorkerResult } from "./protocol.js";
 
 export interface WorkerLaunch {
@@ -24,9 +25,15 @@ interface Pending {
   cleanup: () => void;
 }
 
-function abortable<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+function abortable<T>(
+  operation: Promise<T>,
+  signal: AbortSignal,
+  retain?: () => boolean,
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const abort = () => reject(signal.reason);
+    const abort = () => {
+      if (!retain?.()) reject(signal.reason);
+    };
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     operation
@@ -50,6 +57,7 @@ export class WorkerClient {
     | undefined;
   private readonly lifetime = new AbortController();
   private queue: Promise<unknown> = Promise.resolve();
+  private readonly deadlineCleanup = new Set<AbortSignal>();
 
   constructor(private readonly options: WorkerClientOptions) {}
 
@@ -260,7 +268,9 @@ export class WorkerClient {
         return this.executeNow(action, args, callSignal, operationId);
       });
     this.queue = result.catch(() => undefined);
-    return abortable(result, callSignal);
+    return abortable(result, callSignal, () =>
+      this.deadlineCleanup.has(callSignal),
+    );
   }
 
   private async executeNow(
@@ -269,13 +279,66 @@ export class WorkerClient {
     signal?: AbortSignal,
     operationId?: string,
   ): Promise<WorkerResult> {
+    let inputPolicy:
+      | ReturnType<typeof pressTiming>
+      | ReturnType<typeof textTiming>
+      | undefined;
+    if (action === "keypress" || action === "click" || action === "type_text") {
+      try {
+        inputPolicy = (action === "type_text" ? textTiming : pressTiming)(
+          args,
+          this.options.timeoutMs ?? 30_000,
+        );
+      } catch (error) {
+        return {
+          ok: false,
+          action,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
     const child = await this.start(signal);
     if (this.disposed) throw new Error("WORKER_DISPOSED: session has closed");
     signal?.throwIfAborted();
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(
+      let expired = false;
+      let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+      const timeoutError = () =>
+        new Error(
+          `WORKER_TIMEOUT: ${action} exceeded the execution deadline; input was not replayed`,
+        );
+      const timer = executionDeadline(
+        inputPolicy?.timeoutMs ??
+          Math.max(
+            1,
+            this.options.timeoutMs ?? 30_000,
+            action === "wait" &&
+              Number.isSafeInteger(args.milliseconds ?? 500) &&
+              Number(args.milliseconds ?? 500) >= 1 &&
+              Number(args.milliseconds ?? 500) <= 30000
+              ? Number(args.milliseconds ?? 500) + 2000
+              : 0,
+            action === "wait_for" &&
+              Number.isSafeInteger(args.timeoutMs ?? 5000) &&
+              Number(args.timeoutMs ?? 5000) >= 100 &&
+              Number(args.timeoutMs ?? 5000) <= 60000
+              ? Number(args.timeoutMs ?? 5000) + 10000
+              : 0,
+          ),
         () => {
+          if (inputPolicy) {
+            expired = true;
+            if (signal) this.deadlineCleanup.add(signal);
+            // Keep the request and its owner until cooperative release is acknowledged.
+            child.stdin.write(`${JSON.stringify({ cancel: id })}\n`);
+            cleanupTimer = setTimeout(() => {
+              this.fail(child, timeoutError());
+              if (!this.inputActive && this.options.canTerminate?.() !== false)
+                child.kill();
+            }, 5000);
+            return;
+          }
           this.fail(
             child,
             new Error(
@@ -285,23 +348,9 @@ export class WorkerClient {
           if (!this.inputActive && this.options.canTerminate?.() !== false)
             child.kill();
         },
-        Math.max(
-          this.options.timeoutMs ?? 30_000,
-          action === "wait" &&
-            Number.isSafeInteger(args.milliseconds ?? 500) &&
-            Number(args.milliseconds ?? 500) >= 1 &&
-            Number(args.milliseconds ?? 500) <= 30000
-            ? Number(args.milliseconds ?? 500) + 2000
-            : 0,
-          action === "wait_for" &&
-            Number.isSafeInteger(args.timeoutMs ?? 5000) &&
-            Number(args.timeoutMs ?? 5000) >= 100 &&
-            Number(args.timeoutMs ?? 5000) <= 60000
-            ? Number(args.timeoutMs ?? 5000) + 10000
-            : 0,
-        ),
       );
       const abort = () => {
+        if (expired) return;
         const pending = this.pending.get(id);
         if (!pending) return;
         this.pending.delete(id);
@@ -312,10 +361,29 @@ export class WorkerClient {
       };
       this.pending.set(id, {
         operationId,
-        resolve,
+        resolve: (result) =>
+          resolve(
+            expired
+              ? {
+                  ...result,
+                  ok: false,
+                  error:
+                    result.cleanupConfirmed === false ||
+                    /CLEANUP_UNCONFIRMED/.test(String(result.error))
+                      ? (result.error ??
+                        "INPUT_CLEANUP_UNCONFIRMED: deadline expired before release was confirmed")
+                      : timeoutError().message,
+                  executionDeadlineExpired: true,
+                  interrupted: true,
+                  timing: inputPolicy,
+                }
+              : result,
+          ),
         reject,
         cleanup: () => {
-          clearTimeout(timer);
+          timer();
+          if (signal) this.deadlineCleanup.delete(signal);
+          clearTimeout(cleanupTimer);
           signal?.removeEventListener("abort", abort);
         },
       });

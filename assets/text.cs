@@ -12,6 +12,7 @@ using System.Windows.Automation;
 partial class WindowsBridge {
   [StructLayout(LayoutKind.Sequential)] struct KeyboardInput {public ushort Key,Scan;public uint Flags,Time;public UIntPtr Extra;}
   const int UnicodeInputDelayMs=50;
+  static bool textInputDispatched;
   sealed class HeldKey {public ushort Key,Scan;public uint Flags;}
   [DllImport("user32.dll")] static extern IntPtr GetKeyboardLayout(uint thread);
   [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern short VkKeyScanEx(char value,IntPtr layout);
@@ -100,6 +101,7 @@ partial class WindowsBridge {
     if(!release){BeginWindowDispatch();NotifyPhysicalInput(true);}
     PointerInput input=new PointerInput{Type=1,Data=new InputUnion{Keyboard=new KeyboardInput{Key=key.Key,Scan=key.Scan,Flags=key.Flags | (release?2U:0U),Extra=OwnedInputMarker}}};
     if(SendInput(1,new PointerInput[]{input},Marshal.SizeOf(typeof(PointerInput)))!=1)throw new InvalidOperationException("KEY_DISPATCH_UNCONFIRMED: partial input must not be replayed");
+    if(!release)textInputDispatched=true;
   }
   static void Down(List<HeldKey> held,HeldKey key) {held.Add(key);KeyEvent(key,false);}
   static void Up(List<HeldKey> held,HeldKey key) {KeyEvent(key,true);held.Remove(key);}
@@ -107,22 +109,29 @@ partial class WindowsBridge {
     switch(key){case "enter":case "return":return 13;case "tab":return 9;case "esc":case "escape":return 27;case "backspace":return 8;case "delete":case "del":return 46;case "home":return 36;case "end":return 35;case "pageup":case "pgup":return 33;case "pagedown":case "pgdn":return 34;case "up":return 38;case "down":return 40;case "left":return 37;case "right":return 39;case "space":return 32;case "insert":case "ins":return 45;case "pause":return 19;case "capslock":return 20;case "numlock":return 144;case "scrolllock":return 145;}
     int number;if(key.StartsWith("f") && Int32.TryParse(key.Substring(1),out number) && number>=1 && number<=24)return (ushort)(111+number);return 0;
   }
-  static void Chord(IEnumerable values,EventWaitHandle cancel,Process listener,IntPtr window,uint owner,List<HeldKey> held,InteractionGuard interaction) {
+  static void Chord(IEnumerable values,EventWaitHandle cancel,Process listener,IntPtr window,uint owner,List<HeldKey> held,InteractionGuard interaction,long holdMs=0,InputTiming timing=null) {
+    Action holdCheck=delegate {
+      TextCheck(cancel,listener,window,owner,IntPtr.Zero,false,interaction);
+    };
+    if(timing!=null)timing.Check();
     List<ushort> modifiers=new List<ushort>();string main=null;
     foreach(object item in values) {string key=Convert.ToString(item),name=key.Trim().ToLowerInvariant();if(name=="ctrl" || name=="control")modifiers.Add(17);else if(name=="alt" || name=="option")modifiers.Add(18);else if(name=="shift")modifiers.Add(16);else if(name=="win" || name=="windows" || name=="cmd" || name=="meta")throw new InvalidOperationException("KEY_BLOCKED");else if(main!=null)throw new InvalidOperationException("INVALID_ARGUMENTS: exactly one non-modifier key required");else main=key;}
-    if(main==null)throw new InvalidOperationException("INVALID_ARGUMENTS: non-modifier key required");
-    ushort code=SpecialKey(main.Trim().ToLowerInvariant());
-    if(code==0) {
+    if(main==null && modifiers.Count!=1)throw new InvalidOperationException("INVALID_ARGUMENTS: one main key or standalone modifier required");
+    ushort code=main==null?(ushort)0:SpecialKey(main.Trim().ToLowerInvariant());
+    if(main!=null && code==0) {
       if(main.Length!=1)throw new InvalidOperationException("INVALID_ARGUMENTS: unsupported key");
       uint ignored;uint thread=GetWindowThreadProcessId(window,out ignored);short mapping=VkKeyScanEx(main[0],GetKeyboardLayout(thread));
-      if(mapping==-1) {if(modifiers.Count>0)throw new InvalidOperationException("KEY_LAYOUT_UNSUPPORTED: chord cannot represent this character");TextCheck(cancel,listener,window,owner,IntPtr.Zero,false,interaction);HeldKey unicode=new HeldKey{Scan=main[0],Flags=4};Down(held,unicode);Up(held,unicode);return;}
+      if(mapping==-1) {if(modifiers.Count>0)throw new InvalidOperationException("KEY_LAYOUT_UNSUPPORTED: chord cannot represent this character");TextCheck(cancel,listener,window,owner,IntPtr.Zero,false,interaction);HeldKey unicode=new HeldKey{Scan=main[0],Flags=4};Down(held,unicode);if(timing!=null && holdMs>0)timing.Wait(holdMs,cancel,holdCheck);Up(held,unicode);return;}
       code=(ushort)(mapping & 255);
       // A named shortcut letter is layout-mapped without adding implicit Shift.
       if(modifiers.Count==0){if((mapping & 0x100)!=0)modifiers.Add(16);if((mapping & 0x200)!=0)modifiers.Add(17);if((mapping & 0x400)!=0)modifiers.Add(18);}
     }
     foreach(ushort modifier in modifiers){TextCheck(cancel,listener,window,owner,IntPtr.Zero,false,interaction);Down(held,new HeldKey{Key=modifier});}
     TextCheck(cancel,listener,window,owner,IntPtr.Zero,false,interaction);
-    HeldKey primary=new HeldKey{Key=code,Flags=(code>=33 && code<=46)?1U:0U};Down(held,primary);Up(held,primary);
+    if(main!=null){HeldKey primary=new HeldKey{Key=code,Flags=(code>=33 && code<=46)?1U:0U};Down(held,primary);}
+    if(timing!=null && holdMs>0)timing.Wait(holdMs,cancel,holdCheck);
+    // Immediate presses release without post-dispatch checks: their effect may move focus.
+    // Positive holds retain the existing keypress target/protection checks during the wait.
     // Release modifiers regardless of target/focus changes caused by the chord.
     for(int i=held.Count-1;i>=0;i--){HeldKey key=held[i];Up(held,key);}
   }
@@ -148,13 +157,34 @@ partial class WindowsBridge {
     throw new InvalidOperationException("CLIPBOARD_RESTORE_UNCONFIRMED");
   }
   static object ExecuteText(string action,Dictionary<string,object> args) {
-    Dictionary<string,object> result=Result(true,action);result["cleanupConfirmed"]=true;
+    Dictionary<string,object> result=Result(true,action);result["cleanupConfirmed"]=true;textInputDispatched=false;
     IntPtr before=IntPtr.Zero,window=IntPtr.Zero;ControlPoint pointer=new ControlPoint();
     List<HeldKey> held=new List<HeldKey>();HashSet<long> popups=new HashSet<long>();
     EventWaitHandle cancel=null;Process listener=null,clipboard=null;bool clipboardMayChange=false,clipboardReplaced=false;
     InteractionGuard interaction=null;
     AutomationElement main=null;bool cleanup=true;
     try {
+      long holdMs=0,inputDelayMs=UnicodeInputDelayMs;InputTiming timing=null;
+      string text=TextOption(args,"text",""),method=TextOption(args,"method","auto");
+      if(text.IndexOf('\0')>=0)throw new InvalidOperationException("INVALID_ARGUMENTS: NUL text cannot be entered safely");
+      if(action=="type_text") {
+        inputDelayMs=InputTiming.Milliseconds(args,"inputDelayMs",UnicodeInputDelayMs);
+        if((args.ContainsKey("inputDelayMs") || args.ContainsKey("timeoutMs")) && (method!="sendinput" || args.ContainsKey("browserTab")))throw new InvalidOperationException("TIMING_UNSUPPORTED: text timing requires explicit native sendinput");
+        if(method=="sendinput") {
+          long units=text.Replace("\r\n","\n").Length;
+          if(inputDelayMs!=0 && units>9007199254740991L/inputDelayMs)throw new InvalidOperationException("INVALID_ARGUMENTS: requested pacing duration is not representable");
+          long duration=args.ContainsKey("inputDelayMs")?units*inputDelayMs:0;
+          timing=new InputTiming(args,duration,args.ContainsKey("inputDelayMs"),40000);
+          var policy=timing.Describe();policy["inputDelayMs"]=inputDelayMs;result["timing"]=policy;
+          result["inputDelayMs"]=inputDelayMs;result["inputUnitsDispatched"]=0;
+        }
+      }
+      if(action=="keypress") {
+        holdMs=InputTiming.Milliseconds(args,"holdMs",0);
+        timing=new InputTiming(args,holdMs,args.ContainsKey("holdMs"),40000);
+        var policy=timing.Describe();policy["holdMs"]=holdMs;result["timing"]=policy;
+        if((args.ContainsKey("holdMs") || args.ContainsKey("timeoutMs")) && TextOption(args,"dispatch","foreground")=="background")throw new InvalidOperationException("TIMING_UNSUPPORTED: keypress timing requires native foreground dispatch");
+      }
       interaction=new InteractionGuard(TextOption(args,"_cancelEvent",""),NumberOption(args,"_stopProcessId",0));before=GetForegroundWindow();GetCursorPos(out pointer);
       Dictionary<string,object> quiet=new Dictionary<string,object>(args);quiet["activate"]=false;
       if(args.ContainsKey("_elementId")) {
@@ -165,15 +195,13 @@ partial class WindowsBridge {
       ApplyVisibleIntent(args,window);
       if(textFocus.Count>0 && !textFocus.ContainsKey(PointerOriginKey(window)))ForgetTextFocus();
       uint owner=WindowOwner(window);popups=ControlPopups(owner,window);
-      string text=TextOption(args,"text",""),method=TextOption(args,"method","auto");
-      if(text.IndexOf('\0')>=0)throw new InvalidOperationException("INVALID_ARGUMENTS: NUL text cannot be entered safely");
-      if(action=="type_text" && method=="auto" && TextOption(args,"focusMode","preserve")=="preserve" && !Option(args,"activate",false) && BackgroundEdit(window,text,result)) {result["inputTargetHandle"]=window.ToInt64();result["inputTargetProcessId"]=owner;return result;}
+      if(action=="type_text" && method=="auto" && TextOption(args,"focusMode","preserve")=="preserve" && !Option(args,"activate",false) && BackgroundEdit(window,text,result)) {textInputDispatched=true;result["inputTargetHandle"]=window.ToInt64();result["inputTargetProcessId"]=owner;return result;}
       bool background=action=="type_text"?method=="background":TextOption(args,"dispatch","foreground")=="background";
       if(background) {
         if(!args.ContainsKey("windowRef") && !args.ContainsKey("windowTitle") && !args.ContainsKey("processId") && !args.ContainsKey("nativeWindowHandle"))throw new InvalidOperationException("BACKGROUND_TARGET_REQUIRED");
         string characters=action=="type_text"?text:Convert.ToString(((IList)args["keys"])[0]);
         IntPtr recipient=TextFocus(window);if(recipient==IntPtr.Zero)recipient=window;AssertWritableText(recipient);
-        foreach(char character in characters) {CheckWindowReference(window);if(!IsWindow(window) || WindowOwner(window)!=owner || WindowOwner(recipient)!=owner)throw new InvalidOperationException("TARGET_IDENTITY_CHANGED");BeginWindowDispatch();if(!ControlPost(recipient,0x102,new IntPtr(character),new IntPtr(1)))throw new InvalidOperationException("TEXT_DISPATCH_UNCONFIRMED: some WM_CHAR messages may have been delivered; never replay");}
+        foreach(char character in characters) {CheckWindowReference(window);if(!IsWindow(window) || WindowOwner(window)!=owner || WindowOwner(recipient)!=owner)throw new InvalidOperationException("TARGET_IDENTITY_CHANGED");BeginWindowDispatch();if(!ControlPost(recipient,0x102,new IntPtr(character),new IntPtr(1)))throw new InvalidOperationException("TEXT_DISPATCH_UNCONFIRMED: some WM_CHAR messages may have been delivered; never replay");textInputDispatched=true;}
         result["method"]="postmessage-wmchar";result["verification"]="unconfirmed";result["verified"]=false;result["inputTargetHandle"]=window.ToInt64();result["inputTargetProcessId"]=owner;return result;
       }
       if(TextOption(args,"_cancelEvent","").Length==0)throw new InvalidOperationException("WCU_NEEDS_INPUT: physical text/key input requires independent stopping");
@@ -192,19 +220,20 @@ partial class WindowsBridge {
       IntPtr expectedFocus=main!=null?ConfirmTextFocus(main,cancel,listener,window,owner,interaction):TextFocus(window,false);if(main!=null){result["focusConfirmed"]=true;result["inputFocusHandle"]=expectedFocus.ToInt64();}if(action=="type_text")AssertWritableText(expectedFocus);
       TextCheck(cancel,listener,window,owner,expectedFocus,action=="type_text",interaction);
       if(action=="type_text")RememberTextFocus(window,expectedFocus);
-      if(action=="keypress") {Chord((IEnumerable)args["keys"],cancel,listener,window,owner,held,interaction);result["method"]="sendinput-keychord";}
+      if(action=="keypress") {Chord((IEnumerable)args["keys"],cancel,listener,window,owner,held,interaction,holdMs,timing);result["method"]="sendinput-keychord";}
       else if(method=="sendinput") {
-        // Modern Notepad also corrupts seeded/appended text with a 10 ms gap.
-        // Keep complete pairs paced and cancellable; dispatch is still not verification.
+        // Preserve complete UTF-16 pairs and newline/tab handling at the selected pace.
+        // Dispatch is still not application verification.
         for(int index=0;index<text.Length;index++) {
           char character=text[index];
           if(character=='\r' && index+1<text.Length && text[index+1]=='\n')index++;
-          TextCheck(cancel,listener,window,owner,expectedFocus,true,interaction);
+          timing.Check();TextCheck(cancel,listener,window,owner,expectedFocus,true,interaction);
           HeldKey key=character=='\r' || character=='\n'?new HeldKey{Key=13}:character=='\t'?new HeldKey{Key=9}:new HeldKey{Scan=character,Flags=4};
           Down(held,key);Up(held,key);
-          if(cancel.WaitOne(UnicodeInputDelayMs))throw new InvalidOperationException("COMPUTER_USE_STOPPED");
+          result["inputUnitsDispatched"]=Convert.ToInt32(result["inputUnitsDispatched"])+1;
+          timing.Wait(inputDelayMs,cancel,delegate {TextCheck(cancel,listener,window,owner,expectedFocus,true,interaction);});
         }
-        result["method"]="sendinput-unicode";result["inputDelayMs"]=UnicodeInputDelayMs;
+        result["method"]="sendinput-unicode";
       }else {
         // All UIA focus/provider calls finish BEFORE clipboard replacement.
         ProcessStartInfo info=new ProcessStartInfo{FileName=TextOption(args,"_clipboardExecutable",""),UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true,StandardOutputEncoding=Encoding.UTF8,StandardErrorEncoding=Encoding.UTF8};
@@ -239,6 +268,7 @@ partial class WindowsBridge {
       }
       if(cancel!=null)cancel.Dispose();if(listener!=null)listener.Dispose();
       result["cleanupConfirmed"]=cleanup;
+      if(action=="keypress" || action=="type_text"){result["inputDispatched"]=textInputDispatched;result["interrupted"]=!Convert.ToBoolean(result["ok"]); }
       // No potentially blocked UIA verification is permitted before clipboard cleanup.
       if(cleanup)RestoreControlState(result,before,pointer,window,popups,Option(args,"activate",false),interaction);
       else {result["pointer"]="left: cleanup unconfirmed";result["foreground"]="left: cleanup unconfirmed";}

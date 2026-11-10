@@ -6,6 +6,21 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { WorkerClient } from "../src/client.js";
 
+function timingRelayWorker(): WorkerClient {
+  const leaf = `require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.action)setTimeout(()=>console.log(JSON.stringify({id:r.id,result:{ok:true,action:r.action,received:r.args,cleanupConfirmed:true}})),700)});`;
+  const relay = `import {WorkerClient} from ${JSON.stringify(new URL("../src/client.ts", import.meta.url).href)};
+import {createInterface} from 'node:readline';
+const inner=new WorkerClient({timeoutMs:500,launch:async()=>({executable:process.execPath,args:['-e',${JSON.stringify(leaf)}]})});
+const lines=createInterface({input:process.stdin});lines.on('line',async line=>{const r=JSON.parse(line);if(!r.action)return;try{console.log(JSON.stringify({id:r.id,result:await inner.execute(r.action,r.args)}))}catch(e){console.log(JSON.stringify({id:r.id,result:{ok:false,action:r.action,error:String(e)}}))}});lines.on('close',()=>inner.dispose());`;
+  return new WorkerClient({
+    timeoutMs: 500,
+    launch: async () => ({
+      executable: process.execPath,
+      args: ["--import", "tsx", "--input-type=module", "-e", relay],
+    }),
+  });
+}
+
 test("health reaches a lazy reusable worker and disposal closes it", async () => {
   let launches = 0;
   const worker = new WorkerClient({
@@ -279,6 +294,256 @@ test("abort during provisioning cancels the call and later health can start", as
   await assert.rejects(pending, { name: "AbortError" });
   try {
     assert.equal((await worker.execute("health", {})).ok, true);
+  } finally {
+    await worker.dispose();
+  }
+});
+
+for (const action of ["keypress", "click"]) {
+  test(`${action} explicit deadlines stop cooperatively and preserve cleanup without replay`, async () => {
+    const peer = `const input=require('node:readline').createInterface({input:process.stdin});let active;let calls=0;
+input.on('line',line=>{const r=JSON.parse(line);if(r.cancel){clearTimeout(active.timer);console.log(JSON.stringify({id:active.id,result:{ok:false,action:active.action,cleanupConfirmed:true,inputDispatched:true,interrupted:true,calls}}));return;}if(!r.action)return;calls++;active={id:r.id,action:r.action,timer:setTimeout(()=>console.log(JSON.stringify({id:r.id,result:{ok:true,action:r.action,cleanupConfirmed:true,calls}})),500)};});`;
+    const worker = new WorkerClient({
+      timeoutMs: 2000,
+      launch: async () => ({
+        executable: process.execPath,
+        args: ["-e", peer],
+      }),
+    });
+    try {
+      const result = await worker.execute(action, {
+        ...(action === "keypress" ? { keys: ["Ctrl"] } : { x: 1, y: 1 }),
+        holdMs: 1000,
+        timeoutMs: 150,
+      });
+      assert.equal(result.ok, false);
+      assert.match(String(result.error), /WORKER_TIMEOUT.*not replayed/);
+      assert.equal(result.cleanupConfirmed, true);
+      assert.equal(result.calls, 1);
+      assert.equal(result.inputDispatched, true);
+      assert.equal(result.interrupted, true);
+    } finally {
+      await worker.dispose();
+    }
+  });
+
+  test(`${action} timing crosses two request layers without restoring ordinary deadlines or wrapping long timers`, async () => {
+    const worker = timingRelayWorker();
+    try {
+      for (const timing of [
+        { holdMs: 1000 },
+        { timeoutMs: 0 },
+        { timeoutMs: 2000 },
+        { holdMs: 2147483648 },
+        { holdMs: Number.MAX_SAFE_INTEGER, timeoutMs: 0 },
+        { timeoutMs: Number.MAX_SAFE_INTEGER },
+      ]) {
+        const result = await worker.execute(action, {
+          ...(action === "keypress" ? { keys: ["Ctrl"] } : { x: 1, y: 1 }),
+          ...timing,
+        });
+        assert.equal(result.ok, true, JSON.stringify(result));
+        assert.deepEqual(result.received, {
+          ...(action === "keypress" ? { keys: ["Ctrl"] } : { x: 1, y: 1 }),
+          ...timing,
+        });
+      }
+      const ordinary = await worker.execute(
+        action,
+        action === "keypress" ? { keys: ["Ctrl"] } : { x: 1, y: 1 },
+      );
+      assert.equal(ordinary.ok, false);
+      assert.match(String(ordinary.error), /WORKER_TIMEOUT/);
+      assert.equal(ordinary.cleanupConfirmed, true);
+    } finally {
+      await worker.dispose();
+    }
+  });
+
+  test(`unrepresentable ${action} timing is refused before launching a worker`, async () => {
+    let launches = 0;
+    const worker = new WorkerClient({
+      launch: async () => {
+        launches++;
+        throw Error("must not start");
+      },
+    });
+    try {
+      for (const timing of [
+        { holdMs: Number.MAX_SAFE_INTEGER },
+        { holdMs: Infinity },
+        { timeoutMs: NaN },
+        { timeoutMs: -1 },
+        { timeoutMs: 0.5 },
+      ]) {
+        const result = await worker.execute(action, {
+          ...(action === "keypress" ? { keys: ["A"] } : { x: 1, y: 1 }),
+          ...timing,
+        });
+        assert.equal(result.ok, false);
+        assert.match(String(result.error), /INVALID_ARGUMENTS/);
+      }
+      assert.equal(launches, 0);
+    } finally {
+      await worker.dispose();
+    }
+  });
+}
+
+test("deadline-triggered stop notices preserve the eventual cleanup acknowledgment", async () => {
+  const controller = new AbortController();
+  const peer = `const lines=require('node:readline').createInterface({input:process.stdin});let request;lines.on('line',line=>{const r=JSON.parse(line);if(r.cancel){console.log(JSON.stringify({event:'stopped',operationId:'deadline-operation'}));setTimeout(()=>console.log(JSON.stringify({id:request.id,result:{ok:false,action:'keypress',cleanupConfirmed:true,inputDispatched:true}})),20);}else if(r.action)request=r;});`;
+  const worker = new WorkerClient({
+    onStop: () => controller.abort(),
+    launch: async () => ({ executable: process.execPath, args: ["-e", peer] }),
+  });
+  try {
+    const result = await worker.execute(
+      "keypress",
+      { keys: ["Ctrl"], timeoutMs: 150 },
+      controller.signal,
+      "deadline-operation",
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.cleanupConfirmed, true);
+    assert.match(String(result.error), /WORKER_TIMEOUT/);
+  } finally {
+    await worker.dispose();
+  }
+});
+
+test("keypress deadline reports cleanup uncertainty before its timeout category", async () => {
+  const peer = `let id;require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.cancel)console.log(JSON.stringify({id,result:{ok:false,action:'keypress',cleanupConfirmed:false,error:'INPUT_CLEANUP_UNCONFIRMED: release failed'}}));else if(r.action)id=r.id;});`;
+  const worker = new WorkerClient({
+    launch: async () => ({ executable: process.execPath, args: ["-e", peer] }),
+  });
+  try {
+    const result = await worker.execute("keypress", {
+      keys: ["Ctrl"],
+      timeoutMs: 150,
+    });
+    assert.equal(result.cleanupConfirmed, false);
+    assert.match(String(result.error), /^INPUT_CLEANUP_UNCONFIRMED/);
+    assert.equal(result.executionDeadlineExpired, true);
+  } finally {
+    await worker.dispose();
+  }
+});
+
+test("text explicit deadlines stop cooperatively and preserve cleanup without replay", async () => {
+  const peer = `const input=require('node:readline').createInterface({input:process.stdin});let active;let calls=0;
+input.on('line',line=>{const r=JSON.parse(line);if(r.cancel){clearTimeout(active.timer);console.log(JSON.stringify({id:active.id,result:{ok:false,action:'type_text',cleanupConfirmed:true,inputDispatched:true,interrupted:true,calls}}));return;}if(!r.action)return;calls++;active={id:r.id,timer:setTimeout(()=>console.log(JSON.stringify({id:r.id,result:{ok:true,action:r.action,cleanupConfirmed:true,calls}})),500)};});`;
+  const worker = new WorkerClient({
+    timeoutMs: 2000,
+    launch: async () => ({ executable: process.execPath, args: ["-e", peer] }),
+  });
+  try {
+    const result = await worker.execute("type_text", {
+      text: "a\r\n🙂\t",
+      method: "sendinput",
+      inputDelayMs: 1000,
+      timeoutMs: 150,
+    });
+    assert.equal(result.ok, false);
+    assert.match(String(result.error), /WORKER_TIMEOUT.*not replayed/);
+    assert.equal(result.cleanupConfirmed, true);
+    assert.equal(result.calls, 1);
+    assert.equal(result.inputDispatched, true);
+    assert.equal(result.interrupted, true);
+  } finally {
+    await worker.dispose();
+  }
+});
+
+test("text timing crosses two request layers without restoring ordinary deadlines or wrapping long timers", async () => {
+  const worker = timingRelayWorker();
+  try {
+    for (const timing of [
+      { inputDelayMs: 1000 },
+      { timeoutMs: 0 },
+      { timeoutMs: 2000 },
+      { inputDelayMs: 2147483648 },
+      { inputDelayMs: 2147483648, timeoutMs: 0 },
+      { timeoutMs: Number.MAX_SAFE_INTEGER },
+    ]) {
+      const result = await worker.execute("type_text", {
+        text: "a\r\n🙂\t",
+        method: "sendinput",
+        ...timing,
+      });
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.deepEqual(result.received, {
+        text: "a\r\n🙂\t",
+        method: "sendinput",
+        ...timing,
+      });
+    }
+  } finally {
+    await worker.dispose();
+  }
+});
+
+test("unrepresentable text timing is refused before launching a worker", async () => {
+  let launches = 0;
+  const worker = new WorkerClient({
+    launch: async () => {
+      launches++;
+      throw Error("must not start");
+    },
+  });
+  try {
+    for (const timing of [
+      { inputDelayMs: Number.MAX_SAFE_INTEGER },
+      { inputDelayMs: Infinity },
+      { timeoutMs: NaN },
+      { timeoutMs: -1 },
+      { timeoutMs: 0.5 },
+    ]) {
+      const result = await worker.execute("type_text", {
+        text: "x",
+        method: "sendinput",
+        ...timing,
+      });
+      assert.equal(result.ok, false);
+      assert.match(String(result.error), /INVALID_ARGUMENTS/);
+    }
+    assert.equal(launches, 0);
+  } finally {
+    await worker.dispose();
+  }
+});
+
+test("text deadline results expose normalized-unit pacing budgets and default policy", async () => {
+  const peer = `let active;require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);if(r.cancel)console.log(JSON.stringify({id:active.id,result:{ok:false,action:'type_text',cleanupConfirmed:true,inputDispatched:true}}));else if(r.action)active=r;});`;
+  const worker = new WorkerClient({
+    timeoutMs: 150,
+    launch: async () => ({ executable: process.execPath, args: ["-e", peer] }),
+  });
+  try {
+    for (const [args, expected] of [
+      [{}, { inputDelayMs: 50, timeoutMs: 150, deadlinePolicy: "default" }],
+      [
+        { inputDelayMs: 0 },
+        { inputDelayMs: 0, timeoutMs: 150, deadlinePolicy: "derived" },
+      ],
+      [
+        { inputDelayMs: 1 },
+        { inputDelayMs: 1, timeoutMs: 155, deadlinePolicy: "derived" },
+      ],
+      [
+        { inputDelayMs: 1000, timeoutMs: 150 },
+        { inputDelayMs: 1000, timeoutMs: 150, deadlinePolicy: "explicit" },
+      ],
+    ] as const) {
+      const result = await worker.execute("type_text", {
+        text: "a\r\n🙂\t",
+        method: "sendinput",
+        ...args,
+      });
+      assert.equal(result.ok, false);
+      assert.equal(result.cleanupConfirmed, true);
+      assert.deepEqual(result.timing, expected);
+    }
   } finally {
     await worker.dispose();
   }

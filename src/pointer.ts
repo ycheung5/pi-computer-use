@@ -1,3 +1,4 @@
+import { pressTiming, timingMilliseconds } from "./input-timing.js";
 import { confirmInputCleanup, nativeDesktop, retainInput } from "./native.js";
 import type { WorkerResult } from "./protocol.js";
 
@@ -23,6 +24,9 @@ export const pointerTools = ["click", "double_click", "move", "drag"].map(
       additionalProperties: false,
       properties: {
         ...target,
+        ...(action === "click"
+          ? { holdMs: timingMilliseconds, timeoutMs: timingMilliseconds }
+          : {}),
         ...(action === "drag"
           ? {
               path: {
@@ -92,6 +96,7 @@ export function validatePointer(
           "includeOffscreen",
           ...(action === "move" ? [] : ["button", "dispatch"]),
         ]),
+    ...(action === "click" ? ["holdMs", "timeoutMs"] : []),
     ...(action === "scroll" ? ["deltaX", "deltaY", "browserTab"] : []),
   ]);
   if (
@@ -134,6 +139,27 @@ export function validatePointer(
     !["auto", "background", "foreground"].includes(String(args.dispatch))
   )
     return bad("unsupported dispatch");
+  if (action === "click") {
+    try {
+      pressTiming(args, 90_000);
+    } catch (cause) {
+      return {
+        ok: false,
+        action,
+        error: cause instanceof Error ? cause.message : String(cause),
+      };
+    }
+    if (
+      (args.holdMs !== undefined || args.timeoutMs !== undefined) &&
+      (args.dispatch === "background" || args.activate === false)
+    )
+      return {
+        ok: false,
+        action,
+        error:
+          "TIMING_UNSUPPORTED: click timing requires native foreground dispatch without explicit activate: false",
+      };
+  }
   if (action === "drag") {
     if (
       !Array.isArray(args.path) ||

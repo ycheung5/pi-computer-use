@@ -1,3 +1,5 @@
+import { timingMilliseconds } from "./input-timing.js";
+
 // Shared reference-compatible tool schemas; browser execution stays in browser.ts.
 const target = {
   windowRef: { type: "string", minLength: 1 },
@@ -42,7 +44,16 @@ const definitions: Record<
   { properties: Record<string, Rule>; required?: string[] }
 > = {
   click: {
-    properties: { ...target, ...view, ...element, ...point, button, dispatch },
+    properties: {
+      ...target,
+      ...view,
+      ...element,
+      ...point,
+      button,
+      dispatch,
+      holdMs: timingMilliseconds,
+      timeoutMs: timingMilliseconds,
+    },
   },
   double_click: {
     properties: { ...target, ...view, ...element, ...point, button, dispatch },
@@ -76,11 +87,15 @@ const definitions: Record<
         default: "preserve",
       },
       restoreClipboard: { type: "boolean", default: true },
+      inputDelayMs: timingMilliseconds,
+      timeoutMs: timingMilliseconds,
     },
   },
   keypress: {
     required: ["keys"],
     properties: {
+      holdMs: timingMilliseconds,
+      timeoutMs: timingMilliseconds,
       ...target,
       ...tab,
       keys: {
@@ -169,10 +184,38 @@ export const browserActionTools = Object.entries(definitions).map(
   }),
 );
 
+export function browserActionRefusal(
+  action: string,
+  args: Record<string, unknown>,
+): string | undefined {
+  if (
+    action === "click" &&
+    (args.holdMs !== undefined || args.timeoutMs !== undefined)
+  )
+    return "TIMING_UNSUPPORTED: click timing requires native foreground dispatch";
+  if (
+    action === "keypress" &&
+    (args.holdMs !== undefined ||
+      args.timeoutMs !== undefined ||
+      (Array.isArray(args.keys) &&
+        args.keys.length === 1 &&
+        /^(ctrl|control|alt|option|shift)$/i.test(String(args.keys[0]).trim())))
+  )
+    return "TIMING_UNSUPPORTED: keypress timing and standalone modifiers require native foreground dispatch";
+  if (
+    action === "type_text" &&
+    (args.inputDelayMs !== undefined || args.timeoutMs !== undefined)
+  )
+    return "TIMING_UNSUPPORTED: text timing requires explicit native sendinput";
+  return undefined;
+}
+
 export function normalizeBrowserAction(
   action: string,
   args: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
+  const refusal = browserActionRefusal(action, args);
+  if (refusal) throw new Error(refusal);
   const definition = definitions[action];
   if (!definition) return undefined;
   const properties: Record<string, Rule> = { ...definition.properties, ...tab };

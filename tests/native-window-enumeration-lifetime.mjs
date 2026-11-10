@@ -56,6 +56,7 @@ const nativeSources = [
   "pointer.cs",
   "browser-indicators.cs",
   "text.cs",
+  "input-timing.cs",
 ].map((name) =>
   name === "windows.cs" && windowsSource
     ? windowsSource

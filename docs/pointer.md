@@ -14,6 +14,18 @@ A missing cleanup acknowledgment retains desktop ownership and blocks replacemen
 
 Confirmed activation and successful input/background operations remember the exact target HWND/PID for this operation. Later targetless observations and input use that identity after foreground is returned. Explicit targets, browser requests, element references and explicit desktop scope take precedence. Settlement clears the remembered target; a stale identity fails rather than guessing the user's current foreground. Screenshots retain their existing full-desktop versus window-capture semantics.
 
+## Single-click holds and deadlines
+
+The source candidate adds optional `holdMs` and `timeoutMs` to single `click` for existing left/right/middle buttons. Omitted or zero hold releases immediately. Explicit timing uses native foreground dispatch, including auto element clicks; explicit `dispatch: background`, `activate: false` and browser targets refuse before input. With both fields omitted, existing routing and activation rules above apply. Double-click and drag do not accept timing fields.
+
+Both request layers reuse the [keypress timing policy](text.md#keypress-holds-and-deadlines): positive timeout is authoritative, zero disables only the execution deadline, and omission adds an explicit hold to the ordinary budget. Safe whole nonnegative milliseconds have no product cap; invalid values and derived overflow refuse before input. Native waits use bounded interruptible intervals and check target, foreground, point, protection and pointer interference throughout a positive hold. Zero/omitted holds retain immediate release without a new post-down target check that could reject a dialog opened by the click.
+
+Results report effective `timing` (`holdMs`, `timeoutMs`, `deadlinePolicy`), `inputDispatched`, interruption and `cleanupConfirmed`. Dispatch remains distinct from an observed application effect. Release runs before pointer/foreground restoration. Unconfirmed release retains ownership and blocks dependent work; timeout, cancellation and partial input never trigger replay.
+
+The existing owned fixture prepares scoped acceptance with `npm run test:native:pointer:physical -- --list --case=timing` (safe planning only). The Pi-only `--case=timing` run requires a build, Windows Node and `PI_CU_DEDICATED_INPUT_DESKTOP=1` on the authorized idle test desktop. It observes actual button messages/timestamps and OS state for default click/restoration, zero hold, timed left/right/middle, a covering-target error, shorter deadline and cancellation of a representable very long hold with deadline disabled. Failure or unconfirmed cleanup retains the owner and fixture. This case does not rerun the old physical baseline or physical Esc demonstration.
+
+Portable worker/peer checks verify schema, route refusals, two-layer timing forwarding, default/positive/disabled deadlines, long values, overflow, shutdown and ownership retention without sleeping for long requested durations. Native compilation and the scoped actual fixture effects passed; see the [composed receipt](validation.md#input-timing-and-modifier-tap-acceptance). Portable results alone do not establish physical input timing.
+
 ## Validation
 
 - `npm test`: worker argument validation and the public worker lifecycle contract that prevents retirement while cleanup is unconfirmed. These portable tests do not prove Windows input delivery.

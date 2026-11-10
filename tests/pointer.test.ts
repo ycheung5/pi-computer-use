@@ -158,3 +158,62 @@ test("an acknowledgement write failure retains the possible input owner", async 
     await worker.dispose().catch(() => undefined);
   }
 });
+
+test("single-click timing validates native foreground capability before input", async () => {
+  const worker = new WorkerClient({
+    launch: async () => ({
+      executable: process.execPath,
+      args: [
+        "--import",
+        "tsx",
+        fileURLToPath(new URL("../src/worker.ts", import.meta.url)),
+      ],
+    }),
+  });
+  try {
+    for (const button of ["left", "right", "middle"])
+      for (const timing of [
+        { holdMs: 0 },
+        { holdMs: 60000 },
+        { timeoutMs: 0 },
+        { holdMs: 2147483648, timeoutMs: 0 },
+      ]) {
+        const result = await worker.execute("click", {
+          x: 1,
+          y: 1,
+          button,
+          ...timing,
+        });
+        assert.match(String(result.error), /UNSUPPORTED_HOST/);
+      }
+    for (const field of ["holdMs", "timeoutMs"])
+      for (const value of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, "1", null]) {
+        const result = await worker.execute("click", {
+          x: 1,
+          y: 1,
+          [field]: value,
+        });
+        assert.match(String(result.error), /INVALID_ARGUMENTS/);
+      }
+    for (const route of [
+      { dispatch: "background" },
+      { activate: false },
+      { browserTab: "owned:1" },
+      { elementId: "t1:1" },
+    ]) {
+      const result = await worker.execute("click", {
+        x: 1,
+        y: 1,
+        holdMs: 0,
+        ...route,
+      });
+      assert.match(String(result.error), /TIMING_UNSUPPORTED/);
+    }
+    for (const action of ["double_click", "drag"]) {
+      const result = await worker.execute(action, { x: 1, y: 1, holdMs: 0 });
+      assert.match(String(result.error), /INVALID_ARGUMENTS/);
+    }
+  } finally {
+    await worker.dispose();
+  }
+});

@@ -30,7 +30,7 @@ const actionDescriptions: Record<string, string> = {
   element_info:
     "Inspect a fresh UIA or page element ID, or a physical screen point.",
   click:
-    "Click a control or physical screen point; background delivery is unverified. Browser page IDs act inside the page. Observe effects before retrying.",
+    "Click a control or physical screen point. Native foreground holdMs presses and releases left/right/middle in this call; timeoutMs: 0 disables only its execution deadline. Explicit timing refuses browser/background and activate: false routes. Omitted timing preserves defaults; background delivery is unverified. Observe effects before retrying.",
   double_click:
     "Double-click a control or physical screen point; background delivery is unverified. Browser page IDs act inside the page. Observe effects before retrying.",
   move: "Move the pointer to a control or physical screen point; browser page IDs act inside the page. Observe hover effects.",
@@ -38,9 +38,9 @@ const actionDescriptions: Record<string, string> = {
   scroll:
     "Scroll a control or physical screen point; native element scrolling tries background first. Positive deltaY scrolls down. Browser tabs scroll inside the page.",
   type_text:
-    "Type into the focused control. Native auto tries a background edit then clipboard paste; clipboard restoration is requested by default. Background WM_CHAR is unverified.",
+    "Type into the focused control. Native auto tries a background edit then clipboard paste; clipboard restoration is requested by default. Explicit native sendinput supports inputDelayMs (default 50; zero adds no delay) and timeoutMs (zero disables execution deadline). Other routes refuse timing fields. Partial input is never replayed; observe text to verify it. Background WM_CHAR is unverified.",
   keypress:
-    'Send a key or chord, for example ["ctrl","a"]. Windows keys are blocked; native background dispatch supports one printable character only.',
+    "Send a key/chord or standalone Ctrl, Alt or Shift. Native foreground holdMs completes and releases in this call; timeoutMs: 0 disables only its execution deadline. Omitted timing preserves defaults. Timing and modifier taps refuse browser/background routes; Windows keys remain blocked. Observe effects before retrying.",
   focus:
     "Focus a fresh UIA or browser page element; observe the intended focus before typing.",
   invoke:

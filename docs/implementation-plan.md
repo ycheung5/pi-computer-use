@@ -6,13 +6,15 @@ Requirements and behavioral contracts are authoritative in the [specification](s
 
 ## Input timing delivery
 
-The [input timing/modifier-tap spec](spec.md#input-timing-and-modifier-taps) is the only requirement authority for this first post-release change. It extends existing tools; no implementation or live acceptance is claimed by this plan.
+The [input timing/modifier-tap spec](spec.md#input-timing-and-modifier-taps) is the only requirement authority for this first post-release change. It extends existing tools. All three slices are implemented and accepted at the agreed seams on integration/input-timing-40. The [composed receipt](validation.md#input-timing-and-modifier-tap-acceptance) owns the source scope, final checks, live results and fixture-failure dispositions. Published npm 0.1.0 remains unchanged.
 
 1. Extend existing action schemas/normalizers and public tool/worker tests for standalone generic modifiers, timing values, route capability refusal and unchanged defaults.
 2. Keep per-call duration/deadline calculation in reusable request handling rather than duplicate it in host adapters. Thread effective policy through Pi/worker/native execution so omitted, explicit positive and disabled execution deadlines remain consistent. Reuse controlled request peers for long-duration/overflow/cancellation checks without real long sleeps; do not add a general scheduler or test-only production API.
 3. Extend native text/pointer execution with cancellable, representable pacing/hold waits and release acknowledgments using current input ownership. Keep each hold within one call and retain target/focus/protection checks. Reject unsupported explicit backend combinations before dispatch.
 4. Run affected configured regressions and package checks; extend the current owned text/pointer fixtures for one grouped live acceptance of actual down/up effects, exact text and newly affected cleanup. Exercise both host request paths only where changed forwarding requires it. Reuse accepted stop/display/profile evidence and retain any observed failures.
 5. Reconcile the existing topic docs/tool descriptions with the implemented fields and record validation. The second input-coverage change and any release/version bump need their own delivery work; do not expand this slice or mark it complete from portable mocks alone.
+
+The delivery is complete for #41 keyboard, #42 text and #43 mouse. Reuse the linked acceptance; do not rerun historical release checks. Future broader input coverage and any merge/version/publication remain separate work.
 
 Existing code locations for implementation navigation: `src/text.ts`, `src/pointer.ts` and `src/browser-actions.ts` own routed argument contracts; `src/extension.ts`, `src/client.ts`, `src/native.ts` and `src/worker.ts` own forwarding, deadlines and lifecycle; `assets/text.cs` and `assets/pointer.cs` own native effects/release. Prefer existing `tests/text.test.ts`, `tests/pointer.test.ts`, `tests/worker.test.ts`, input-preparation/extension tests and native text/pointer fixtures. These are delivery pointers, not a new shared-module hierarchy.
 
