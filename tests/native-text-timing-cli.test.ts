@@ -26,8 +26,10 @@ test("owned text timing plan prepares only the new scoped keyboard cases without
     "text-cancel-long-delay",
     "modifier-aliases",
     "immediate-release",
+    "focus-changing-immediate-release",
+    "focus-changing-hold",
     "timed-key-and-chord",
-    "focus-error-release",
+    "foreground-error-release",
     "short-deadline-release",
     "cancel-disabled-deadline",
   ]);

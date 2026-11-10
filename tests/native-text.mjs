@@ -18,8 +18,10 @@ const timingCases = [
   "text-cancel-long-delay",
   "modifier-aliases",
   "immediate-release",
+  "focus-changing-immediate-release",
+  "focus-changing-hold",
   "timed-key-and-chord",
-  "focus-error-release",
+  "foreground-error-release",
   "short-deadline-release",
   "cancel-disabled-deadline",
 ];
@@ -321,7 +323,8 @@ async function untilText(predicate) {
 }
 async function verifyTiming() {
   const primary = (await find("Background editor", "Document"))[0];
-  assert.ok(primary);
+  const secondary = (await find("Secondary editor", "Edit"))[0];
+  assert.ok(primary && secondary);
   const focus = async () => {
     const result = await call("focus", {
       elementId: primary.id,
@@ -360,6 +363,38 @@ async function verifyTiming() {
     );
     return duration;
   };
+  for (const timing of [{}, { holdMs: 0 }, { holdMs: 200 }]) {
+    await focus();
+    resetEvents();
+    const before = await observeText();
+    const result = await call("keypress", {
+      keys: ["Tab"],
+      activate: true,
+      ...timing,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.cleanupConfirmed, true);
+    assert.equal(result.inputDispatched, true);
+    assert.equal(result.interrupted, false);
+    await released(9, timing.holdMs ?? 0);
+    const after = await untilText(
+      (s) => s.focus === secondary.nativeWindowHandle && s.held === 0,
+    );
+    assert.equal(after.primary, before.primary);
+    assert.equal(after.secondary, before.secondary);
+    console.log(
+      JSON.stringify({
+        check:
+          timing.holdMs > 0
+            ? "focus-changing-hold"
+            : "focus-changing-immediate-release",
+        timing,
+        before,
+        after,
+        result,
+      }),
+    );
+  }
   const restart = async () => {
     await host.emit("agent_settled", { aborted: false });
     await host.emit("before_agent_start", {
@@ -518,23 +553,26 @@ async function verifyTiming() {
   }
   await focus();
   resetEvents();
-  const focusError = call("keypress", {
+  const foregroundError = call("keypress", {
     keys: ["F24"],
     holdMs: 3000,
     timeoutMs: 0,
     activate: true,
   });
-  const focusOutcome = focusError.then(
+  const foregroundOutcome = foregroundError.then(
     (result) => ({ result }),
     (error) => ({ error: String(error) }),
   );
   await reply("key-event:135:down:");
-  const ready = reply("focus-ready");
-  fixture.stdin.write("prepare-focus\n");
-  await ready;
-  const failed = await focusOutcome;
+  const ready = reply("timing-foreground-loss:");
+  fixture.stdin.write("timing-foreground-loss\n");
+  const loss = await ready;
+  assert.match(loss, /^timing-foreground-loss:True:[1-9]\d*$/);
+  const siblingHandle = Number(loss.split(":")[2]);
+  await untilText((s) => s.foreground === siblingHandle);
+  const failed = await foregroundOutcome;
   assert.ok(failed.result && !failed.result.ok, JSON.stringify(failed));
-  assert.match(failed.result.error, /TARGET_FOCUS_CHANGED/);
+  assert.match(failed.result.error, /TARGET_FOREGROUND_CHANGED/);
   await released(135);
   await focus();
   resetEvents();
