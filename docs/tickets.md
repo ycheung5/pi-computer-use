@@ -1,6 +1,6 @@
 # Implementation tickets
 
-Requirements live in [spec](spec.md), delivery/coverage in [implementation-plan](implementation-plan.md), results in [validation](validation.md). This is the current Pi-first queue, reconciled on 2026-11-09 under [ADR 0004](adr/0004-pi-first-acceptance.md). DSH manual/host/model comparisons, credentials and parity benchmarks are discarded.
+Requirements live in [spec](spec.md), delivery/coverage in [implementation-plan](implementation-plan.md), results in [validation](validation.md). This is the current Pi-first queue, reconciled on 2026-11-10 under [ADR 0004](adr/0004-pi-first-acceptance.md). DSH manual/host/model comparisons, credentials and parity benchmarks are discarded.
 
 ## Current investigation and acceptance work
 
@@ -11,7 +11,7 @@ Requirements live in [spec](spec.md), delivery/coverage in [implementation-plan]
 | Tool implementation | All 25 target tools have implementations. Release acceptance concerns Pi correctness, preservation and usability. |
 | Completed issues | 26: #1, #2, #3, #6, #7, #8, #14, #16, #17, #18, #19, #20, #21, #24, #25, #26, #27, #28, #29, #30, #31, #32, #33, #34, #35, #36. Historical comparison completions retain their original evidence scope. |
 | Superseded issues | 10: #4, #5, #9, #10, #11, #12, #13, #15, #23, #37. Superseded is not a completed product delivery. |
-| Open issues | None in the first-release delivery queue. #21 and parent #1 are completed after verified npm publication. Accepted test limitations remain documented. |
+| Open issues | One post-release specification: #40, ready-for-agent, not implemented. The first-release queue remains complete; #21/#1 stay closed with their accepted scopes. |
 | Accepted Pi outcomes | Windows/WSL2 packaged launch, ownership, waits, settings/tool selection, Chromium and experimental Firefox workflows; six browser/mixed agent scenarios each passed three reset runs. Native creation/preservation, replacement/partial recovery and composed continuation (#35), #31 control interruption/cleanup and human-confirmed GitHub sign-in persistence/removal also passed. |
 | Latest recorded checks | Final release-audit checks: 187 passed, one historical-reference skip; 91-entry 0.1.0 archive, MIT/notices/version/development-file exclusion and documentation links passed. [Audit](validation.md#final-release-audit). The final scoped/banner package check passed 92 entries. Public npm 0.1.0/latest and downloaded archive hash are verified; earlier Windows/model/physical receipts retain their scope. |
 
@@ -41,6 +41,7 @@ Work on one bounded missing outcome at a time. Reuse accepted evidence across is
 
 | Order / owner | Next action | User involvement |
 | --- | --- | --- |
+| Next — #40 | Implement the agreed [modifier taps and per-call timing spec](spec.md#input-timing-and-modifier-taps) using the [focused delivery plan](implementation-plan.md#input-timing-delivery). One specification issue is published; no implementation or sub-ticket split is claimed. | Shared scope and existing test seams are confirmed. Later live checks use the existing scoped idle-test prerequisites; no repeated historical acceptance or new model series. |
 | First release complete | 0.1.0 is public on npm; maintainer/latest and the downloaded archive checksum match. #21 and #1 are complete. | None required for this release. Do not reopen accepted cases or repeat tests without a demonstrated new issue. |
 
 Standing scoped idle-test authorization remains. Preserve unrelated applications, documents, clipboard and profiles, serialize desktop activity and request human participation only for genuine physical/private/visual steps. Unknown input cleanup retains actual owners and blocks dependent activity. No DSH/OpenRouter credentials, DSH installation or side-by-side tests are needed.

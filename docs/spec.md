@@ -1,6 +1,6 @@
 # Pi Windows Computer Use
 
-Status: agreed scope. Original product specification: [GitHub issue #1](https://github.com/ycheung5/pi-computer-use/issues/1). Current Pi-first acceptance is tracked by the existing product issues and release gate [#21](https://github.com/ycheung5/pi-computer-use/issues/21). [ADR 0004](adr/0004-pi-first-acceptance.md) supersedes mandatory DSH parity; historical alignment records are not current release gates.
+Status: agreed scope. Original product specification: [GitHub issue #1](https://github.com/ycheung5/pi-computer-use/issues/1). Version 0.1.0 is published and its product/release owners are completed. The post-release [input timing and modifier-tap specification](#input-timing-and-modifier-taps) is agreed planned behavior, not implemented 0.1.0 behavior. [ADR 0004](adr/0004-pi-first-acceptance.md) supersedes mandatory DSH parity; historical alignment records are not current release gates.
 
 ## Problem Statement
 
@@ -156,6 +156,75 @@ Accepted product decision, 2026-11-01; scoped control (#31) and presentation/dis
 
 ## Further Notes
 
-The initial implementation exists; acceptance remains incomplete. Follow the [current outcome map and queue](tickets.md#delivery-outcomes-and-ownership), [implementation plan](implementation-plan.md#detailed-milestones) and [validation catalog](validation.md#alignment-scenario-catalog). Each runnable scenario proceeds through baseline, diagnosis, targeted repair and affected regressions; final reconciliation and optimization follow the required outcomes. Pi functional and preservation requirements remain binding; removed DSH comparison gates must not be reintroduced through historical notes.
+Version 0.1.0 is published with its scoped acceptance and documented limitations. The input-timing change below is agreed but not implemented. Follow the [current outcome map and queue](tickets.md#delivery-outcomes-and-ownership), [input-timing delivery plan](implementation-plan.md#input-timing-delivery) and [validation receipts](validation.md#npm-publication-receipt). Each runnable scenario proceeds through baseline, diagnosis, targeted repair and affected regressions; final reconciliation and optimization follow the required outcomes. Pi functional and preservation requirements remain binding; removed DSH comparison gates must not be reintroduced through historical notes.
 
 Issue tracker: [ycheung5/pi-computer-use](https://github.com/ycheung5/pi-computer-use). See [tracker configuration](agents/issue-tracker.md) for operations and [triage labels](agents/triage-labels.md) for status vocabulary.
+
+## Input timing and modifier taps
+
+Status: agreed 2026-11-10; [GitHub specification #40](https://github.com/ycheung5/pi-computer-use/issues/40), ready-for-agent; specification only. The following template is the canonical first-change requirement set. The published 0.1.0 contracts above remain the baseline until implementation.
+
+### Problem Statement
+
+Pi users cannot tap Ctrl, Alt or Shift alone, request a timed key/button press, or adjust the fixed SendInput typing delay. Long requested input durations also conflict with execution deadlines inside the Windows worker and at the Pi boundary. Agents need explicit per-call controls that preserve existing behavior when omitted and retain stopping, cleanup and non-replay guarantees. This addresses input flexibility; the cause of the user's whole-task slowness has not been measured.
+
+### Solution
+
+Extend the existing keypress, click and text-entry tools with standalone generic modifier taps and opt-in per-call timing. Every press/hold completes and releases inside one tool call. Agents can choose a typing interval, hold duration and execution timeout, including disabling that execution timeout. Keep the existing Pi extension and Windows worker; add no new tool family, MCP server or persistent held-input state.
+
+### User Stories
+
+1. As an agent, I want to tap Ctrl alone, so that applications can respond to a standalone modifier.
+2. As an agent, I want to tap Alt or Shift alone, so that modifier-only interactions are available.
+3. As a user, I want existing shortcuts unchanged, so that upgrading preserves current workflows.
+4. As an agent, I want to hold a supported key or chord for a requested duration, so that I can perform a long press.
+5. As an agent, I want to hold a supported mouse button at the selected target, so that I can perform a long mouse press.
+6. As a user, I want each held input released before its call completes, so that the model cannot leave a key down while thinking.
+7. As an agent, I want an explicit SendInput typing interval, so that I can adapt pacing to an application's behavior.
+8. As a user, I want the existing 50 ms typing interval when omitted, so that the compatibility baseline remains available.
+9. As an agent, I want zero typing delay where appropriate, so that I can request unpaced dispatch explicitly.
+10. As a user, I want no arbitrary duration ceiling, so that the extension does not guess how long my task should take.
+11. As an agent, I want a per-call execution timeout, so that I can choose how long to wait for that operation.
+12. As an agent, I want zero timeout to disable the execution deadline, so that an intentional long operation is not cut short by that deadline.
+13. As an agent, I want default deadlines to accommodate explicit timing, so that accepted long-duration requests can finish.
+14. As a user, I want Esc and cancellation to interrupt waits, so that increasing durations does not prevent stopping.
+15. As a user, I want input released after errors, shutdown or cancellation, so that failures do not leave controls held.
+16. As a user, I want uncertain cleanup to retain ownership and block dependent work, so that subsequent input does not compound uncertainty.
+17. As an agent, I want unsupported method/parameter combinations rejected before input, so that my requested method is not silently changed.
+18. As an agent, I want actual timing settings and dispatch status reported, so that I can distinguish configuration from observed task success.
+19. As a user, I want partial or stopped input never automatically replayed, so that changing timing cannot duplicate actions.
+20. As a maintainer, I want native Windows and WSL2 callers to share the same contract, so that host routing does not change timing semantics.
+21. As a maintainer, I want focused regression and owned-fixture checks, so that this update does not reopen accepted release tests.
+22. As a user, I want broader keyboard/mouse coverage delivered separately, so that the first change stays small and reviewable.
+
+### Implementation Decisions
+
+- Extend existing input schemas, route validation, Pi integration, request/deadline handling and native input execution. Preserve the current module responsibilities and independent emergency-stop helper. No new dependencies, public test API, general scheduler or persistent down/up API.
+- Accept one standalone generic Ctrl/Control, Alt/Option or Shift modifier in keypress. Existing supported ordinary keys/chords remain supported. Multiple modifiers without a main key are not newly promised. Existing aliases and malformed/duplicate-key validation remain applicable.
+- Add optional holdMs to keypress and single click only. Omission preserves current immediate release; zero explicitly requests immediate release. For a chord, hold its pressed main key and modifiers together, then release all held inputs. For a click, press the selected supported button at the resolved target, wait, and release. Existing targeting, foreground intent and restoration rules continue to apply. No new auto-repeat guarantee is implied by a held key.
+- Add optional inputDelayMs to type_text only with explicitly selected sendinput. Omission preserves the existing 50 ms pacing. Zero requests no intentional inter-unit delay. Keep current Unicode/newline/tab handling; the unit is the actual dispatched UTF-16 input unit, with the existing newline normalization. This is not a promise of exact application processing time or universal correctness at lower intervals.
+- Add optional timeoutMs to type_text, keypress and single click only. A positive value supplies the requested execution deadline; zero disables that call's execution deadline through all relevant input execution layers. An explicit shorter timeout is honored, not silently extended, and may end partial input with the existing cleanup/non-replay result.
+- With timeoutMs omitted, ordinary calls retain current deadline behavior. When holdMs or inputDelayMs is explicitly supplied, derive sufficient default execution budgets from the requested hold/pacing duration plus existing execution overhead allowances. Both the native-helper request and outer Pi-worker request must accommodate it; an inner 40-second or outer 90-second timer must not silently override the accepted contract.
+- Timing arguments are non-negative safe whole milliseconds, without arbitrary product ceilings. Reject negative, fractional, non-finite, unsafe or otherwise unrepresentable values and unrepresentable derived durations before input. Long waits must not wrap, clamp to a short timer, or accidentally mean infinity because of an underlying API integer limit. Zero has the parameter-specific meanings above.
+- Disabling the execution deadline does not disable explicit cancellation, shutdown handling, emergency stopping, target/protection checks or cleanup acknowledgments. Existing startup, target-resolution and cleanup safeguards remain independent. Timing is best effort, not a hard real-time guarantee.
+- Validate backend/method capability before sending input. The first slice requires native foreground timed holds and explicit native SendInput pacing. A selected browser/background/quiet route must either honor the requested semantics or return a clear unsupported-combination error before input. Do not silently ignore a parameter, switch an explicit method, or escalate an explicit background request. Existing auto routing remains unchanged when new parameters are omitted; its resolution with new parameters must honor them or refuse before dispatch. This slice does not promise universal browser/background long-press support.
+- Preserve exclusive control, visible local border, target identity/focus/occlusion checks, protection during tool gaps, clipboard preservation and human handback. Cancellation/error/shutdown must release agent-held input, or explicitly report unconfirmed cleanup and block dependent work. No automatic replay or forced termination of an uncertain input owner.
+- Report the effective requested timing/deadline policy, whether input was dispatched or interrupted, and existing cleanup confirmation. A successful dispatch does not establish an observed application effect. Existing result fields retain their meaning.
+- Keep the current Pi package and tool names. The published 0.1.0 remains unchanged; implementation and any later publication are separate work.
+
+### Testing Decisions
+
+- Reuse the confirmed public Pi-tool and worker request/cancellation interfaces as the highest practical seams. Extend existing schema, input-preparation, text, pointer and worker/transport tests; do not add a new framework or public timing-test interface.
+- Test externally visible validation, routing, effects and cleanup results rather than private state. Cover modifier taps, existing chords, omitted/zero/positive timing, representable large values and derived overflow, invalid values, unsupported routes and no input before refusal.
+- Use existing controllable worker peers and owned fixtures to test omitted/positive/disabled execution deadlines at both request layers, a deliberately shorter timeout, cancellation during a long requested interval and release/ownership uncertainty. Use short deterministic simulations for very long values and timer-overflow cases; tests must not sleep for the full requested durations.
+- Extend the existing native text and pointer fixtures for one grouped scoped Windows acceptance: standalone modifier down/up events, a timed key/chord and mouse press/release, explicit typing intervals with exact Unicode readback, default pacing regression, and stop/error cleanup of newly held inputs. Observe events/effects independently of returned dispatch success. Reuse existing stop/control evidence; repeat a physical Esc demonstration only if the changed mechanism or a failure specifically requires it.
+- Check relevant Pi/WSL2-to-Windows and native request forwarding so no layer drops a field or restores a hidden default deadline. Keep these checks scoped to changed behavior; no new paid-model reset series, DSH comparison or unrelated display/browser/profile acceptance.
+- Run configured portable checks and actual package/documentation validation for implementation. Record unrun live prerequisites and limitations honestly. Passing mocks do not establish real Windows input effects; exact-text verification is required before claiming lower pacing correct.
+
+### Out of Scope
+
+Broader named-key coverage, Windows keys, left/right modifiers, numpad/media keys, mouse side buttons and modifier-click/drag are deferred to the second change. Also excluded: raw virtual-key/scan-code input, holds across calls, separate key-down/up tools, double-click/drag timing controls, privileged or device-specific integrations, secure-desktop bypass, changing default typing pace, global timeout removal, a new MCP adapter, universal device/application coverage and diagnosing or claiming a fix for unmeasured whole-task latency.
+
+### Further Notes
+
+The user confirmed this first-change scope after choosing a two-change delivery. Existing 0.1.0 acceptance remains closed and reusable. This spec is planned behavior, not a claim that current runtime tools accept these parameters. Readable key names remain the agent-facing interface. Required input release and uncertain-cleanup safeguards qualify every duration/timeout option. Future broader input coverage must be specified and accepted separately rather than silently added here.
