@@ -22,8 +22,10 @@ test("owned text timing plan prepares only the new scoped keyboard cases without
   assert.deepEqual(result.cases, [
     "modifier-aliases",
     "immediate-release",
+    "focus-changing-immediate-release",
+    "focus-changing-hold",
     "timed-key-and-chord",
-    "focus-error-release",
+    "foreground-error-release",
     "short-deadline-release",
     "cancel-disabled-deadline",
   ]);
