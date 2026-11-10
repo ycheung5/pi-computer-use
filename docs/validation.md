@@ -1,6 +1,6 @@
 # Release validation
 
-Release status: **0.1.0 published on npm, 2026-11-09; 0.1.1 preparation below**. The user published the prepared package after accepting its first-release scope. Public version/latest, maintainer identity and the downloaded registry archive checksum are independently verified. #21 and product parent #1 are complete; accepted test limitations remain in force. Automated and passive fixture results are evidence for their stated paths, not proof that all applications, physical input, displays or user acceptance work. The [spec](spec.md) defines requirements; this page maps them to runnable checks and pending evidence.
+Release status: **0.1.0 published on npm; GitHub v0.1.0 and v0.1.1 published; npm 0.1.1 pending**, verified 2026-11-10. The user published the first npm package after accepting its release scope. Public 0.1.0 version/latest, maintainer identity and the downloaded registry archive checksum are independently verified. #21 and product parent #1 are complete; accepted test limitations remain in force. Automated and passive fixture results are evidence for their stated paths, not proof that all applications, physical input, displays or user acceptance work. The [spec](spec.md) defines requirements; this page maps them to runnable checks and pending evidence.
 
 ## 0.1.1 release preparation
 
@@ -19,6 +19,8 @@ The [input acceptance receipt](#input-timing-and-modifier-tap-acceptance) owns W
 Preparation checks passed: `npm run check` reported **214 passed, one historical-reference skip** (`/tmp/pi-cu-011-check.log`); `npm run test:package` verified the **95-entry 0.1.1 archive**, package/lock/packed-version coherence, license notices, development-file exclusion and local documentation links (`/tmp/pi-cu-011-package.log`). No runtime behavior was changed during release preparation, and no desktop or model tests were repeated.
 
 Release attempt, 2026-11-10: the prepared archive was verified again at 363,670 bytes, SHA-1 `7a4fabf87e0b5b0c11ff42b996d39632aa9df85d`, with package name/version checked inside it. npm returned 404 for version availability and rejected the publish PUT with E404; `npm whoami` then returned E401 Unauthorized. Publication is not complete and must be retried from an authenticated npm session. Tag `v0.1.1` identifies preparation commit `17a9ae0036faaf42cfb025307df1684b0a031c3f`; no GitHub 0.1.1 release has been published by this run. The existing GitHub API credential's release-write restriction also remains unresolved.
+
+Subsequent public verification confirmed the user published [GitHub v0.1.1](https://github.com/ycheung5/pi-computer-use/releases/tag/v0.1.1) through the web interface on 2026-11-10. Its uploaded asset list was empty; only GitHub's automatic source archives were available, so the prepared built `.tgz` still needs attaching for direct built-package download. A fresh npm metadata read still showed latest 0.1.0 and no 0.1.1 version. GitHub publication therefore supersedes the earlier pending GitHub-release status but does not establish npm availability.
 
 ## Input timing and modifier-tap acceptance
 
